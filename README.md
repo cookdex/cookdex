@@ -9,9 +9,8 @@ No account. No ads. No tracking. Your recipes live on your devices.
 ## Features
 
 - **Add recipes your way**: type them in, paste them, or use **Smart Import** to turn pasted text, a link, or a photo of a handwritten recipe card into a clean recipe (uses your own Gemini API key).
-- **Recipe sections**: keep the marinade, sauce, and main dish separate in the recipe, while the shopping list totals everything.
+- **Recipe sections**: keep the marinade, sauce, and main dish separate in the recipe.
 - **Smart shopping list**: add ingredients from any recipe, with quantities combined and items sorted into store categories.
-- **Quantity ranges**: "6–7 cloves garlic" stays a range, even when it's combined in the shopping list.
 - **Favorites, tags, search, and card or compact views.**
 - **Cook mode and scaling**: adjust servings, check off ingredients, and keep the screen awake while cooking.
 - **Share recipes**: send one recipe or a selection as readable text, or import shared recipe files.
@@ -53,13 +52,11 @@ Most phones from the last several years are supported (64-bit ARM).
 
 **Updating:** replace the folder with the new one. Your recipes are stored separately in your Windows user data, so they aren't affected.
 
-## Verify your download (optional)
+## Verifying downloads
 
 <!-- release-certificate -->
 Android release certificate SHA-256: `2e432b0d778212330f2b9d5dc830cda5b13d18d67489d52334c41af872e56cd5`
 <!-- /release-certificate -->
-
-Android only installs an update if it's signed with the same key as the installed app, so once you've installed cookdex, nobody else can slip you a fake update. To check your first download, compare the fingerprint with an app like [AppVerifier](https://github.com/soupslurpr/AppVerifier). Each release also lists SHA-256 checksums for its files.
 
 ## Using cookdex
 
@@ -89,7 +86,7 @@ Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/) and p
 
 ## Built with AI
 
-cookdex was built by a non-developer using AI coding tools: mostly OpenAI's Codex, with Claude for planning. The ideas, testing, and decisions are human.
+cookdex was built by a non-developer using AI coding tools: mostly OpenAI's Codex, with Claude for planning. The ideas, testing, and decisions are human. The code has had an AI-assisted security review with the findings fixed, but no professional audit.
 
 ## Feedback and security issues
 
