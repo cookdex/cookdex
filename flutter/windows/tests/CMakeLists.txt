@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.14)
+project(c9_http_test LANGUAGES CXX)
+add_executable(c9_http_test http_test.cpp ../runner/http_request.cpp)
+target_compile_features(c9_http_test PRIVATE cxx_std_20)
+target_compile_definitions(c9_http_test PRIVATE NOMINMAX)
+target_link_libraries(c9_http_test PRIVATE winhttp)
+
+foreach(mode dev production)
+  add_executable(metadata_${mode}_test metadata_test.cpp)
+  target_compile_features(metadata_${mode}_test PRIVATE cxx_std_17)
+  target_link_libraries(metadata_${mode}_test PRIVATE version)
+endforeach()
+target_compile_definitions(metadata_production_test PRIVATE COOKDEX_PRODUCTION)

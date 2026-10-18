@@ -1,0 +1,15 @@
+artifacts/
+work/
+*.bundle
+*.bundle.sha256
+*.keystore
+*.jks
+*.p12
+*.pfx
+key.properties
+local.properties
+.env
+.env.*
+__pycache__/
+*.pyc
+.DS_Store

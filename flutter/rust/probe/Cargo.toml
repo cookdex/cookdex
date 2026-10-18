@@ -1,0 +1,13 @@
+[package]
+name = "cookdex-core-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cookdex-core = { path = "../core" }
+serde_json = "1.0"
+uuid = { version = "1", features = ["v4"] }

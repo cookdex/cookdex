@@ -1,0 +1,386 @@
+{
+  "formatVersion": 1,
+  "synthetic": true,
+  "clock": "2026-01-02T03:04:05.000Z",
+  "textImportIds": [
+    "c0_imported_first",
+    "c0_imported_second"
+  ],
+  "recipes": [
+    {
+      "schemaVersion": 1,
+      "id": "c0_synthetic_soup",
+      "title": "Synthetic crème | soup",
+      "description": "First line\nSecond line",
+      "tags": [
+        "Dinner",
+        "tag | pipe",
+        "tag\nline"
+      ],
+      "servings": "4 bowls",
+      "prepTime": "10 minutes",
+      "cookTime": "20 minutes",
+      "totalTime": "30 minutes",
+      "source": "https://example.test/c0-soup",
+      "notes": "Literal | and \\; Unicode é.\nSecond note.",
+      "favorite": true,
+      "createdAt": "2026-01-02T03:04:05.000Z",
+      "updatedAt": "2026-02-03T04:05:06.000Z",
+      "revision": 7,
+      "ingredients": [
+        {
+          "amount": {
+            "kind": "number",
+            "numerator": 1,
+            "denominator": 3
+          },
+          "unit": "cup",
+          "name": "oil",
+          "prepNote": "extra virgin",
+          "optional": false,
+          "section": "Base"
+        },
+        {
+          "amount": {
+            "kind": "number",
+            "numerator": 33,
+            "denominator": 100
+          },
+          "unit": "cup",
+          "name": "cream",
+          "prepNote": "cold",
+          "optional": true,
+          "section": "Finish"
+        },
+        {
+          "amount": {
+            "kind": "number",
+            "numerator": 3,
+            "denominator": 10
+          },
+          "unit": "l",
+          "name": "water",
+          "prepNote": "",
+          "optional": false,
+          "section": "Base"
+        },
+        {
+          "amount": {
+            "kind": "toTaste"
+          },
+          "unit": "",
+          "name": "salt",
+          "prepNote": "fine",
+          "optional": false,
+          "section": "Finish"
+        },
+        {
+          "amount": {
+            "kind": "unspecified"
+          },
+          "unit": "",
+          "name": "parsley",
+          "prepNote": "chopped",
+          "optional": true,
+          "section": "Finish"
+        }
+      ],
+      "steps": [
+        "Mix.\nKeep stirring.",
+        "Serve."
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "id": "c0_synthetic_second",
+      "title": "Second synthetic recipe",
+      "description": "First line\nSecond line",
+      "tags": [
+        "Dinner",
+        "tag | pipe",
+        "tag\nline"
+      ],
+      "servings": "4 bowls",
+      "prepTime": "10 minutes",
+      "cookTime": "20 minutes",
+      "totalTime": "30 minutes",
+      "source": "https://example.test/c0-soup",
+      "notes": "Literal | and \\; Unicode é.\nSecond note.",
+      "favorite": false,
+      "createdAt": "2026-01-02T03:04:05.000Z",
+      "updatedAt": "2026-02-03T04:05:06.000Z",
+      "revision": 7,
+      "ingredients": [
+        {
+          "amount": {
+            "kind": "number",
+            "numerator": 1,
+            "denominator": 3
+          },
+          "unit": "cup",
+          "name": "oil",
+          "prepNote": "extra virgin",
+          "optional": false,
+          "section": "Base"
+        },
+        {
+          "amount": {
+            "kind": "number",
+            "numerator": 33,
+            "denominator": 100
+          },
+          "unit": "cup",
+          "name": "cream",
+          "prepNote": "cold",
+          "optional": true,
+          "section": "Finish"
+        },
+        {
+          "amount": {
+            "kind": "number",
+            "numerator": 3,
+            "denominator": 10
+          },
+          "unit": "l",
+          "name": "water",
+          "prepNote": "",
+          "optional": false,
+          "section": "Base"
+        },
+        {
+          "amount": {
+            "kind": "toTaste"
+          },
+          "unit": "",
+          "name": "salt",
+          "prepNote": "fine",
+          "optional": false,
+          "section": "Finish"
+        },
+        {
+          "amount": {
+            "kind": "unspecified"
+          },
+          "unit": "",
+          "name": "parsley",
+          "prepNote": "chopped",
+          "optional": true,
+          "section": "Finish"
+        }
+      ],
+      "steps": [
+        "Mix.\nKeep stirring.",
+        "Serve."
+      ]
+    }
+  ],
+  "legacyText": "Recipe Book Text v1\nTitle: Synthetic crème \\| soup\nDescription: First line\\nSecond line\nServings: 4 bowls\nPrep time: 10 minutes\nCook time: 20 minutes\nTotal time: 30 minutes\nSource: https://example.test/c0-soup\nTags: [\"Dinner\",\"tag | pipe\",\"tag\\nline\"]\n\nIngredients (amount | unit | name | prep note | optional):\nSection: Base\n- 1/3 | cup | oil | extra virgin | no\nSection: Finish\n- 33/100 | cup | cream | cold | yes\nSection: Base\n- 3/10 | l | water |  | no\nSection: Finish\n- to taste |  | salt | fine | no\n-  |  | parsley | chopped | yes\n\nSteps:\n1. Mix.\\nKeep stirring.\n2. Serve.\n\nNotes: Literal \\| and \\\\; Unicode é.\\nSecond note.\n\nMetadata:\nCreated: 2026-01-02T03:04:05.000Z\nUpdated: 2026-02-03T04:05:06.000Z\nRevision: 7\nFavorite: yes\n--- End recipe ---\n\nRecipe Book Text v1\nTitle: Second synthetic recipe\nDescription: First line\\nSecond line\nServings: 4 bowls\nPrep time: 10 minutes\nCook time: 20 minutes\nTotal time: 30 minutes\nSource: https://example.test/c0-soup\nTags: [\"Dinner\",\"tag | pipe\",\"tag\\nline\"]\n\nIngredients (amount | unit | name | prep note | optional):\nSection: Base\n- 1/3 | cup | oil | extra virgin | no\nSection: Finish\n- 33/100 | cup | cream | cold | yes\nSection: Base\n- 3/10 | l | water |  | no\nSection: Finish\n- to taste |  | salt | fine | no\n-  |  | parsley | chopped | yes\n\nSteps:\n1. Mix.\\nKeep stirring.\n2. Serve.\n\nNotes: Literal \\| and \\\\; Unicode é.\\nSecond note.\n\nMetadata:\nCreated: 2026-01-02T03:04:05.000Z\nUpdated: 2026-02-03T04:05:06.000Z\nRevision: 7\nFavorite: no\n--- End recipe ---",
+  "quantityCases": [
+    {
+      "input": "0.33",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 33,
+        "denominator": 100
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 1,
+        "denominator": 3
+      }
+    },
+    {
+      "input": "0.3",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 3,
+        "denominator": 10
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 3,
+        "denominator": 10
+      }
+    },
+    {
+      "input": "33/100",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 33,
+        "denominator": 100
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 33,
+        "denominator": 100
+      }
+    },
+    {
+      "input": "0.3299",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 3299,
+        "denominator": 10000
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 3299,
+        "denominator": 10000
+      }
+    },
+    {
+      "input": "0.3300",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 33,
+        "denominator": 100
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 1,
+        "denominator": 3
+      }
+    },
+    {
+      "input": "0.3301",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 3301,
+        "denominator": 10000
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 1,
+        "denominator": 3
+      }
+    },
+    {
+      "input": "0.3366",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 1683,
+        "denominator": 5000
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 1,
+        "denominator": 3
+      }
+    },
+    {
+      "input": "0.3367",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 3367,
+        "denominator": 10000
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 3367,
+        "denominator": 10000
+      }
+    },
+    {
+      "input": "0.99",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 99,
+        "denominator": 100
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 1,
+        "denominator": 1
+      }
+    },
+    {
+      "input": "0.9899",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 9899,
+        "denominator": 10000
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 9899,
+        "denominator": 10000
+      }
+    },
+    {
+      "input": "1.01",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 101,
+        "denominator": 100
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 1,
+        "denominator": 1
+      }
+    },
+    {
+      "input": "1.0101",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 10101,
+        "denominator": 10000
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 10101,
+        "denominator": 10000
+      }
+    },
+    {
+      "input": "1.499",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 1499,
+        "denominator": 1000
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 3,
+        "denominator": 2
+      }
+    },
+    {
+      "input": "1 33/100",
+      "tauriExact": {
+        "kind": "number",
+        "numerator": 133,
+        "denominator": 100
+      },
+      "flutterNewInput": {
+        "kind": "number",
+        "numerator": 133,
+        "denominator": 100
+      }
+    },
+    {
+      "input": "",
+      "tauriExact": {
+        "kind": "unspecified"
+      },
+      "flutterNewInput": {
+        "kind": "unspecified"
+      }
+    },
+    {
+      "input": "to taste",
+      "tauriExact": {
+        "kind": "toTaste"
+      },
+      "flutterNewInput": {
+        "kind": "toTaste"
+      }
+    }
+  ],
+  "rejectedAmounts": [
+    "-1",
+    "1/0",
+    "abc"
+  ],
+  "notes": "Flutter expectations are approved future C2/C7 data, not an implementation or a claim that those checks pass. Stored recipe cream remains 33/100 on load/ZIP/recovery. Compare semantic fields, never ZIP bytes or private view shapes."
+}

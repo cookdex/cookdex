@@ -1,0 +1,23 @@
+Recipe Book Text v1
+Title: Moonlight bean stew
+Description: A made-up recipe for interchange tests.
+Servings: 3 bowls
+Prep time: 10 minutes
+Cook time: PT20M
+Total time: 30 minutes
+Source: https://example.test/moonlight
+Tags: ["Family Favorite", "dinner"]
+
+Ingredients (amount | unit | name | prep note | optional):
+Section: Base
+- 1-2 | cup | white beans | rinsed | no
+-  |  | salt |  | yes
+Section: Finish
+- 1/3 | tbsp | olive oil |  | no
+
+Steps:
+1. Mix the beans and warm gently.
+2. Add the oil.\nServe in bowls.
+
+Notes: Fictional sample — café, 柚子, 🌙. Literal \| and \\.
+--- End recipe ---

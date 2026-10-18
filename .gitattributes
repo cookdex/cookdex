@@ -1,0 +1,4 @@
+# Flutter regenerates these tracked files with LF on every platform.
+flutter/windows/flutter/generated_plugin_registrant.cc text eol=lf
+flutter/windows/flutter/generated_plugin_registrant.h text eol=lf
+flutter/windows/flutter/generated_plugins.cmake text eol=lf

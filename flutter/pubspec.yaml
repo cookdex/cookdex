@@ -1,0 +1,31 @@
+name: cookdex
+description: cookdex Flutter development app.
+publish_to: none
+version: 1.7.0+17000
+environment:
+  sdk: ^3.13.5
+dependencies:
+  flutter:
+    sdk: flutter
+  pretty_qr_code: 3.6.0
+  flutter_zxing: 3.1.0
+  camera: 0.12.1
+  ffi: 2.2.0
+  material_symbols_icons: 4.2960.0
+  flutter_rust_bridge: 2.13.0
+  freezed_annotation: 3.1.0
+dev_dependencies:
+  camera_platform_interface: 2.15.0
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  vm_service: 15.3.0
+  flutter_lints: 6.0.0
+  freezed: 4.0.2
+  build_runner: 2.16.2
+
+flutter:
+  # Flutter's native-style text-selection overflow toolbar uses fallback icons.
+  # Authored product icons use the Material Symbols package above.
+  uses-material-design: true

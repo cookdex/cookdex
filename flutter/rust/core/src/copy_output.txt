@@ -1,0 +1,21 @@
+Return only Recipe Book Text v1 without Markdown fences. If nothing can be read, explain why in a short sentence instead of returning an empty result. Keep every labeled field. Each ingredient has five columns separated by " | ": amount, unit, name, prep note, optional (yes/no). Use Section: before each group, blank for ungrouped ingredients. Repeat rows and numbered steps as needed. Tags are a JSON string array. Escape backslashes as \\, pipes as \|, and embedded newlines as \n.
+
+Recipe Book Text v1
+Title: Recipe title
+Description: 
+Servings: 
+Prep time: 
+Cook time: 
+Total time: 
+Source: 
+Tags: []
+
+Ingredients (amount | unit | name | prep note | optional):
+Section: 
+- 0.33 | cup | cream |  | no
+
+Steps:
+1. First instruction.
+
+Notes: 
+--- End recipe ---

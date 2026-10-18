@@ -1,0 +1,67 @@
+Recipe Book Text v1
+Title: Synthetic crème \| soup
+Description: First line\nSecond line
+Servings: 4 bowls
+Prep time: 10 minutes
+Cook time: 20 minutes
+Total time: 30 minutes
+Source: https://example.test/c0-soup
+Tags: ["Dinner","tag | pipe","tag\nline"]
+
+Ingredients (amount | unit | name | prep note | optional):
+Section: Base
+- 1/3 | cup | oil | extra virgin | no
+Section: Finish
+- 33/100 | cup | cream | cold | yes
+Section: Base
+- 3/10 | l | water |  | no
+Section: Finish
+- to taste |  | salt | fine | no
+-  |  | parsley | chopped | yes
+
+Steps:
+1. Mix.\nKeep stirring.
+2. Serve.
+
+Notes: Literal \| and \\; Unicode é.\nSecond note.
+
+Metadata:
+Created: 2026-01-02T03:04:05.000Z
+Updated: 2026-02-03T04:05:06.000Z
+Revision: 7
+Favorite: yes
+--- End recipe ---
+
+Recipe Book Text v1
+Title: Second synthetic recipe
+Description: First line\nSecond line
+Servings: 4 bowls
+Prep time: 10 minutes
+Cook time: 20 minutes
+Total time: 30 minutes
+Source: https://example.test/c0-soup
+Tags: ["Dinner","tag | pipe","tag\nline"]
+
+Ingredients (amount | unit | name | prep note | optional):
+Section: Base
+- 1/3 | cup | oil | extra virgin | no
+Section: Finish
+- 33/100 | cup | cream | cold | yes
+Section: Base
+- 3/10 | l | water |  | no
+Section: Finish
+- to taste |  | salt | fine | no
+-  |  | parsley | chopped | yes
+
+Steps:
+1. Mix.\nKeep stirring.
+2. Serve.
+
+Notes: Literal \| and \\; Unicode é.\nSecond note.
+
+Metadata:
+Created: 2026-01-02T03:04:05.000Z
+Updated: 2026-02-03T04:05:06.000Z
+Revision: 7
+Favorite: no
+--- End recipe ---

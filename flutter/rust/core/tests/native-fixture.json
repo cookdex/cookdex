@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "recipes": [
+    {
+      "schemaVersion": 1,
+      "id": "adae9152-50ed-44b9-bb9f-1ea93b12d77c",
+      "title": "Fixture",
+      "description": "",
+      "tags": [],
+      "servings": "",
+      "prepTime": "",
+      "cookTime": "",
+      "totalTime": "",
+      "source": "",
+      "notes": "",
+      "favorite": false,
+      "createdAt": "2026-10-01T01:06:14.226Z",
+      "updatedAt": "2026-10-01T01:06:14.226Z",
+      "revision": 1,
+      "ingredients": [
+        {
+          "amount": {
+            "kind": "number",
+            "numerator": 1,
+            "denominator": 3
+          },
+          "unit": "cup",
+          "name": "flour",
+          "prepNote": "sifted",
+          "optional": true,
+          "section": "Dough"
+        }
+      ],
+      "steps": [
+        "Mix.",
+        "Bake."
+      ]
+    }
+  ],
+  "shopping": [],
+  "deletedRecipes": []
+}
