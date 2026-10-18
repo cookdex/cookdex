@@ -4,12 +4,9 @@ A simple, local-first recipe book with a shopping list that actually adds things
 
 No account. No ads. No tracking. Your recipes live on your devices.
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/b2299cf4-32a7-44a3-9d69-08f0642999fe" alt="No Recipes" width="250">
-  <img src="https://github.com/user-attachments/assets/8f0f8c2c-6e05-4df6-b1d7-fb04ee7e8b1a" alt="Recipes" width="250">
-</p>
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/65c5bad7-1f4e-4181-914a-8b61af3949d5" alt="Recipe Viewer" width="250">
-  <img src="https://github.com/user-attachments/assets/b3cecb41-f6b0-4f2d-a5c2-674d229666c7" alt="Cook Mode" width="250">
+  <img src="https://github.com/user-attachments/assets/8f0f8c2c-6e05-4df6-b1d7-fb04ee7e8b1a" alt="Recipes" width="260">
+  <img src="https://github.com/user-attachments/assets/65c5bad7-1f4e-4181-914a-8b61af3949d5" alt="Recipe Viewer" width="260">
+  <img src="https://github.com/user-attachments/assets/b3cecb41-f6b0-4f2d-a5c2-674d229666c7" alt="Cook Mode" width="260">
 </p>
 
 ## Features
