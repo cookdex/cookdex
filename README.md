@@ -3,8 +3,14 @@
 A simple, local-first recipe book with a shopping list that actually adds things up. Android and Windows.
 
 No account. No ads. No tracking. Your recipes live on your devices.
-
-<!-- Screenshots go here -->
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/b2299cf4-32a7-44a3-9d69-08f0642999fe" alt="No Recipes" width="250">
+  <img src="https://github.com/user-attachments/assets/8f0f8c2c-6e05-4df6-b1d7-fb04ee7e8b1a" alt="Recipes" width="250">
+</p>
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/65c5bad7-1f4e-4181-914a-8b61af3949d5" alt="Recipe Viewer" width="250">
+  <img src="https://github.com/user-attachments/assets/b3cecb41-f6b0-4f2d-a5c2-674d229666c7" alt="Cook Mode" width="250">
+</p>
 
 ## Features
 
@@ -63,6 +69,10 @@ Android release certificate SHA-256: `2e432b0d778212330f2b9d5dc830cda5b13d18d674
 ### Smart Import
 
 Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/) and paste it into cookdex's settings. Photo import works on Android only for now.
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/2146e28a-bacf-4755-b1a6-89a229ea5844" alt="Smart Import" width="250">
+  <img src="https://github.com/user-attachments/assets/f6d2c0d3-5728-46cd-a762-e4372937acf7" alt="Smart Import Settings" width="250">
+</p>
 
 ### Syncing your devices
 
@@ -76,6 +86,9 @@ Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/) and p
 - Each device keeps automatic snapshots: one per day for a week, then one per week for a month. Find them in **Settings → Backup & restore → Snapshots**.
 - Snapshots live on that device. Export a ZIP backup now and then and keep it somewhere else.
 - Sync is not a backup. A deletion on one device syncs to the others.
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/dda12047-0a02-4eaa-98e1-bbea2c1c4c42" alt="Settings" width="250">
+</p>
 
 ## Known limitations
 
