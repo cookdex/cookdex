@@ -58,12 +58,6 @@ Most phones from the last several years are supported (64-bit ARM).
 
 **Updating:** replace the folder with the new one. Your recipes are stored separately in your Windows user data, so they aren't affected.
 
-## Verifying downloads
-
-<!-- release-certificate -->
-Android release certificate SHA-256: `2e432b0d778212330f2b9d5dc830cda5b13d18d67489d52334c41af872e56cd5`
-<!-- /release-certificate -->
-
 ## Using cookdex
 
 ### Smart Import
@@ -105,6 +99,12 @@ cookdex was built by a non-developer using AI coding tools: mostly OpenAI's Code
 
 - **Bugs and ideas:** open an [Issue](https://github.com/cookdex/cookdex/issues).
 - **Security problems:** please report them privately using **Report a vulnerability** on the repo's Security tab, not as a public issue.
+
+## Verifying downloads
+
+<!-- release-certificate -->
+Android release certificate SHA-256: `2e432b0d778212330f2b9d5dc830cda5b13d18d67489d52334c41af872e56cd5`
+<!-- /release-certificate -->
 
 ## Building from source
 
