@@ -40,8 +40,6 @@ pub fn display_scaled(value: Amount, unit: &str) -> Result<String> {
     };
     let ladder: &[(&str, u128)] = match key.as_str() {
         "cup" | "tbsp" | "tsp" => &[("cup", 48), ("tbsp", 3), ("tsp", 1)],
-        "lb" | "oz" => &[("lb", 16), ("oz", 1)],
-        "kg" | "g" => &[("kg", 1000), ("g", 1)],
         "l" | "ml" => &[("l", 1000), ("ml", 1)],
         _ => return Ok(text(value, &key)),
     };
@@ -127,8 +125,8 @@ mod tests {
             ("1/3", "cup", 1, "2 tbsp + 2 tsp"),
             ("3", "", 1, "1 1/2"),
             ("2", "(14 oz) cans", 4, "4 (14 oz) cans"),
-            ("8", "oz", 4, "1 lb"),
-            ("500", "g", 4, "1 kg"),
+            ("8", "oz", 4, "16 oz"),
+            ("500", "g", 4, "1000 g"),
             ("500", "ml", 4, "1 l"),
             ("1–2", "cup", 4, "2–4 cups"),
             ("", "", 4, ""),

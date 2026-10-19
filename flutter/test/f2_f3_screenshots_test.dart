@@ -184,17 +184,17 @@ void main() {
           openUrl: (_) async {},
         ),
       );
-      await tester.tap(find.text('Start here'));
+      await tester.tap(find.text('Getting started'));
       await tester.pumpAndSettle();
-      await reveal(find.text('Sync'));
-      await tester.tap(find.text('Sync'));
+      await reveal(find.text('Syncing your devices'));
+      await tester.tap(find.text('Syncing your devices'));
       await tester.pumpAndSettle();
       final paragraphs = helpSections
           .singleWhere((section) => section.id == 'sync')
           .paragraphs;
-      await reveal(find.text(paragraphs[1]));
+      await reveal(find.byKey(ValueKey('help-paragraph-${paragraphs[1]}')));
       await capture('help-invitations');
-      await reveal(find.text(paragraphs[3]));
+      await reveal(find.byKey(ValueKey('help-paragraph-${paragraphs[3]}')));
       await capture('help-repair-sync');
       await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();

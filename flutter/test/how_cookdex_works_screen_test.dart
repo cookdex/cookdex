@@ -130,7 +130,10 @@ void main() {
       for (final section in helpSections.skip(1)) {
         await _expand(tester, section.id);
         for (final paragraph in section.paragraphs) {
-          await _reveal(tester, find.text(paragraph));
+          await _reveal(
+            tester,
+            find.byKey(ValueKey('help-paragraph-$paragraph')),
+          );
           expect(tester.takeException(), isNull);
         }
       }

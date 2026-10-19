@@ -146,6 +146,10 @@ void main() {
     expect(tests, 0);
     expect(find.text('Key saved. Leave blank to keep it.'), findsOneWidget);
     final key = tester.widget<TextField>(_field('Gemini key'));
+    expect(key.autocorrect, isFalse);
+    expect(key.enableSuggestions, isFalse);
+    expect(key.enableIMEPersonalizedLearning, isFalse);
+    expect(key.textCapitalization, TextCapitalization.none);
     expect(key.controller!.text, isEmpty);
     expect(key.obscureText, isTrue);
     expect(key.autocorrect, isFalse);
@@ -323,7 +327,10 @@ void main() {
       final retry = tester.getRect(find.text('Retry'));
       expect(retry.top, greaterThan(loadError.bottom));
       expect(retry.top - loadError.bottom, lessThan(48));
-      expect(retry.bottom, lessThan(tester.getTopLeft(_field('Gemini key')).dy));
+      expect(
+        retry.bottom,
+        lessThan(tester.getTopLeft(_field('Gemini key')).dy),
+      );
       expect(_testEnabled(tester), isFalse);
       service.platform.failLoad = false;
       await _tap(tester, 'Retry');

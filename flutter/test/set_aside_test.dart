@@ -246,9 +246,13 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Start here'));
+      await tester.tap(find.text('Getting started'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Backups'));
+      await tester.scrollUntilVisible(
+        find.text('Backups'),
+        180,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Backups'));
       await tester.pumpAndSettle();
@@ -256,7 +260,9 @@ void main() {
           .singleWhere((s) => s.id == 'backups')
           .paragraphs;
       for (var i = 0; i < 2; i++) {
-        final paragraph = find.text(paragraphs[i]);
+        final paragraph = find.byKey(
+          ValueKey('help-paragraph-${paragraphs[i]}'),
+        );
         await Scrollable.ensureVisible(tester.element(paragraph), alignment: 0);
         await tester.pumpAndSettle();
         await shot('help-${i == 0 ? 'recovery' : 'omissions'}');

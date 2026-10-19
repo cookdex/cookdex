@@ -2,6 +2,10 @@
 use super::Amount;
 
 pub fn normalize(input: &str) -> String {
+    // Package sizes are user text, preserved on save and interchange.
+    if package(input).is_some() {
+        return input.trim().into();
+    }
     let raw = input.trim().trim_end_matches('.');
     if raw == "T" {
         return "tbsp".into();
@@ -20,12 +24,61 @@ pub fn normalize(input: &str) -> String {
         "pinch" | "pinches" => "pinch",
         "clove" | "cloves" => "clove",
         "can" | "cans" => "can",
+        "jar" | "jars" => "jar",
+        "bottle" | "bottles" => "bottle",
+        "box" | "boxes" => "box",
+        "bag" | "bags" => "bag",
+        "package" | "packages" => "package",
         _ => return lower,
     }
     .into()
 }
 
-/// Sizes belong to the ingredient name, never the unit column.
+/// Recognize only the supported container suffix after a nonempty parenthesized size.
+/// The prefix is opaque: never parse, scale or convert a package's size.
+pub fn package(input: &str) -> Option<(&str, &'static str)> {
+    let raw = input.trim();
+    if !raw.starts_with('(') {
+        return None;
+    }
+    let end = raw.find(')')?;
+    if raw[1..end].trim().is_empty() {
+        return None;
+    }
+    let container = match raw[end + 1..].trim().to_lowercase().as_str() {
+        "can" | "cans" => "can",
+        "jar" | "jars" => "jar",
+        "bottle" | "bottles" => "bottle",
+        "box" | "boxes" => "box",
+        "bag" | "bags" => "bag",
+        "package" | "packages" => "package",
+        _ => return None,
+    };
+    Some((&raw[..=end], container))
+}
+
+/// A comparison key only; stored sized-unit spelling stays untouched.
+pub fn package_key(input: &str) -> Option<String> {
+    package(input).map(|(size, container)| format!("{} {container}", size.to_lowercase()))
+}
+
+/// Import-only recovery of a singular sized container with an implicit count.
+/// Require a physical size, a singular container and a nonempty product name.
+pub fn implicit_package(input: &str) -> Option<(String, String)> {
+    let captures = super::rx(r"(?i)^\s*([0-9]+(?:\.[0-9]+)?\s+(?:oz|ounces?|lb|pounds?|g|grams?|kg|kilograms?|ml|milliliters?|l|liters?))\s+(can|jar|bottle|box|bag|package)\s+(?:of\s+)?(.+?)\s*$")
+        .captures(input)?;
+    let size = &captures[1];
+    let number = size.split_whitespace().next()?.parse::<f64>().ok()?;
+    if number <= 0.0 || !number.is_finite() || captures[3].eq_ignore_ascii_case("of") {
+        return None;
+    }
+    Some((
+        format!("({size}) {}", captures[2].to_lowercase()),
+        captures[3].to_string(),
+    ))
+}
+
+/// Adjectival sizes belong to names; parenthesized container sizes stay in units.
 pub fn normalize_ingredient(unit: &str, name: &str) -> (String, String) {
     let unit = normalize(unit);
     let size = match unit.as_str() {
@@ -74,6 +127,11 @@ pub fn leading_unit(name: &str) -> Option<(String, String)> {
                 | "pinch"
                 | "clove"
                 | "can"
+                | "jar"
+                | "bottle"
+                | "box"
+                | "bag"
+                | "package"
         )
     {
         return None;
@@ -85,9 +143,22 @@ pub fn display(unit: &str, amount: Amount) -> String {
     let plural = amount
         .bounds()
         .is_some_and(|(_, upper)| upper.numerator() > upper.denominator());
+    if let Some((size, container)) = package(unit) {
+        let suffix = if plural {
+            if container == "box" { "es" } else { "s" }
+        } else {
+            ""
+        };
+        return format!("{size} {container}{suffix}");
+    }
     if plural {
         match unit {
-            "cup" | "clove" | "can" => return format!("{unit}s"),
+            "cup" | "clove" | "slice" | "sprig" | "stalk" | "head" | "can" | "jar" | "bottle"
+            | "bag" | "package" => {
+                return format!("{unit}s");
+            }
+            "box" => return "boxes".into(),
+            "bunch" => return "bunches".into(),
             "pinch" => return "pinches".into(),
             _ => (),
         }

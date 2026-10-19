@@ -320,14 +320,16 @@ void main() {
       c.draft.steps.add(EditableStep('Original instruction.'));
       await editor(tester, c);
       await reveal(tester, find.text('AI guess').first);
-      expect(find.text('AI guess'), findsNWidgets(3));
+      expect(find.text('AI guess'), findsNWidgets(2));
+      expect(find.text('Total time: AI guess'), findsOneWidget);
       await reveal(tester, find.text('AI-written'));
       expect(find.text('AI-written'), findsOneWidget);
       c.reorder(c.draft.steps, 0, 1);
       await tester.pumpAndSettle();
       expect(c.draft.steps.last.aiGuess, true);
       await reveal(tester, find.text('AI guess').first);
-      expect(find.text('AI guess'), findsNWidgets(3));
+      expect(find.text('AI guess'), findsNWidgets(2));
+      expect(find.text('Total time: AI guess'), findsOneWidget);
       await reveal(tester, find.text('AI-written'));
       expect(find.text('AI-written'), findsOneWidget);
       c.draft.aiGuessedFields.clear();
@@ -338,6 +340,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('AI guess'), findsNothing);
       expect(find.text('AI-written'), findsNothing);
+      expect(find.text('Total time: AI guess'), findsNothing);
     },
   );
   testWidgets('new and recovered imports use the review title', (tester) async {
@@ -1168,7 +1171,7 @@ void main() {
     },
   );
   testWidgets(
-    'phone editor keeps short fields paired and ingredient rows compact',
+    'phone editor groups time fields below Makes and keeps ingredient rows compact',
     (tester) async {
       final (c, _, _) = await controller();
       final section = c.draft.sections.single;
@@ -1181,7 +1184,7 @@ void main() {
       await editor(tester, c, phoneFont: true);
       expect(
         tester.getTopLeft(field('Makes')).dy,
-        tester.getTopLeft(field('Total time')).dy,
+        lessThan(tester.getTopLeft(field('Total time')).dy),
       );
       expect(
         tester.getTopLeft(field('Prep time')).dy,
@@ -1532,58 +1535,57 @@ void main() {
     },
   );
 
-  testWidgets('empty paired metadata hints wrap fully at largest system text', (
-    tester,
-  ) async {
-    final (c, _, _) = await controller();
-    await editor(tester, c, scale: 2, phoneFont: true);
-    for (final label in ['Makes', 'Total time', 'Prep time', 'Cook time']) {
-      await reveal(tester, field(label));
-      final decoration = fieldDecoration(tester, field(label));
+  testWidgets(
+    'empty grouped metadata hints wrap fully at largest system text',
+    (tester) async {
+      final (c, _, _) = await controller();
+      await editor(tester, c, scale: 2, phoneFont: true);
+      for (final label in ['Makes', 'Total time', 'Prep time', 'Cook time']) {
+        await reveal(tester, field(label));
+        final decoration = fieldDecoration(tester, field(label));
+        expect(
+          decoration.hintText,
+          label == 'Makes' ? '4 servings or 12 tortillas' : null,
+        );
+        expect(decoration.floatingLabelBehavior, FloatingLabelBehavior.always);
+        if (label == 'Makes') {
+          final hint = find.descendant(
+            of: field(label),
+            matching: find.text('4 servings or 12 tortillas'),
+          );
+          final paragraph = tester.renderObject<RenderParagraph>(hint);
+          expect(paragraph.didExceedMaxLines, isFalse);
+        } else {
+          expect(decoration.labelText, label);
+        }
+      }
+      await reveal(tester, field('Makes'));
       expect(
-        decoration.hintText,
-        label == 'Makes' ? '4 servings or 12 tortillas' : label,
+        tester.getTopLeft(field('Makes')).dy,
+        lessThan(tester.getTopLeft(field('Total time')).dy),
       );
-      expect(decoration.hintMaxLines, label == 'Makes' ? 4 : 2);
-      final hint = find.descendant(
-        of: field(label),
-        matching: find.text(
-          label == 'Makes' ? '4 servings or 12 tortillas' : label,
-        ),
-      );
-      final paragraph = tester.renderObject<RenderParagraph>(hint);
-      expect(paragraph.didExceedMaxLines, isFalse);
+      await reveal(tester, field('Prep time'));
       expect(
-        tester.getRect(hint).bottom,
-        lessThanOrEqualTo(tester.getRect(field(label)).bottom),
+        tester.getTopLeft(field('Prep time')).dy,
+        tester.getTopLeft(field('Cook time')).dy,
       );
-    }
-    await reveal(tester, field('Makes'));
-    expect(
-      tester.getTopLeft(field('Makes')).dy,
-      tester.getTopLeft(field('Total time')).dy,
-    );
-    await reveal(tester, field('Prep time'));
-    expect(
-      tester.getTopLeft(field('Prep time')).dy,
-      tester.getTopLeft(field('Cook time')).dy,
-    );
-    await reveal(tester, field('Total time'));
-    await tester.tap(field('Total time'));
-    await tester.pumpAndSettle();
-    expect(
-      tester.widget<TextField>(field('Total time')).decoration!.labelText,
-      'Total time',
-    );
-    await enterFieldText(tester, field('Total time'), '45 min');
-    FocusManager.instance.primaryFocus?.unfocus();
-    await tester.pumpAndSettle();
-    expect(
-      tester.widget<TextField>(field('Total time')).decoration!.labelText,
-      'Total time',
-    );
-    expect(tester.takeException(), isNull);
-  });
+      await reveal(tester, field('Total time'));
+      await tester.tap(field('Total time'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(field('Total time')).decoration!.labelText,
+        'Total time',
+      );
+      await enterFieldText(tester, field('Total time'), '45 min');
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(field('Total time')).decoration!.labelText,
+        'Total time',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   for (final scale in [1.0, 2.0]) {
     testWidgets('long editor fields grow at 390dp / $scale text', (
@@ -1611,11 +1613,8 @@ void main() {
         '30 minutes, plus overnight chilling and resting before cooking',
       );
       await tester.pumpAndSettle();
-      expect(tester.widget<TextField>(field('Prep time')).maxLines, isNull);
-      expect(
-        tester.getSize(field('Prep time')).height,
-        greaterThan(shortPrepHeight),
-      );
+      expect(tester.widget<TextField>(field('Prep time')).maxLines, 1);
+      expect(tester.getSize(field('Prep time')).height, shortPrepHeight);
       expect(
         tester.getTopLeft(field('Prep time')).dy,
         tester.getTopLeft(field('Cook time')).dy,

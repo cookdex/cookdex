@@ -344,6 +344,7 @@ class _RecipeEditorState extends State<RecipeEditor>
     String Function() readValue,
     ValueChanged<String> change, {
     bool multiline = true,
+    bool timeField = false,
     String? hint,
     List<String> suggestions = const [],
   }) => Padding(
@@ -355,8 +356,12 @@ class _RecipeEditorState extends State<RecipeEditor>
       hint: hint,
       readValue: readValue,
       multiline: multiline,
+      timeField: timeField,
+      textCapitalization: const ['title', 'description', 'notes'].contains(key)
+          ? TextCapitalization.sentences
+          : TextCapitalization.none,
       suggestions: suggestions,
-      aiLabel: d.aiGuessedFields.contains(key == 'total' ? 'totalTime' : key)
+      aiLabel: !timeField && d.aiGuessedFields.contains(key)
           ? 'AI guess'
           : null,
       onChanged: (s) => _edit(() => change(s)),
@@ -374,6 +379,7 @@ class _RecipeEditorState extends State<RecipeEditor>
           builder: (context) => TextField(
             scrollController: PrimaryScrollController.of(context),
             controller: text,
+            textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(labelText: 'Name'),
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => Navigator.pop(ctx, text.text),
@@ -448,7 +454,10 @@ class _RecipeEditorState extends State<RecipeEditor>
     suggestionProvider: suggestionProvider,
     editingAction: editingAction,
     aiLabel: aiLabel,
-    suggestionStrip: hint == 'Unit' || hint == 'Ingredient',
+    textCapitalization: semanticLabel?.startsWith('Step ') == true
+        ? TextCapitalization.sentences
+        : TextCapitalization.none,
+    suggestionStrip: hint == 'Unit' || hint == 'Ingredient' || hint == 'Amount',
     onChanged: (s) => _edit(() => change(s)),
   );
 
@@ -480,9 +489,24 @@ class _RecipeEditorState extends State<RecipeEditor>
       children: [
         LayoutBuilder(
           builder: (context, constraints) {
-            final amountWidth = _hintWidth('Amount', minimum: 80);
-            final unitWidth = _hintWidth('clove', minimum: 64);
-            final nameWidth = _hintWidth('Ingredient', minimum: 96);
+            final phone = MediaQuery.sizeOf(context).width < 600;
+            final sizedUnit = row.unit.trimLeft().startsWith('(');
+            final amountWidth = _hintWidth(
+              '1 1/2',
+              minimum: _hintWidth('Amount', minimum: 80),
+            ).clamp(0.0, constraints.maxWidth);
+            // Reserve a complete package unit on phones before typing, so
+            // activation does not resize the fields. Wider layouts retain
+            // their compact units unless a package size needs this room.
+            final unitWidth =
+                (phone || sizedUnit
+                        ? _hintWidth('(14 oz) cans') + 3
+                        : _hintWidth('clove', minimum: 64))
+                    .clamp(0.0, constraints.maxWidth);
+            final nameWidth = _hintWidth(
+              'Ingredient',
+              minimum: unitWidth > 96 ? unitWidth + 1 : 96,
+            );
             final wrapFields =
                 amountWidth + unitWidth + nameWidth + 12 > constraints.maxWidth;
             final fieldWidgets = <Widget>[
@@ -1091,55 +1115,116 @@ class _RecipeEditorState extends State<RecipeEditor>
                                           (s) => d.description = s,
                                           multiline: true,
                                         ),
-                                        Row(
-                                          key: const ValueKey('servings-total'),
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Expanded(
-                                              child: _field(
-                                                'servings',
-                                                'Makes',
-                                                () => d.servings,
-                                                (s) => d.servings = s,
-                                                hint: '4 servings or 12 tortillas',
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: _field(
-                                                'total',
-                                                'Total time',
-                                                () => d.totalTime,
-                                                (s) => d.totalTime = s,
-                                              ),
-                                            ),
-                                          ],
+                                        _field(
+                                          'servings',
+                                          'Makes',
+                                          () => d.servings,
+                                          (s) => d.servings = s,
+                                          hint: '4 servings or 12 tortillas',
                                         ),
-                                        Row(
-                                          key: const ValueKey('prep-cook'),
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Expanded(
-                                              child: _field(
-                                                'prep',
-                                                'Prep time',
-                                                () => d.prepTime,
-                                                (s) => d.prepTime = s,
+                                        LayoutBuilder(
+                                          builder: (context, constraints) {
+                                            // Outlined labels render at 75% of body size.
+                                            // Reserve the actual 16dp side insets and
+                                            // 4dp border gap on each side of the label.
+                                            var minimum = 48.0;
+                                            for (final title in [
+                                              'Prep time',
+                                              'Cook time',
+                                              'Total time',
+                                            ]) {
+                                              final label = TextPainter(
+                                                text: TextSpan(
+                                                  text: title,
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodyLarge,
+                                                ),
+                                                textDirection:
+                                                    Directionality.of(context),
+                                                textScaler:
+                                                    MediaQuery.textScalerOf(
+                                                      context,
+                                                    ),
+                                              )..layout();
+                                              final width =
+                                                  label.width * .75 + 40;
+                                              if (width > minimum) {
+                                                minimum = width;
+                                              }
+                                              label.dispose();
+                                            }
+                                            final columns =
+                                                ((constraints.maxWidth + 12) /
+                                                        (minimum + 12))
+                                                    .floor()
+                                                    .clamp(1, 3);
+                                            final width =
+                                                (constraints.maxWidth -
+                                                    12 * (columns - 1)) /
+                                                columns;
+                                            return Wrap(
+                                              key: const ValueKey(
+                                                'recipe-times',
                                               ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: _field(
-                                                'cook',
-                                                'Cook time',
-                                                () => d.cookTime,
-                                                (s) => d.cookTime = s,
-                                              ),
-                                            ),
-                                          ],
+                                              spacing: 12,
+                                              children: [
+                                                SizedBox(
+                                                  width: width,
+                                                  child: _field(
+                                                    'prep',
+                                                    'Prep time',
+                                                    () => d.prepTime,
+                                                    (s) => d.prepTime = s,
+                                                    multiline: false,
+                                                    timeField: true,
+                                                  ),
+                                                ),
+                                                SizedBox(
+                                                  width: width,
+                                                  child: _field(
+                                                    'cook',
+                                                    'Cook time',
+                                                    () => d.cookTime,
+                                                    (s) => d.cookTime = s,
+                                                    multiline: false,
+                                                    timeField: true,
+                                                  ),
+                                                ),
+                                                SizedBox(
+                                                  width: width,
+                                                  child: _field(
+                                                    'total',
+                                                    'Total time',
+                                                    () => d.totalTime,
+                                                    (s) => d.totalTime = s,
+                                                    multiline: false,
+                                                    timeField: true,
+                                                  ),
+                                                ),
+                                              ],
+                                            );
+                                          },
                                         ),
+                                        if (d.aiGuessedFields.contains(
+                                          'totalTime',
+                                        ))
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 12,
+                                            ),
+                                            child: Text(
+                                              'Total time: AI guess',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall
+                                                  ?.copyWith(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                  ),
+                                            ),
+                                          ),
                                         _heading(
                                           'Tags',
                                           actions: [
@@ -1554,11 +1639,14 @@ class _EditorSuggestionStrip extends StatelessWidget {
           !field.widget.suggestionStrip) {
         return const SizedBox.shrink();
       }
+      final amount = field.widget.label == 'Amount';
       final query = field._text.text.trim().toLowerCase();
-      final options =
-          (field.widget.suggestionProvider?.call() ?? field.widget.suggestions)
-              .where((option) => option.toLowerCase().contains(query))
-              .toList();
+      final options = amount
+          ? const ['to taste']
+          : (field.widget.suggestionProvider?.call() ??
+                    field.widget.suggestions)
+                .where((option) => option.toLowerCase().contains(query))
+                .toList();
       return TextFieldTapRegion(
         child: Material(
           key: const ValueKey('editor-suggestion-strip'),
@@ -1596,6 +1684,7 @@ class _EditorField extends StatefulWidget {
     required this.readValue,
     required this.onChanged,
     this.multiline = false,
+    this.timeField = false,
     this.compact = false,
     this.muted = false,
     this.semanticLabel,
@@ -1608,7 +1697,9 @@ class _EditorField extends StatefulWidget {
     this.aiLabel,
     this.hint,
     this.suggestionStrip = false,
+    this.textCapitalization = TextCapitalization.none,
   });
+  final TextCapitalization textCapitalization;
   final String label;
   // SliverList.list retains widget configurations after a field is recycled.
   // Read mutable draft text when the field mounts, never a captured snapshot.
@@ -1616,7 +1707,7 @@ class _EditorField extends StatefulWidget {
   String get value => readValue();
   final ValueChanged<String> onChanged;
   final ValueChanged<String>? onSubmitted, onSelected;
-  final bool multiline, compact, muted, suggestionStrip;
+  final bool multiline, timeField, compact, muted, suggestionStrip;
   final String? semanticLabel, aiLabel, hint;
   final List<String> suggestions;
   final List<String> Function()? suggestionProvider;
@@ -1858,6 +1949,7 @@ class _EditorFieldState extends State<_EditorField> {
         widget.label != oldWidget.label ||
         widget.semanticLabel != oldWidget.semanticLabel ||
         widget.multiline != oldWidget.multiline ||
+        widget.timeField != oldWidget.timeField ||
         widget.compact != oldWidget.compact ||
         widget.muted != oldWidget.muted ||
         widget.aiLabel != oldWidget.aiLabel ||
@@ -1894,43 +1986,39 @@ class _EditorFieldState extends State<_EditorField> {
   Widget build(BuildContext context) {
     if (_cachedField != null) return _cachedField!;
     final editing = _focus.hasFocus && widget.editingAction != null;
-    // InputDecoration's resting label is always one line. Empty paired
-    // metadata fields use a wrapping hint until focused, then retain their
-    // normal floating label while editing and once populated.
-    final metadataHint =
-        !widget.compact &&
-        const [
-          'Servings',
-          'Total time',
-          'Prep time',
-          'Cook time',
-        ].contains(widget.label) &&
-        _text.text.isEmpty &&
-        !_focus.hasFocus;
     final style = widget.muted
         ? Theme.of(context).textTheme.bodySmall
               ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)
         : widget.compact
         ? Theme.of(context).textTheme.bodyMedium
         : Theme.of(context).textTheme.bodyLarge;
+    double? timeHeight;
+    if (widget.timeField) {
+      final line = TextPainter(
+        text: TextSpan(text: 'M', style: style),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout();
+      timeHeight = (line.height + 24).clamp(48.0, double.infinity);
+      line.dispose();
+    }
     final decoration = InputDecoration(
       isDense: widget.compact,
       maintainHintSize: !widget.compact,
-      constraints: widget.compact ? const BoxConstraints(minHeight: 48) : null,
+      constraints: widget.timeField
+          ? BoxConstraints.tightFor(height: timeHeight)
+          : widget.compact
+          ? const BoxConstraints(minHeight: 48)
+          : null,
       contentPadding: widget.compact
           ? EdgeInsets.fromLTRB(8, 12, 8, editing ? 52 : 12)
           : null,
-      labelText: widget.compact || metadataHint ? null : widget.label,
-      floatingLabelBehavior: widget.hint != null
+      labelText: widget.compact ? null : widget.label,
+      floatingLabelBehavior: widget.timeField || widget.hint != null
           ? FloatingLabelBehavior.always
           : null,
-      hintText:
-          widget.hint ?? (widget.compact || metadataHint ? widget.label : null),
-      hintMaxLines: widget.hint != null
-          ? 4
-          : metadataHint
-          ? 2
-          : null,
+      hintText: widget.hint ?? (widget.compact ? widget.label : null),
+      hintMaxLines: widget.hint != null ? 4 : null,
       hintStyle: widget.compact
           ? Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -2032,6 +2120,9 @@ class _EditorFieldState extends State<_EditorField> {
                 scrollController: _fieldScroll,
                 focusNode: _focus,
                 autofocus: false,
+                textCapitalization: widget.textCapitalization,
+                autocorrect: true,
+                enableSuggestions: true,
                 minLines: 1,
                 maxLines: widget.multiline ? null : 1,
                 keyboardType: widget.multiline
@@ -2174,6 +2265,9 @@ class _PasteDialogState extends State<_PasteDialog> {
                   decoration: InputDecoration(
                     labelText: _isSteps ? 'Steps' : 'Ingredients',
                   ),
+                  textCapitalization: _isSteps
+                      ? TextCapitalization.sentences
+                      : TextCapitalization.none,
                   keyboardType: TextInputType.multiline,
                   textInputAction: TextInputAction.newline,
                   onChanged: (value) {

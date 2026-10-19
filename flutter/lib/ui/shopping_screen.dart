@@ -762,6 +762,7 @@ class _ShoppingScreenState extends State<ShoppingScreen>
                     builder: (context) => TextField(
                       scrollController: PrimaryScrollController.of(context),
                       controller: _input,
+                      textCapitalization: TextCapitalization.none,
                       readOnly: _busy,
                       decoration: InputDecoration(
                         hintText: 'Add an item',
@@ -1334,6 +1335,7 @@ class _EditShoppingDialogState extends State<_EditShoppingDialog> {
         builder: (context) => TextField(
           scrollController: PrimaryScrollController.of(context),
           controller: _text,
+          textCapitalization: TextCapitalization.none,
           autofocus: true,
           readOnly: _busy,
           decoration: InputDecoration(labelText: 'Item', errorText: _error),

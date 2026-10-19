@@ -161,10 +161,10 @@ void main() {
           openUrl: (_) async {},
         ),
       );
-      await tester.tap(find.text('Start here'));
+      await tester.tap(find.text('Getting started'));
       await tester.pumpAndSettle();
-      await reveal(find.text('Sync'));
-      await tester.tap(find.text('Sync'));
+      await reveal(find.text('Syncing your devices'));
+      await tester.tap(find.text('Syncing your devices'));
       await tester.pumpAndSettle();
       final paragraphs = helpSections
           .singleWhere((section) => section.id == 'sync')
@@ -172,7 +172,7 @@ void main() {
       for (var i = 0; i < paragraphs.length; i++) {
         if (paragraphs[i].toLowerCase().contains('camera') ||
             paragraphs[i].toLowerCase().contains('qr')) {
-          await reveal(find.text(paragraphs[i]));
+          await reveal(find.byKey(ValueKey('help-paragraph-${paragraphs[i]}')));
           await capture('help-scanner-$i');
         }
       }

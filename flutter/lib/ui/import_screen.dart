@@ -368,6 +368,8 @@ class _ImportScreenState extends State<ImportScreen>
                       obscureText: true,
                       autocorrect: false,
                       enableSuggestions: false,
+                      enableIMEPersonalizedLearning: false,
+                      textCapitalization: TextCapitalization.none,
                       decoration: InputDecoration(
                         labelText: 'Gemini key',
                         hintText: settings.hasKey ? 'Key saved' : null,

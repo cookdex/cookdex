@@ -14,6 +14,8 @@ const _actions = [
   'Clean up recipes',
   'Smart Import settings',
   'How cookdex works',
+  'cookdex on GitHub',
+  'Share cookdex',
 ];
 
 SettingsScreen _screen({
@@ -45,6 +47,8 @@ SettingsScreen _screen({
     onCleanUpRecipes: action('Clean up recipes'),
     onSmartImportSettings: action('Smart Import settings'),
     onHowCookdexWorks: action('How cookdex works'),
+    onGitHub: action('cookdex on GitHub'),
+    onShareCookdex: action('Share cookdex'),
     shoppingKeepAwake: shoppingKeepAwake,
     onShoppingKeepAwake: onShoppingKeepAwake ?? (_) {},
     recipeTextScale: recipeTextScale,

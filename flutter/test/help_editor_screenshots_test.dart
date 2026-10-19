@@ -50,10 +50,7 @@ void main() {
         .singleWhere((s) => s.id == 'adding')
         .paragraphs;
     final paragraph = paragraphs[ranges ? 1 : 0];
-    expect(
-      paragraph,
-      contains(ranges ? 'ranges' : 'Tap where you want the cursor.'),
-    );
+    expect(paragraph, contains(ranges ? 'ranges' : 'Choose Write a recipe'));
     for (final config in [
       ('small', const Size(360, 800), 1.0),
       ('normal', const Size(412, 892), 1.0),
@@ -83,14 +80,14 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Start here'));
+      await tester.tap(find.text('Getting started'));
       await tester.pumpAndSettle();
-      final heading = find.text('Adding recipes');
+      final heading = find.text('Adding and editing recipes');
       await tester.ensureVisible(heading);
       await tester.pumpAndSettle();
       await tester.tap(heading);
       await tester.pumpAndSettle();
-      final copy = find.text(paragraph);
+      final copy = find.byKey(ValueKey('help-paragraph-$paragraph'));
       await tester.ensureVisible(copy);
       await tester.pumpAndSettle();
       final bodyRect = tester.getRect(

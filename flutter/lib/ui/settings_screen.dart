@@ -26,6 +26,8 @@ class SettingsScreen extends StatelessWidget {
     this.onCleanUpRecipes,
     this.onSmartImportSettings,
     this.onHowCookdexWorks,
+    this.onGitHub,
+    this.onShareCookdex,
     required this.shoppingKeepAwake,
     required this.onShoppingKeepAwake,
     required this.recipeTextScale,
@@ -54,6 +56,8 @@ class SettingsScreen extends StatelessWidget {
   final VoidCallback? onCleanUpRecipes;
   final VoidCallback? onSmartImportSettings;
   final VoidCallback? onHowCookdexWorks;
+  final VoidCallback? onGitHub;
+  final VoidCallback? onShareCookdex;
   final bool shoppingKeepAwake;
   final ValueChanged<bool> onShoppingKeepAwake;
   final double recipeTextScale;
@@ -315,6 +319,13 @@ class SettingsScreen extends StatelessWidget {
             _action(helpTitle, Symbols.help, onHowCookdexWorks),
           ]),
           _group(context, 'About', [
+            _action(
+              'cookdex on GitHub',
+              Symbols.open_in_new,
+              onGitHub,
+              summary: 'Updates, source code and help',
+            ),
+            _action('Share cookdex', Symbols.share, onShareCookdex),
             ListTile(
               leading: const Icon(Symbols.info),
               title: const Text('cookdex'),

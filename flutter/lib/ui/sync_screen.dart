@@ -57,6 +57,7 @@ class SyncScreen extends StatelessWidget {
           builder: (context) => TextField(
             scrollController: PrimaryScrollController.of(context),
             controller: name,
+            textCapitalization: TextCapitalization.sentences,
             maxLength: 100,
           ),
         ),

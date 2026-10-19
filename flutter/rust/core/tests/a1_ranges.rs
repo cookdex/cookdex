@@ -236,7 +236,7 @@ fn scaling_shopping_keeps_exact_totals_provenance_and_recipe() {
     let items = shopping::add_scaled(&[], &recipe, &[0, 1], 1).unwrap();
     assert_eq!(items[0].quantity_text(), "2 tbsp + 2 tsp");
     assert_eq!(items[0].contributor_scales, ["×0.5"]);
-    assert_eq!(items[1].quantity_text(), "1 (14 oz) cans");
+    assert_eq!(items[1].quantity_text(), "1 (14 oz) can");
     let again = shopping::add_scaled(&items, &recipe, &[0], 4).unwrap();
     assert_eq!(again[0].measures[0].amount.text(), "5/6");
     assert_eq!(again[0].contributor_scales, ["×0.5, ×2"]);

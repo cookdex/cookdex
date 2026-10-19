@@ -332,6 +332,8 @@ class _PairingScreenState extends State<PairingScreen> {
                           ),
                           autocorrect: false,
                           enableSuggestions: false,
+                          enableIMEPersonalizedLearning: false,
+                          textCapitalization: TextCapitalization.none,
                         ),
                       ),
                       const SizedBox(height: 12),

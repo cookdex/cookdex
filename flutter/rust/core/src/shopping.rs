@@ -107,6 +107,9 @@ pub fn validate(items: &[Item]) -> Result<()> {
     Ok(())
 }
 fn unit(unit: &str) -> (String, Rational) {
+    if let Some(key) = crate::recipe::units::package_key(unit) {
+        return (format!("literal:{key}"), Rational::new(1, 1).unwrap());
+    }
     let key = crate::recipe::units::normalize(unit);
     let (family, n, d) = match key.as_str() {
         "tsp" | "teaspoon" | "teaspoons" => ("us", 1, 1),
@@ -122,6 +125,56 @@ fn unit(unit: &str) -> (String, Rational) {
     };
     (family.into(), Rational::new(n, d).unwrap())
 }
+
+fn merge_weights(measures: &mut Vec<Measure>, incoming: &Measure) -> Result<bool> {
+    let (family, from) = unit(&incoming.unit);
+    if family != "mass" {
+        return Ok(false);
+    }
+    let indices: Vec<_> = measures
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| unit(&m.unit).0 == "mass" && m.amount.bounds().is_some())
+        .map(|(i, _)| i)
+        .collect();
+    let Some(&first) = indices.first() else {
+        return Ok(false);
+    };
+    let mut target = from;
+    let mut target_unit = incoming.unit.clone();
+    for &i in &indices {
+        let candidate = unit(&measures[i].unit).1;
+        if candidate.numerator() as u128 * target.denominator() as u128
+            > target.numerator() as u128 * candidate.denominator() as u128
+        {
+            target = candidate;
+            target_unit = crate::recipe::units::normalize(&measures[i].unit);
+        }
+    }
+    let (low, high) = incoming.amount.bounds().expect("numeric incoming weight");
+    let (mut low, mut high) = (low.convert(from, target)?, high.convert(from, target)?);
+    for &i in &indices {
+        let (a, b) = measures[i]
+            .amount
+            .bounds()
+            .expect("numeric existing weight");
+        let from = unit(&measures[i].unit).1;
+        low = low.checked_add(a.convert(from, target)?)?;
+        high = high.checked_add(b.convert(from, target)?)?;
+    }
+    measures[first] = Measure {
+        amount: Amount::range(low, high)?,
+        unit: target_unit,
+    };
+    let removed: HashSet<_> = indices.into_iter().skip(1).collect();
+    let mut index = 0;
+    measures.retain(|_| {
+        let keep = !removed.contains(&index);
+        index += 1;
+        keep
+    });
+    Ok(true)
+}
 fn add_row(items: &mut Vec<Item>, row: &Ingredient, source: &RecipeId) -> Result<()> {
     let incoming = Measure {
         amount: row.amount,
@@ -130,6 +183,11 @@ fn add_row(items: &mut Vec<Item>, row: &Ingredient, source: &RecipeId) -> Result
     let match_index = if row.amount.bounds().is_some() {
         items.iter().position(|item| {
             normalize_name(&item.name) == normalize_name(&row.name)
+                && item.measures.iter().all(|m| {
+                    let existing = crate::recipe::units::package_key(&m.unit);
+                    let incoming = crate::recipe::units::package_key(&row.unit);
+                    (existing.is_none() && incoming.is_none()) || existing == incoming
+                })
                 && item
                     .measures
                     .first()
@@ -142,14 +200,18 @@ fn add_row(items: &mut Vec<Item>, row: &Ingredient, source: &RecipeId) -> Result
         let item = &mut items[index];
         let (lower, upper) = row.amount.bounds().expect("numeric amount");
         let (family, from) = unit(&row.unit);
-        let mut merged = false;
+        let mut merged = merge_weights(&mut item.measures, &incoming)?;
         for measure in &mut item.measures {
+            if merged {
+                break;
+            }
             let (target_family, to) = unit(&measure.unit);
             if let Some((old_lower, old_upper)) = measure.amount.bounds() {
                 if family == target_family {
                     let sum_lower = old_lower.checked_add(lower.convert(from, to)?)?;
                     let sum_upper = old_upper.checked_add(upper.convert(from, to)?)?;
-                    if normalize_name(&measure.unit) == normalize_name(&row.unit)
+                    if family.starts_with("literal:")
+                        || normalize_name(&measure.unit) == normalize_name(&row.unit)
                         || ([1, 2, 3, 4, 8].contains(&sum_lower.denominator())
                             && [1, 2, 3, 4, 8].contains(&sum_upper.denominator()))
                     {

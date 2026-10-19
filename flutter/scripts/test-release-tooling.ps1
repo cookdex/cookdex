@@ -2,10 +2,32 @@
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/env.ps1"
 . "$PSScriptRoot/release-signing.ps1"
+& python -m unittest discover -s $PSScriptRoot -p 'test_package_hygiene.py'
+Assert-FlutterExit
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('cookdex-signing-test-' + [Guid]::NewGuid().ToString('N'))
 $previousPassword = $env:COOKDEX_KEYTOOL_PASSWORD
 try {
     New-Item -ItemType Directory -Path $testRoot | Out-Null
+    . "$PSScriptRoot/package-shortcuts.ps1"
+    # Dummy executable files only: creating .lnk files never executes them.
+    $productionFolder = Join-Path $testRoot 'production'
+    $devFolder = Join-Path $testRoot 'development'
+    foreach ($folder in @($productionFolder, $devFolder)) {
+        New-Item -ItemType Directory -Path $folder | Out-Null
+        'synthetic non-executable fixture' | Set-Content (Join-Path $folder 'cookdex.exe')
+    }
+    Write-CookdexPackageShortcuts -Bundle $productionFolder -Production
+    Write-CookdexPackageShortcuts -Bundle $devFolder
+    & (Join-Path $productionFolder 'Create shortcut.ps1') -NonInteractive | Out-Null
+    $productionShortcut = Join-Path $testRoot 'cookdex.lnk'
+    $productionHash = (Get-FileHash -LiteralPath $productionShortcut).Hash
+    & (Join-Path $devFolder 'Create shortcut.ps1') -NonInteractive | Out-Null
+    $devShortcut = Join-Path $testRoot 'cookdex-dev.lnk'
+    $shell = New-Object -ComObject WScript.Shell
+    if ((Get-FileHash -LiteralPath $productionShortcut).Hash -ne $productionHash -or
+        $shell.CreateShortcut($productionShortcut).TargetPath -ne (Join-Path $productionFolder 'cookdex.exe') -or
+        $shell.CreateShortcut($devShortcut).TargetPath -ne (Join-Path $devFolder 'cookdex.exe') -or
+        $shell.CreateShortcut($devShortcut).Description -ne 'cookdex-dev') { throw 'Dev shortcut changed production or selected the wrong target.' }
     # Exercise the owner's child-process suppression in Windows PowerShell 5.1:
     # benign native stderr must succeed, and a failing child must stop without
     # exposing its diagnostics. This never invokes either owner entry point.
@@ -67,7 +89,7 @@ try {
         $null = [Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$parseErrors)
         if ($parseErrors.Count) { throw 'PowerShell parsing failed.' }
     }
-    Write-Output 'PASS release tooling: child stderr/exit handling, random password, RSA-4096/40-year certificate, private ACL, sign/verify, overwrite refusal, secret-safe failure and script parsing.'
+    Write-Output 'PASS release tooling: isolated dev/production shortcuts, child stderr/exit handling, random password, RSA-4096/40-year certificate, private ACL, sign/verify, overwrite refusal, secret-safe failure and script parsing.'
 } finally {
     $password = $null
     $env:COOKDEX_KEYTOOL_PASSWORD = $previousPassword

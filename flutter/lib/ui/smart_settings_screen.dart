@@ -302,6 +302,8 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
                   obscureText: true,
                   autocorrect: false,
                   enableSuggestions: false,
+                  enableIMEPersonalizedLearning: false,
+                  textCapitalization: TextCapitalization.none,
                   maxLength: 256,
                   decoration: const InputDecoration(
                     labelText: 'Gemini key',
@@ -319,6 +321,8 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
                   enabled: !_busy && _saved != null,
                   autocorrect: false,
                   enableSuggestions: false,
+                  enableIMEPersonalizedLearning: false,
+                  textCapitalization: TextCapitalization.none,
                   maxLength: 100,
                   decoration: const InputDecoration(
                     labelText: 'Model',

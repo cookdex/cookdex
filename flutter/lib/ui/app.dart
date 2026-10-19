@@ -98,6 +98,40 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   bool _obscured = false;
   bool _restoring = false;
   bool _snapshotsFailing = false;
+
+  Future<void> _openGitHub(BuildContext context) async {
+    try {
+      await widget.platform.openSource(cookdexGitHubUrl);
+    } catch (_) {
+      if (context.mounted) {
+        showFeedback(
+          context,
+          'Could not open GitHub. Please try again.',
+          kind: FeedbackKind.error,
+        );
+      }
+    }
+  }
+
+  Future<void> _shareCookdex(BuildContext context) async {
+    try {
+      final outcome = await _exports.shareApp(
+        isAndroid: widget.platform.isAndroid,
+      );
+      if (context.mounted && outcome == ExportOutcome.copied) {
+        showFeedback(context, 'Link copied');
+      }
+    } catch (_) {
+      if (context.mounted) {
+        showFeedback(
+          context,
+          'Could not share cookdex. Please try again.',
+          kind: FeedbackKind.error,
+        );
+      }
+    }
+  }
+
   bool _snapshotCheckRunning = false;
   Timer? _snapshotTimer;
   bool _openingEditor = false;
@@ -1283,6 +1317,8 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
                             ),
                           ),
                           SettingsScreen(
+                            onGitHub: () => _openGitHub(context),
+                            onShareCookdex: () => _shareCookdex(context),
                             hasPrevious: widget.store.hasPrevious,
                             busy: _restoring,
                             syncSummary:

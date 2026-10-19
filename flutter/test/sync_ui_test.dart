@@ -524,6 +524,11 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, 'Paste invitation'));
       await tester.pumpAndSettle();
     }
+    final invitation = tester.widget<TextField>(find.byType(TextField));
+    expect(invitation.autocorrect, isFalse);
+    expect(invitation.enableSuggestions, isFalse);
+    expect(invitation.enableIMEPersonalizedLearning, isFalse);
+    expect(invitation.textCapitalization, TextCapitalization.none);
   }
 
   Future<void> createInvitation(WidgetTester tester) async {

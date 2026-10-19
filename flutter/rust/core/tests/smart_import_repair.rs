@@ -112,6 +112,14 @@ fn shared_rules_cannot_diverge_and_retry_contains_specific_problem() {
     let i = input();
     let tags = provider::allowed_tags(&i);
     let copy = provider::copy_prompt(&tags);
+    for rule in [
+        "can, jar, bottle, box, bag, package",
+        "unit (14 oz) cans, name diced tomatoes",
+        "unit (16 oz) jar, name salsa",
+        "Preserve the size exactly",
+    ] {
+        assert!(copy.contains(rule));
+    }
     for (mode, photos) in [
         (provider::Mode::Recipe, false),
         (provider::Mode::Recipe, true),
@@ -148,6 +156,25 @@ fn shared_rules_cannot_diverge_and_retry_contains_specific_problem() {
         body["response_format"]["schema"]["properties"]["status"]["enum"],
         json!(["ok", "unreadable", "not_a_recipe", "retrieval_failed"])
     );
+}
+
+#[test]
+fn sized_container_reply_keeps_product_name_and_exact_size() {
+    let mut v = written();
+    v["ingredients"] = json!([
+        {"name":"diced tomatoes","amount":"2","unit":"(14 oz) cans","prepNote":"drained","section":"","optional":false},
+        {"name":"salsa","amount":"1","unit":"(16 oz) jar","prepNote":"","section":"","optional":false},
+        {"name":"broth","amount":"2","unit":"(250 ml) bottles","prepNote":"","section":"","optional":false}
+    ]);
+    let (recipe, _) = provider::validated_response(&envelope(v)).unwrap();
+    let rows = &recipe.content.ingredients;
+    assert_eq!(rows[0].name, "diced tomatoes");
+    assert_eq!(rows[0].prep_note, "drained");
+    assert_eq!(
+        rows.iter().map(|r| r.unit.as_str()).collect::<Vec<_>>(),
+        ["(14 oz) cans", "(16 oz) jar", "(250 ml) bottles"]
+    );
+    assert_eq!(rows[0].amount.text(), "2");
 }
 
 #[test]
@@ -234,4 +261,41 @@ fn page_context_keeps_body_after_tag_like_script_strings() {
     assert!(!text.contains("menu"));
     let context = recipe::web::ai_context(html).unwrap();
     assert!(context.contains("2 cups broth"));
+}
+
+#[test]
+fn implicit_sized_container_reply_repairs_only_unambiguous_singular_forms() {
+    let mut v = written();
+    v["ingredients"] = json!([
+        {"name":"salsa verde","amount":"","unit":"(16 oz) jar","prepNote":"","section":"","optional":false},
+        {"name":"16 oz jar of salsa verde","amount":"","unit":"","prepNote":"","section":"","optional":false},
+        {"name":"jar of salsa verde","amount":"16","unit":"oz","prepNote":"","section":"","optional":false},
+        {"name":"salsa verde","amount":"2","unit":"(16 oz) jars","prepNote":"","section":"","optional":false},
+        {"name":"salsa verde","amount":"","unit":"(16 oz) jars","prepNote":"","section":"","optional":false},
+        {"name":"salsa verde","amount":"to taste","unit":"(16 oz) jar","prepNote":"","section":"","optional":false}
+    ]);
+    let (recipe, _) = provider::validated_response(&envelope(v)).unwrap();
+    for row in &recipe.content.ingredients[..3] {
+        assert_eq!(row.amount.text(), "1");
+        assert_eq!(row.unit, "(16 oz) jar");
+        assert_eq!(row.name, "salsa verde");
+    }
+    assert_eq!(recipe.content.ingredients[3].amount.text(), "2");
+    assert_eq!(recipe.content.ingredients[4].amount.text(), "");
+    assert_eq!(recipe.content.ingredients[5].amount.text(), "to taste");
+}
+
+#[test]
+fn implicit_sized_container_accepts_container_case_but_not_a_plural() {
+    for (unit, expected) in [
+        ("(16 OZ) Jar", "1"),
+        ("(16 OZ) JAR", "1"),
+        ("(16 OZ) JARS", ""),
+    ] {
+        let mut v = written();
+        v["ingredients"] = json!([{"name":"salsa verde","amount":"","unit":unit,"prepNote":"","section":"","optional":false}]);
+        let (recipe, _) = provider::validated_response(&envelope(v)).unwrap();
+        assert_eq!(recipe.content.ingredients[0].amount.text(), expected);
+        assert!(recipe.content.ingredients[0].unit.starts_with("(16 OZ)"));
+    }
 }

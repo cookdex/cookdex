@@ -314,6 +314,7 @@ class _RecipesScreenState extends State<RecipesScreen> {
   Widget _search() => PixelScrollScope(
     axis: Axis.horizontal,
     builder: (context) => TextField(
+      textCapitalization: TextCapitalization.none,
       scrollController: PrimaryScrollController.of(context),
       key: const Key('recipe-search'),
       controller: _query,

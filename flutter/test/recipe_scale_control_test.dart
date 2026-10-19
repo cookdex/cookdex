@@ -1,9 +1,56 @@
 import 'package:cookdex/ui/recipe_scale_control.dart';
 import 'package:cookdex/ui/theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'set_aside_test.dart' show fonts;
+
 void main() {
+  testWidgets('large recipe heading keeps its word above the scale control', (
+    tester,
+  ) async {
+    await fonts(tester);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: cookdexTheme(),
+        home: Scaffold(
+          body: Padding(
+            padding: const EdgeInsets.all(16),
+            child: RecipeScaleControl(
+              scale: 2,
+              onSelected: (_) {},
+              textScaler: TextScaler.linear(2),
+              heading: const Text(
+                'Ingredients',
+                textScaler: TextScaler.linear(2.6),
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final heading = find.text('Ingredients');
+    final paragraph = tester.renderObject<RenderParagraph>(heading);
+    expect(
+      paragraph
+          .getBoxesForSelection(
+            const TextSelection(baseOffset: 0, extentOffset: 11),
+          )
+          .length,
+      1,
+    );
+    expect(
+      tester.getTopLeft(find.byKey(const Key('recipe-scale-toggle'))).dy,
+      greaterThanOrEqualTo(tester.getBottomLeft(heading).dy),
+    );
+    expect(tester.takeException(), isNull);
+  });
   for (final size in [
     const Size(320, 800),
     const Size(412, 892),

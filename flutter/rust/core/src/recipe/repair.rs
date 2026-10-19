@@ -135,7 +135,7 @@ pub fn written(value: &Value, now: &str) -> Result<(Recipe, Vec<String>)> {
             continue;
         }
         let label = format!("Ingredient “{name}”");
-        let amount_text = field(
+        let mut amount_text = field(
             row,
             "amount",
             2000,
@@ -158,6 +158,29 @@ pub fn written(value: &Value, now: &str) -> Result<(Recipe, Vec<String>)> {
             &mut warnings,
         );
         let (mut unit, mut name) = super::units::normalize_ingredient(&unit_text, &name);
+        // Only new imports: a singular physically sized container implies one.
+        // Explicit counts, ranges, plural containers and vague sizes stay intact.
+        let implicit = if amount_text.is_empty() && unit.is_empty() {
+            super::units::implicit_package(&name)
+        } else if amount_text.is_empty() {
+            super::units::package(&unit).and_then(|(size, container)| {
+                if unit.trim().to_lowercase().ends_with(container) {
+                    super::units::implicit_package(&format!(
+                        "{} {container} {name}",
+                        &size[1..size.len() - 1]
+                    ))
+                } else {
+                    None
+                }
+            })
+        } else {
+            super::units::implicit_package(&format!("{amount_text} {unit} {name}"))
+        };
+        if let Some((repaired_unit, repaired_name)) = implicit {
+            amount_text = "1".into();
+            unit = repaired_unit;
+            name = repaired_name;
+        }
         // These unambiguous prefix descriptors are preparation, even when a
         // provider overlooks the shared rules. Never apply to stored recipes.
         let mut preparation = Vec::new();
@@ -165,6 +188,10 @@ pub fn written(value: &Value, now: &str) -> Result<(Recipe, Vec<String>)> {
             super::rx(r"(?i)^(grated|chopped|shredded|softened|melted|warm|diced|crumbled)\s+(.+)$")
                 .captures(&name)
         {
+            // In a sized product, "diced tomatoes" describes what to buy.
+            if super::units::package(&unit).is_some() {
+                break;
+            }
             let descriptor = c[1].to_lowercase();
             if !prep_note
                 .split(|c: char| !c.is_alphabetic())

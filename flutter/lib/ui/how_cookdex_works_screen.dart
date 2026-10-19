@@ -82,7 +82,7 @@ class _HowCookdexWorksScreenState extends State<HowCookdexWorksScreen> {
                           padding: const EdgeInsets.only(bottom: 12),
                           child: Align(
                             alignment: Alignment.centerLeft,
-                            child: Text(paragraph),
+                            child: _HelpParagraph(paragraph),
                           ),
                         ),
                       for (final link in section.links)
@@ -112,4 +112,30 @@ class _HowCookdexWorksScreenState extends State<HowCookdexWorksScreen> {
       ),
     ),
   );
+}
+
+class _HelpParagraph extends StatelessWidget {
+  const _HelpParagraph(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final marker = RegExp(r'^(•|\d+\.) ').firstMatch(text);
+    return Semantics(
+      key: ValueKey('help-paragraph-$text'),
+      label: text,
+      excludeSemantics: true,
+      child: marker == null
+          ? Text(text)
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(marker.group(1)!),
+                const SizedBox(width: 8),
+                Expanded(child: Text(text.substring(marker.end))),
+              ],
+            ),
+    );
+  }
 }

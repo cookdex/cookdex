@@ -11,6 +11,10 @@ enum ExportAction { share, shareFile, copy, save }
 /// Opening a share sheet does not prove that the receiving app sent anything.
 enum ExportOutcome { shareOpened, copied, saved, cancelled, copiedFallback }
 
+const cookdexGitHubUrl = 'https://github.com/cookdex/cookdex';
+const cookdexDownloadUrl = '$cookdexGitHubUrl/releases/latest';
+const cookdexShareText = 'Keep your recipes with cookdex.\n$cookdexDownloadUrl';
+
 abstract class ExportPlatform {
   Future<ExportOutcome> shareText(String text, {required String title});
   Future<ExportOutcome> shareFile(String text, {required String filename});
@@ -64,6 +68,10 @@ class ExportService {
   final Future<String> Function(core.Recipe) _exporter;
   static const maxBytes = 64 * 1024 * 1024;
   static const recipeTextMaxBytes = 5 * 1024 * 1024;
+
+  Future<ExportOutcome> shareApp({required bool isAndroid}) => isAndroid
+      ? platform.shareText(cookdexShareText, title: 'Share cookdex')
+      : platform.copy(cookdexDownloadUrl);
 
   void _checkSize(String text) {
     if (utf8.encode(text).length > maxBytes) {

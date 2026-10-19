@@ -18,7 +18,15 @@ function Version([string]$exe, [string[]]$arguments, [string]$pattern) {
     if ($LASTEXITCODE -ne 0 -or $value -notmatch $pattern) { throw 'Version unavailable' }
     return $Matches[1]
 }
-Check 'Git on PATH' $pin.git { Version 'git' @('--version') 'git version (\S+)' }
+# Git does not participate in app compilation: only its upstream minimum matters.
+try {
+    $gitVersion = Version 'git' @('--version') 'git version (\S+)'
+    if ($gitVersion -notmatch '^(\d+\.\d+\.\d+)(?:\.|$)') { throw 'Unknown Git version' }
+    $gitActual = [version]$Matches[1]
+    if ($pin.git -notmatch '^(\d+\.\d+\.\d+)(?:\.|$)') { throw 'Unknown Git minimum' }
+    if ($gitActual -lt [version]$Matches[1]) { throw 'Git is below minimum' }
+    Write-Output "OK Git on PATH ($gitVersion; minimum $($pin.git))"
+} catch { $script:failures++; Write-Output "MISSING OR TOO OLD: Git on PATH. Minimum $($pin.git). Check docs/DEVELOPMENT.md." }
 Check 'PowerShell' $pin.powershell { $PSVersionTable.PSVersion.ToString() }
 if ($pin.PSObject.Properties.Name -contains 'node') {
     Check 'Node on PATH' $pin.node { Version 'node' @('--version') 'v(\S+)' }

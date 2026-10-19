@@ -330,14 +330,14 @@ fn exact_shopping_families_mixed_measures_and_unique_sources() {
     ];
     let items = shopping::add(&[], &r, &[0, 1, 2, 3, 4, 5, 6]).unwrap();
     assert_eq!(items.len(), 4);
-    assert_eq!(items[0].quantity_text(), "1 1/2 cups + 501 g");
+    assert_eq!(items[0].quantity_text(), "1 1/2 cups + 501/1000 kg");
     assert_eq!(items[0].contributors.len(), 1);
     assert_eq!(items[3].quantity_text(), "33/100 cup");
     let mut r2 = r.clone();
     r2.id = RecipeId("second".into());
     let items = shopping::add(&items, &r2, &[0]).unwrap();
     assert_eq!(items[0].contributors.len(), 2);
-    assert_eq!(items[0].quantity_text(), "2 1/2 cups + 501 g");
+    assert_eq!(items[0].quantity_text(), "2 1/2 cups + 501/1000 kg");
     let mut r = Recipe::new(fields("units"), "2026-10-08T00:00:00Z").unwrap();
     r.content.ingredients = vec![
         ingredient("a", "1", "l"),

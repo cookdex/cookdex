@@ -37,7 +37,7 @@ class ExportHost(private val activity: Activity) {
                     putExtra(Intent.EXTRA_SUBJECT, call.argument<String>("title") ?: "Recipe")
                 }
                 try {
-                    activity.startActivity(Intent.createChooser(send, "Share recipe"))
+                    activity.startActivity(Intent.createChooser(send, call.argument<String>("title") ?: "Share recipe"))
                     result.success("opened")
                 } catch (_: android.content.ActivityNotFoundException) {
                     result.error("unavailable", "System sharing is unavailable.", null)

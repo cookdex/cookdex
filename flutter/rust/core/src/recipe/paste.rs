@@ -108,7 +108,11 @@ pub fn parse_ingredients(text: &str, initial_section: &str) -> Result<Vec<Pasted
                 c.is_whitespace() || (c.is_ascii_alphabetic() && c != 'x' && c != 'X')
             })
         });
-        if let Some(m) = matched {
+        if let Some((package_unit, product)) = super::units::implicit_package(&line) {
+            amount = Amount::parse_new("1")?;
+            unit = package_unit;
+            line = product;
+        } else if let Some(m) = matched {
             match Amount::parse_new(m.as_str()) {
                 Ok(a) => amount = a,
                 Err(_) => {

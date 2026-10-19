@@ -44,6 +44,25 @@ class _Platform extends ExportPlatform {
 }
 
 void main() {
+  test(
+    'app sharing opens Android share sheet and copies only link on Windows',
+    () async {
+      final platform = _Platform();
+      final service = ExportService(platform: platform);
+      expect(
+        await service.shareApp(isAndroid: true),
+        ExportOutcome.shareOpened,
+      );
+      expect(platform.calls.single, (
+        'shareText',
+        cookdexShareText,
+        'Share cookdex',
+      ));
+      platform.calls.clear();
+      expect(await service.shareApp(isAndroid: false), ExportOutcome.copied);
+      expect(platform.calls.single, ('copy', cookdexDownloadUrl, null));
+    },
+  );
   test('selected recipes use cookbook text and count filenames', () async {
     final platform = _Platform();
     final service = ExportService(
