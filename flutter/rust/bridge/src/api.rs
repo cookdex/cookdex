@@ -259,7 +259,11 @@ pub struct Candidate {
     pub ai_review: Option<AiReview>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
+#[frb]
 pub struct AiReview {
+    /// True only when the app used the recitation rewrite fallback.
+    #[frb(default = false)]
+    pub rewritten_steps: bool,
     pub guessed_fields: Vec<String>,
     pub guessed_steps: Vec<u32>,
 }
@@ -546,6 +550,21 @@ impl CoreSession {
         Ok(self
             .service()?
             .delete(generation, &recipe::RecipeId(id), &operation.inner)?
+            .into())
+    }
+    pub fn delete_many(
+        &self,
+        generation: i64,
+        ids: Vec<String>,
+        operation: &Operation,
+    ) -> Result<CollectionSnapshot, ServiceError> {
+        Ok(self
+            .service()?
+            .delete_many(
+                generation,
+                &ids.into_iter().map(recipe::RecipeId).collect::<Vec<_>>(),
+                &operation.inner,
+            )?
             .into())
     }
     pub fn rolling_snapshot_maintenance(&self) -> Result<bool, ServiceError> {
@@ -975,6 +994,156 @@ mod smart_import_tests {
     fn reply(value: serde_json::Value) -> Vec<u8> {
         serde_json::to_vec(&json!({"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":value.to_string()}]}]})).unwrap()
     }
+    fn recitation() -> Vec<u8> {
+        br#"{"finish_reason":"RECITATION","status":"failed"}"#.to_vec()
+    }
+    #[test]
+    fn recitation_fallback_preserves_selected_effort_and_forces_all_step_markers() {
+        for effort in ["standard", "thorough"] {
+            let task = task();
+            task.set_effort(effort.into()).unwrap();
+            let first: serde_json::Value =
+                serde_json::from_slice(&task.request().unwrap()).unwrap();
+            assert!(
+                !first["system_instruction"]
+                    .as_str()
+                    .unwrap()
+                    .contains(core::provider::REWRITE_STEPS)
+            );
+            assert!(matches!(
+                task.accept(200, recitation()).unwrap(),
+                ProviderOutput::Retry
+            ));
+            let retry: serde_json::Value =
+                serde_json::from_slice(&task.request().unwrap()).unwrap();
+            assert_eq!(first["model"], retry["model"]);
+            assert_eq!(first["generation_config"], retry["generation_config"]);
+            assert_eq!(first["input"], retry["input"]);
+            assert!(
+                retry["system_instruction"]
+                    .as_str()
+                    .unwrap()
+                    .contains(core::provider::REWRITE_STEPS)
+            );
+            assert!(matches!(
+                task.accept(
+                    200,
+                    reply(
+                        json!({"title":"Synthetic", "steps":["Mix.","Cook."],"aiGuessedSteps":[]})
+                    )
+                )
+                .unwrap(),
+                ProviderOutput::Recipe(_)
+            ));
+            assert_eq!(task.review().guessed_steps, [0, 1]);
+            assert!(task.review().rewritten_steps);
+            assert!(task.request().is_err());
+        }
+    }
+    #[test]
+    fn recitation_exhaustion_transport_errors_and_cancellation_do_not_loop() {
+        let t = task();
+        t.request().unwrap();
+        let block = br#"{"error":{"message":"Request blocked due to copyright/recitation content. Please modify your input and retry."}}"#.to_vec();
+        assert!(matches!(
+            t.accept(400, block.clone()).unwrap(),
+            ProviderOutput::Retry
+        ));
+        t.request().unwrap();
+        assert!(
+            t.accept(400, block)
+                .unwrap_err()
+                .message
+                .contains("Google Lens")
+        );
+        assert!(t.request().is_err());
+        for status in [401, 403, 404, 429, 500, 503] {
+            let t = task();
+            t.request().unwrap();
+            let error = t
+                .accept(
+                    status,
+                    br#"{"error":{"message":"Provider unavailable"}}"#.to_vec(),
+                )
+                .unwrap_err();
+            assert!(error.message.contains("Provider unavailable"));
+            if [403, 404, 429, 503].contains(&status) {
+                assert!(error.message.contains("recommended model"));
+            }
+            assert!(t.request().is_err());
+        }
+        let t = task();
+        t.request().unwrap();
+        t.operation.cancel();
+        assert!(t.accept(200, recitation()).is_err());
+        assert!(t.request().is_err());
+    }
+    #[test]
+    fn malformed_retry_and_recitation_share_one_bounded_budget() {
+        for recitation_first in [false, true] {
+            let t = task();
+            t.request().unwrap();
+            let empty = reply(json!({}));
+            assert!(matches!(
+                t.accept(
+                    200,
+                    if recitation_first {
+                        recitation()
+                    } else {
+                        empty.clone()
+                    }
+                )
+                .unwrap(),
+                ProviderOutput::Retry
+            ));
+            t.request().unwrap();
+            assert!(matches!(
+                t.accept(
+                    200,
+                    if recitation_first {
+                        empty.clone()
+                    } else {
+                        recitation()
+                    }
+                )
+                .unwrap(),
+                ProviderOutput::Retry
+            ));
+            t.request().unwrap();
+            assert!(
+                t.accept(200, empty)
+                    .unwrap_err()
+                    .message
+                    .contains("Google Lens")
+            );
+            assert!(t.request().is_err());
+        }
+    }
+    #[test]
+    fn normal_success_never_rewrites_and_effort_cannot_change_mid_request() {
+        let mut t = task();
+        t.input.text = "Original step.".into();
+        t.request().unwrap();
+        assert!(t.set_effort("thorough".into()).is_err());
+        t.accept(
+            200,
+            reply(json!({"title":"Synthetic", "steps":["Original step."], "aiGuessedSteps":[0]})),
+        )
+        .unwrap();
+        assert!(t.review().guessed_steps.is_empty());
+        assert!(!t.review().rewritten_steps);
+        assert!(t.request().is_err());
+        let t = task();
+        assert!(t.set_effort("invalid".into()).is_err());
+    }
+    #[test]
+    fn generated_normal_steps_do_not_claim_recitation_rewriting() {
+        let t = task();
+        t.request().unwrap();
+        t.accept(200, reply(json!({"title":"Synthetic fragments", "steps":["Stir until combined."], "aiGuessedSteps":[0], "rewrittenSteps":true}))).unwrap();
+        assert_eq!(t.review().guessed_steps, [0]);
+        assert!(!t.review().rewritten_steps);
+    }
     #[test]
     fn retry_keeps_specific_problem_and_partial_recipe_review() {
         let task = task();
@@ -1089,14 +1258,24 @@ pub enum ProviderOutput {
     Retry,
     Recipe(Recipe),
 }
-/// Secret-free adapter boundary. C7/C9 provide the native HTTP/secure-store host.
-/// One task owns one operation token and at most two provider requests.
+#[frb(ignore)]
+#[derive(Default)]
+struct ProviderState {
+    attempts: u8,
+    inflight: bool,
+    finished: bool,
+    validation_retried: bool,
+    rewritten: bool,
+}
+/// Secret-free adapter boundary: one initial request, one validation retry,
+/// and one recitation rewrite, bounded by four total sends.
 #[frb(opaque)]
 pub struct ProviderTask {
+    effort: Mutex<String>,
     input: core::provider::Input,
     model: String,
     operation: Arc<services::Operation>,
-    state: Mutex<(u8, bool)>,
+    state: Mutex<ProviderState>,
     review: Mutex<AiReview>,
     warnings: Mutex<Vec<String>>,
     problems: Mutex<Option<String>>,
@@ -1131,61 +1310,110 @@ impl ProviderTask {
             input,
             model,
             operation: operation.inner.clone(),
-            state: Mutex::new((0, false)),
+            effort: Mutex::new("standard".into()),
+            state: Mutex::new(ProviderState::default()),
             review: Mutex::new(AiReview::default()),
             warnings: Mutex::new(Vec::new()),
             problems: Mutex::new(None),
         })
     }
+    pub fn set_effort(&self, effort: String) -> Result<(), ServiceError> {
+        self.operation.check()?;
+        let state = self.state.lock().unwrap();
+        if state.attempts != 0
+            || state.inflight
+            || !["standard", "thorough"].contains(&effort.as_str())
+        {
+            return Err(services::Error::Validation.into());
+        }
+        *self.effort.lock().unwrap() = effort;
+        Ok(())
+    }
     pub fn request(&self) -> Result<Vec<u8>, ServiceError> {
         self.operation.check()?;
         let mut state = self.state.lock().unwrap();
-        if state.0 >= 2 || state.1 {
+        if state.finished || state.attempts >= 4 || state.inflight {
             return Err(services::Error::StaleWrite.into());
         }
-        let request = core::provider::request_with_problems(
+        let request = core::provider::request_with_options(
             &self.input,
             &self.model,
             self.problems.lock().unwrap().as_deref(),
+            &self.effort.lock().unwrap(),
+            state.rewritten,
         )?;
-        state.1 = true;
+        state.inflight = true;
         Ok(request)
     }
     pub fn accept(&self, status: u16, bytes: Vec<u8>) -> Result<ProviderOutput, ServiceError> {
         self.operation.check()?;
         let mut state = self.state.lock().unwrap();
-        if !state.1 || state.0 >= 2 {
+        if state.finished || !state.inflight || state.attempts >= 4 {
             return Err(services::Error::StaleWrite.into());
         }
-        state.1 = false;
-        state.0 += 1;
+        state.inflight = false;
+        state.attempts += 1;
+        // Only a recitation response can enable the experimentally proven rewrite.
+        if (status == 400 || (200..300).contains(&status)) && core::provider::is_recitation(&bytes)
+        {
+            if !state.rewritten && state.attempts < 4 {
+                state.rewritten = true;
+                *self.problems.lock().unwrap() = None;
+                return Ok(ProviderOutput::Retry);
+            }
+            state.finished = true;
+            return Err(ServiceError {
+                code: ErrorCode::Provider,
+                message: core::provider::RECITATION_MESSAGE.into(),
+            });
+        }
         if !(200..300).contains(&status) {
-            state.0 = 2;
+            state.finished = true;
             let mut error: ServiceError = core::provider::status_error(status, &bytes).into();
             if let Some(reason) = core::provider::failure_reason(&bytes) {
                 error.message = reason;
+            }
+            if self.model != "gemini-3.5-flash-lite" && [400, 403, 404, 429, 503].contains(&status)
+            {
+                error.message.push_str(
+                    " Try switching back to the recommended model in Smart Import settings.",
+                );
+            }
+            if state.rewritten {
+                error.message.push_str(
+                    " Try copying the text with Google Lens and pasting it into Smart Import.",
+                );
             }
             return Err(error);
         }
         match core::provider::validated_response(&bytes) {
             Err(problem) => {
                 *self.problems.lock().unwrap() = Some(problem.message.clone());
-                if problem.retryable && state.0 == 1 {
+                if problem.retryable && !state.validation_retried && state.attempts < 4 {
+                    state.validation_retried = true;
                     Ok(ProviderOutput::Retry)
                 } else {
-                    state.0 = 2;
+                    state.finished = true;
                     Err(ServiceError {
                         code: ErrorCode::Provider,
-                        message: problem.message,
+                        message: if state.rewritten {
+                            core::provider::RECITATION_MESSAGE.into()
+                        } else {
+                            problem.message
+                        },
                     })
                 }
             }
             Ok((mut recipe, warnings)) => {
-                state.0 = 2;
+                state.finished = true;
                 *self.warnings.lock().unwrap() = warnings;
-                let review = core::provider::review_response(&bytes, &self.input, &mut recipe)
+                let mut review = core::provider::review_response(&bytes, &self.input, &mut recipe)
                     .unwrap_or_default();
+                if state.rewritten {
+                    review.ai_guessed_steps = (0..recipe.content.steps.len() as u32).collect();
+                }
                 *self.review.lock().unwrap() = AiReview {
+                    rewritten_steps: state.rewritten,
                     guessed_fields: review.ai_guessed_fields,
                     guessed_steps: review.ai_guessed_steps,
                 };

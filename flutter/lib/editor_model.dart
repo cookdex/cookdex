@@ -129,6 +129,7 @@ class EditorDraft {
     this.stale = false,
     this.imported = false,
     this.exactTextImport = false,
+    this.aiRewrittenSteps = false,
     List<String>? importWarnings,
     Set<String>? aiGuessedFields,
   }) : aiGuessedFields = Set.of(aiGuessedFields ?? {}),
@@ -141,6 +142,7 @@ class EditorDraft {
            ],
        steps = steps ?? [EditableStep('')];
   bool exactTextImport;
+  bool aiRewrittenSteps;
   core.Recipe? base;
   String title,
       description,
@@ -208,6 +210,7 @@ class EditorDraft {
     'exactTextImport': exactTextImport,
     'importWarnings': importWarnings,
     'aiGuessedFields': aiGuessedFields.toList(),
+    'aiRewrittenSteps': aiRewrittenSteps,
   };
   factory EditorDraft.fromJson(Map<String, dynamic> j) {
     if (j['version'] != 1) {
@@ -246,6 +249,7 @@ class EditorDraft {
       stale: j['stale'] == true,
       imported: j['imported'] == true,
       exactTextImport: j['exactTextImport'] == true,
+      aiRewrittenSteps: j['aiRewrittenSteps'] == true,
       importWarnings: (j['importWarnings'] as List? ?? []).cast<String>(),
       aiGuessedFields: (j['aiGuessedFields'] as List? ?? [])
           .cast<String>()

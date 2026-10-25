@@ -108,7 +108,10 @@ void main() {
             }
             if (imported) {
               final attribution = tester.getRect(
-                find.text('Total time: AI guess'),
+                find.descendant(
+                  of: find.byKey(const ValueKey('field-total')),
+                  matching: find.text('AI guess'),
+                ),
               );
               expect(
                 attribution.bottom,

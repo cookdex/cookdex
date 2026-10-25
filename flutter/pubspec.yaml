@@ -1,7 +1,7 @@
 name: cookdex
 description: cookdex Flutter development app.
 publish_to: none
-version: 1.7.3+17003
+version: 1.8.3+18003
 environment:
   sdk: ^3.13.5
 dependencies:
@@ -29,3 +29,10 @@ flutter:
   # Flutter's native-style text-selection overflow toolbar uses fallback icons.
   # Authored product icons use the Material Symbols package above.
   uses-material-design: true
+  assets:
+    - assets/fonts/OFL.txt
+  fonts:
+    - family: CookdexAmounts
+      fonts:
+        - asset: assets/fonts/NotoSans-Medium.ttf
+          weight: 500

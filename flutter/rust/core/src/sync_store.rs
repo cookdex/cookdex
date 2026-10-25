@@ -77,6 +77,44 @@ fn readable_history(db: &Connection) -> Result<Vec<Event>, String> {
     }
     Ok(events)
 }
+// Detail reads need the same envelope/ancestry guarantees as collection load,
+// but must not materialize unrelated recipe payloads or compact history.
+pub(crate) fn validate_recipe_history(db: &Connection, recipe_id: &str) -> Result<(), String> {
+    let mut statement = db
+        .prepare("SELECT id,recipe_id,body FROM history WHERE recipe_id=?1 ORDER BY id")
+        .map_err(err)?;
+    let rows = statement
+        .query_map([recipe_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(err)?;
+    let mut events = vec![];
+    for row in rows {
+        let (id, stored_recipe_id, body) = row.map_err(err)?;
+        let mut event: Event = serde_json::from_str(&body).map_err(err)?;
+        if event.id != id || event.recipe_id != stored_recipe_id {
+            return Err("Stored revision identity mismatch; no data changed".into());
+        }
+        // Recovery deliberately retains damaged old payload bytes. Like the
+        // whole-history reader, validate their digest/ancestry view only.
+        if event
+            .recipe
+            .as_ref()
+            .is_some_and(|r| r["id"] != event.recipe_id || storage::validate_recipe(r).is_err())
+        {
+            event.recipe_digest = payload_digest(&event)?;
+            event.recipe = None;
+        }
+        events.push(event);
+    }
+    validate_events(&events)?;
+    graph(events)?;
+    Ok(())
+}
 pub fn export(db: &Connection) -> Result<Packet, String> {
     if !storage::set_aside_ids(db)?.is_empty() {
         return Err(SET_ASIDE_ERROR.into());
@@ -219,6 +257,63 @@ fn compact_with_budget(db: &Connection, budget: usize) -> Result<(), String> {
         return Ok(());
     }
     let events = readable_history(db)?;
+    compact_events(db, events, budget)
+}
+
+/// Other recipes' ancestry was validated with the cached collection. Retain
+/// the same per-recipe history allowance, with the full budget fallback.
+pub(crate) fn compact_recipes(
+    db: &Connection,
+    ids: &std::collections::HashSet<&str>,
+) -> Result<(), String> {
+    for id in ids {
+        let mut stmt = db
+            .prepare("SELECT id,recipe_id,body FROM history WHERE recipe_id=?1 ORDER BY id")
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(err)?;
+        let mut events = vec![];
+        for row in rows {
+            let (stored_id, stored_recipe, body) = row.map_err(err)?;
+            let mut event: Event = serde_json::from_str(&body).map_err(err)?;
+            if event.id != stored_id || event.recipe_id != stored_recipe {
+                return Err("Stored revision identity mismatch; no data changed".into());
+            }
+            if event
+                .recipe
+                .as_ref()
+                .is_some_and(|r| r["id"] != event.recipe_id || storage::validate_recipe(r).is_err())
+            {
+                event.recipe_digest = payload_digest(&event)?;
+                event.recipe = None;
+            }
+            events.push(event);
+        }
+        compact_events(db, events, LIMIT)?;
+    }
+    let (count, bytes): (i64, i64) = db
+        .query_row(
+            "SELECT count(*),coalesce(sum(length(CAST(body AS BLOB))),0) FROM history",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(err)?;
+    // Stored JSON includes optional null fields in older local events. Its byte
+    // count plus envelope/separators bounds the canonical packet from above.
+    if count > 100000 || bytes.saturating_add(count).saturating_add(64) > LIMIT as i64 {
+        compact(db)?;
+    }
+    Ok(())
+}
+
+fn compact_events(db: &Connection, events: Vec<Event>, budget: usize) -> Result<(), String> {
     // Validate original full bodies before retirement, while allowing oversized
     // legacy history to become small enough through compaction.
     validate_events(&events)?;

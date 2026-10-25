@@ -16,6 +16,7 @@ import 'recipe_store_test.dart' show recipe;
 
 class PlatformFake extends Fake implements ImportPlatform {
   bool hasKey = true;
+  String effort = 'standard';
   int settingsReads = 0, requests = 0;
   Object? fetchError;
   String? redirectedUrl;
@@ -24,7 +25,11 @@ class PlatformFake extends Fake implements ImportPlatform {
   @override
   Future<SmartImportSettings> settings() async {
     settingsReads++;
-    return SmartImportSettings(hasKey: hasKey, model: 'test-model');
+    return SmartImportSettings(
+      hasKey: hasKey,
+      model: 'test-model',
+      effort: effort,
+    );
   }
 
   @override
@@ -55,6 +60,12 @@ class OperationFake extends Fake implements Operation {
 class TaskFake extends Fake implements ProviderTask {
   TaskFake(this.outputs);
   final List<Object> outputs;
+  String? selectedEffort;
+  @override
+  Future<void> setEffort({required String effort}) async {
+    selectedEffort = effort;
+  }
+
   @override
   Future<AiReview> review() async => AiReview(
     guessedFields: const ['servings'],
@@ -96,6 +107,7 @@ class ApiFake extends Fake implements RustLibApi {
   String? rejectText;
   List<String>? blocks;
   List<ProviderInput> sent = [];
+  final tasks = <TaskFake>[];
   List<Object> outputs = [];
   List<Candidate> pageCandidates = [];
   int pageInspections = 0, parseCalls = 0, splitCalls = 0;
@@ -179,7 +191,9 @@ class ApiFake extends Fake implements RustLibApi {
     required Operation operation,
   }) async {
     sent.add(input);
-    return TaskFake(outputs);
+    final task = TaskFake(outputs);
+    tasks.add(task);
+    return task;
   }
 }
 
@@ -199,6 +213,19 @@ void main() {
     );
   });
   tearDown(RustLib.dispose);
+  test(
+    'selected effort reaches provider before the first and retry requests',
+    () async {
+      platform.effort = 'thorough';
+      api.outputs = [
+        const ProviderOutput.retry(),
+        ProviderOutput.recipe(recipe('synthetic')),
+      ];
+      await service.smartText('Synthetic recipe');
+      expect(api.tasks.single.selectedEffort, 'thorough');
+      expect(platform.requests, 2);
+    },
+  );
   test(
     'explicit AI bypasses local parsing and returns guesses in one request',
     () async {

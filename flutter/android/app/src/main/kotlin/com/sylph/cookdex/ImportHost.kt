@@ -67,13 +67,15 @@ class ImportHost(private val activity: Activity) {
                     ImportPhotoMediaStore(activity).publish(file, name)
                 }
             }
-            "settings" -> result.success(mapOf("hasKey" to prefs.contains("key"), "model" to prefs.getString("model", "gemini-3.5-flash-lite")))
+            "settings" -> result.success(mapOf("hasKey" to prefs.contains("key"), "model" to prefs.getString("model", "gemini-3.5-flash-lite"), "effort" to prefs.getString("effort", "standard")))
             "saveSettings" -> background(result) {
                 val model = call.argument<String>("model")?.trim() ?: ""
                 val key = call.argument<String>("key")?.trim() ?: ""
+                val effort = call.argument<String>("effort") ?: "standard"
+                require(effort == "standard" || effort == "thorough")
                 require(model.matches(Regex("[A-Za-z0-9._-]{1,120}")))
                 require(key.length <= 1024 && key.none { it.code < 33 || it.code > 126 })
-                val editor = prefs.edit().putString("model", model)
+                val editor = prefs.edit().putString("model", model).putString("effort", effort)
                 if (key.isNotEmpty()) editor.putString("key", encrypt(key))
                 check(editor.commit())
                 null

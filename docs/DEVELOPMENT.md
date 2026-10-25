@@ -4,7 +4,7 @@ Use an x64 Windows machine with Developer Mode enabled and a short writable chec
 
 ## Toolchain
 
-Exact tested versions are in [`toolchain.json`](../toolchain.json): Flutter 3.47.7/Dart 3.13.5, Rust 1.98.1, Python 3.14.7, PowerShell 7.6.5, Git 2.53.0.windows.3, Java 25.0.3, Android platform 37 revision 2, build-tools 36.0.0, NDK 30.0.16248370, Android CMake 3.22.1, and Visual Studio Build Tools 2026 with Desktop development with C++, MSVC 14.51.36231 and Windows SDK 10.0.22621.0. Android Studio supplies Java; Visual Studio supplies Windows CMake/Ninja. Gradle 9.3.1, AGP 9.1.0 and Kotlin 2.4.20 are project-pinned.
+Exact tested versions are in [`toolchain.json`](../toolchain.json): Flutter 3.47.7/Dart 3.13.5, Rust 1.98.1, Python 3.14.7, PowerShell 7.6.5, Git minimum upstream 2.53.0 (recorded distribution 2.53.0.windows.3), Java 25.0.3, Android platform 37 revision 2, build-tools 36.0.0, NDK 30.0.16248370, Android CMake 3.22.1, and Visual Studio Build Tools 2026 with Desktop development with C++, MSVC 14.51.36231 and Windows SDK 10.0.22621.0. Android Studio supplies Java; Visual Studio supplies Windows CMake/Ninja. Gradle 9.3.1, AGP 9.1.0 and Kotlin 2.4.20 are project-pinned.
 
 Download tools from [Flutter](https://docs.flutter.dev/install/archive), [Rust](https://rustup.rs), [Android Studio](https://developer.android.com/studio), [Visual Studio](https://visualstudio.microsoft.com/downloads/), [Python](https://www.python.org/downloads/), [PowerShell](https://github.com/PowerShell/PowerShell/releases) and [Git for Windows](https://gitforwindows.org/). Match `toolchain.json`; do not silently replace unavailable pins with newer tools.
 

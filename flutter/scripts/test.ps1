@@ -1,5 +1,7 @@
 param([switch]$SkipWindowsNative)
 . "$PSScriptRoot/env.ps1"
+& "$PSScriptRoot/test_env.ps1"
+& "$PSScriptRoot/test_profile_adb.ps1"
 if (Test-Path (Join-Path $cookdexRoot 'scripts/test-maintenance.ps1')) {
     & (Join-Path $cookdexRoot 'scripts/test-maintenance.ps1')
 }

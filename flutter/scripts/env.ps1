@@ -12,7 +12,10 @@ if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'A
 if (-not $env:ANDROID_USER_HOME) { $env:ANDROID_USER_HOME = Join-Path $cookdexRoot 'work/flutter-android' }
 if (-not $env:ANDROID_AVD_HOME) { $env:ANDROID_AVD_HOME = Join-Path $env:ANDROID_USER_HOME 'avd' }
 $env:NDK_HOME = Join-Path $env:ANDROID_HOME 'ndk/30.0.16248370'
-$env:Path = "$env:FLUTTER_SDK\bin;$env:USERPROFILE\.cargo\bin;$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:Path"
+# Profile polling sources this setup repeatedly in the same process. Keep the
+# tool prefix idempotent so its environment cannot grow beyond Windows limits.
+$flutterToolPaths = @("$env:FLUTTER_SDK\bin", "$env:USERPROFILE\.cargo\bin", "$env:JAVA_HOME\bin", "$env:ANDROID_HOME\platform-tools")
+$env:Path = ($flutterToolPaths + @($env:Path -split ';' | Where-Object { $_ -notin $flutterToolPaths })) -join ';'
 $flutterLlvm = Join-Path $env:NDK_HOME 'toolchains/llvm/prebuilt/windows-x86_64/bin'
 $env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = Join-Path $flutterLlvm 'aarch64-linux-android24-clang.cmd'
 $env:CC_aarch64_linux_android = $env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER

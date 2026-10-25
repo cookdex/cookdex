@@ -98,6 +98,65 @@ fn fixture() -> Vec<Recipe> {
 }
 
 #[test]
+fn batch_deletions_sync_and_snapshot_restoration_reaches_the_other_peer() {
+    let first = Peer::new("Delete source");
+    let second = Peer::new("Delete receiver");
+    first.seed();
+    second.pair(&first);
+    let before = first.service.snapshot().unwrap();
+    let ids: Vec<_> = before.summaries.iter().map(|r| r.id.clone()).collect();
+    first
+        .service
+        .delete_many(before.generation, &ids, &op())
+        .unwrap();
+    first.service.sync_now().unwrap();
+    assert!(second.service.snapshot().unwrap().summaries.is_empty());
+    let entry = first.service.rolling_snapshots().unwrap().0.pop().unwrap();
+    let bytes = first.service.rolling_snapshot_bytes(&entry.id).unwrap();
+    first
+        .service
+        .restore(
+            &first.service.preview_restore(&bytes, &op()).unwrap(),
+            &op(),
+        )
+        .unwrap();
+    first.service.sync_now().unwrap();
+    assert_eq!(
+        second.service.snapshot().unwrap().summaries,
+        before.summaries
+    );
+}
+
+#[test]
+fn favorite_sync_preserves_content_edit_time_in_both_directions() {
+    let first = Peer::new("Favorite source");
+    let second = Peer::new("Favorite receiver");
+    let id = first.seed();
+    second.pair(&first);
+    let before = first.recipe(&id);
+    for (source, receiver, value) in [(&first, &second, true), (&second, &first, false)] {
+        source
+            .service
+            .favorite(
+                source.service.snapshot().unwrap().generation,
+                &id,
+                value,
+                &op(),
+            )
+            .unwrap();
+        source.service.sync_now().unwrap();
+        for peer in [source, receiver] {
+            let after = peer.recipe(&id);
+            assert_eq!(after.favorite, value);
+            assert_eq!(after.updated_at, before.updated_at);
+            assert_eq!(after.created_at, before.created_at);
+            assert_eq!(after.content, before.content);
+            assert!(after.revision > before.revision);
+        }
+    }
+}
+
+#[test]
 fn three_live_peers_direct_and_relay_conflicts_cleanup_and_revocation() {
     let phone = Peer::new("Phone");
     let tablet = Peer::new("Tablet");

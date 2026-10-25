@@ -103,7 +103,8 @@ fn malformed_guesses_are_ignored_and_tags_still_filtered() {
         let bytes = envelope(v);
         let (mut r, _) = provider::validated_response(&bytes).unwrap();
         let review = provider::review_response(&bytes, &input(), &mut r).unwrap();
-        assert_eq!(review, provider::AiReview::default());
+        assert_eq!(review.ai_guessed_fields, ["servings", "tags"]);
+        assert_eq!(review.ai_guessed_steps, [0]);
         assert_eq!(r.content.tags, ["dinner"]);
     }
 }
@@ -114,8 +115,8 @@ fn shared_rules_cannot_diverge_and_retry_contains_specific_problem() {
     let copy = provider::copy_prompt(&tags);
     for rule in [
         "can, jar, bottle, box, bag, package",
-        "unit (14 oz) cans, name diced tomatoes",
-        "unit (16 oz) jar, name salsa",
+        "put the count in amount and the package size in parentheses before the container in unit",
+        "When a singular sized container has no explicit count, it means one container",
         "Preserve the size exactly",
     ] {
         assert!(copy.contains(rule));
@@ -297,5 +298,201 @@ fn implicit_sized_container_accepts_container_case_but_not_a_plural() {
         let (recipe, _) = provider::validated_response(&envelope(v)).unwrap();
         assert_eq!(recipe.content.ingredients[0].amount.text(), expected);
         assert!(recipe.content.ingredients[0].unit.starts_with("(16 OZ)"));
+    }
+}
+
+#[test]
+fn new_time_guesses_and_inserted_step_markers_are_transient() {
+    let mut v = written();
+    v["prepTime"] = json!("15 min");
+    v["cookTime"] = json!("40 min");
+    v["totalTime"] = json!("55 min");
+    v["steps"] = json!(["", "Cook the pasta until just firm.", "Drain the pasta."]);
+    v["aiGuessedFields"] = json!(["prepTime", "cookTime", "totalTime", "source"]);
+    v["aiGuessedSteps"] = json!([1, 99]);
+    let bytes = envelope(v);
+    let (mut r, _) = provider::validated_response(&bytes).unwrap();
+    let mut source = input();
+    source.text = "Servings: 12\nDrain the pasta.".into();
+    let review = provider::review_response(&bytes, &source, &mut r).unwrap();
+    assert_eq!(
+        review.ai_guessed_fields,
+        ["cookTime", "prepTime", "totalTime"]
+    );
+    assert_eq!(review.ai_guessed_steps, [0]);
+    assert_eq!(r.content.steps[1], "Drain the pasta.");
+    let text = recipe::text::export_recipe(&r).unwrap();
+    assert!(!text.contains("aiGuessed") && !text.contains("AI-written"));
+    assert_eq!(
+        recipe::text::import_text(&text, NOW).unwrap().candidates[0]
+            .recipe
+            .content,
+        r.content
+    );
+}
+#[test]
+fn updated_rules_preserve_source_constraints_in_both_output_modes() {
+    for fragment in [
+        "Add ingredients named as used in the source steps",
+        "without adding ingredients or ingredient quantities",
+        "insert only an indispensable missing cooking action as a separate AI-written step",
+        "do not rewrite surrounding steps",
+        "Expand shorthand in ingredient names into the plain name",
+        "Use lowercase ingredient names except proper nouns and brands",
+        "Mark ingredients explicitly optional",
+        "Estimate missing servings and total time",
+        "Formatting examples (apply the existing rules, not changes to the recipe)",
+        "Preserve ingredient quantities exactly as written",
+        "do not promote a serving suggestion to an ingredient",
+    ] {
+        assert!(
+            provider::INSTRUCTION.contains(fragment),
+            "missing {fragment}"
+        );
+        assert!(provider::copy_prompt(&[]).contains(fragment));
+    }
+    // The owner selected the exact tested C snapshot, including its historical
+    // baseline examples. New examples must remain independent of fixtures.
+    use sha2::{Digest, Sha256};
+    assert_eq!(
+        format!("{:x}", Sha256::digest(provider::INSTRUCTION.as_bytes())),
+        "a31d394176ca9fe9de8bb5cb4c77551554fe1ddeeed8293ac4f6538f1becf82c"
+    );
+    assert!(!provider::INSTRUCTION.contains("Estimate missing servings, prep time"));
+    let schema = provider::schema(&provider::Mode::Recipe);
+    assert_eq!(
+        schema["properties"]["aiGuessedFields"]["items"]["enum"],
+        json!(["servings", "prepTime", "cookTime", "totalTime", "tags"])
+    );
+    for (source, expected) in [
+        (
+            include_str!("fixtures/smart-import-190/baked-ziti.txt"),
+            include_str!("fixtures/smart-import-190/baked-ziti.expected.txt"),
+        ),
+        (
+            include_str!("fixtures/smart-import-190/funeral-potatoes.txt"),
+            include_str!("fixtures/smart-import-190/funeral-potatoes.expected.txt"),
+        ),
+        (
+            include_str!("fixtures/smart-import-190/swedish-meatballs.txt"),
+            include_str!("fixtures/smart-import-190/swedish-meatballs.expected.txt"),
+        ),
+    ] {
+        let mut i = input();
+        i.text = source.into();
+        let request = provider::request(&i, "gemini-3.5-flash-lite", false).unwrap();
+        let request = String::from_utf8(request).unwrap();
+        assert!(!source.contains("Expected:"));
+        assert!(!request.contains(expected.trim()));
+    }
+}
+#[test]
+fn effort_preserves_standard_default_and_only_changes_thinking() {
+    let default: Value = serde_json::from_slice(
+        &provider::request(&input(), "gemini-3.5-flash-lite", false).unwrap(),
+    )
+    .unwrap();
+    let standard: Value = serde_json::from_slice(
+        &provider::request_with_effort(&input(), "gemini-3.5-flash-lite", None, "standard")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(default, standard);
+    let mut thorough: Value = serde_json::from_slice(
+        &provider::request_with_effort(&input(), "gemini-3.5-flash-lite", None, "thorough")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(thorough["generation_config"]["thinking_level"], "high");
+    thorough["generation_config"]["thinking_level"] = json!("minimal");
+    assert_eq!(thorough, default);
+    assert!(provider::request_with_effort(&input(), "mock-model", None, "unknown").is_err());
+}
+
+#[test]
+fn recitation_detection_ignores_recipe_text_and_other_blocks() {
+    assert!(provider::is_recitation(
+        br#"{"finish_reason":"RECITATION"}"#
+    ));
+    assert!(provider::is_recitation(
+        br#"{"steps":[{"type":"model_output","finish_reason":"recitation"}]}"#
+    ));
+    assert!(!provider::is_recitation(&envelope(
+        json!({"title":"RECITATION", "notes":"Request blocked due to copyright/recitation"})
+    )));
+    assert!(!provider::is_recitation(br#"{"finish_reason":"SAFETY"}"#));
+    assert!(!provider::is_recitation(b"invalid"));
+}
+
+#[test]
+fn heldout_sources_are_data_only_and_margin_rules_apply_to_both_routes() {
+    let fixtures = [
+        (
+            include_str!("fixtures/smart-import-182/lemon-garlic-chicken.txt"),
+            include_str!("fixtures/smart-import-182/lemon-garlic-chicken.expected.txt"),
+        ),
+        (
+            include_str!("fixtures/smart-import-182/banana-bread.txt"),
+            include_str!("fixtures/smart-import-182/banana-bread.expected.txt"),
+        ),
+        (
+            include_str!("fixtures/smart-import-182/black-bean-soup.txt"),
+            include_str!("fixtures/smart-import-182/black-bean-soup.expected.txt"),
+        ),
+        (
+            include_str!("fixtures/smart-import-190/baked-ziti.txt"),
+            include_str!("fixtures/smart-import-190/baked-ziti.expected.txt"),
+        ),
+        (
+            include_str!("fixtures/smart-import-190/funeral-potatoes.txt"),
+            include_str!("fixtures/smart-import-190/funeral-potatoes.expected.txt"),
+        ),
+        (
+            include_str!("fixtures/smart-import-190/swedish-meatballs.txt"),
+            include_str!("fixtures/smart-import-190/swedish-meatballs.expected.txt"),
+        ),
+    ];
+    for (source, expected) in fixtures {
+        let mut i = input();
+        i.text = source.into();
+        for rewrite in [false, true] {
+            let bytes = provider::request_with_options(
+                &i,
+                "gemini-3.5-flash-lite",
+                None,
+                "standard",
+                rewrite,
+            )
+            .unwrap();
+            let request: Value = serde_json::from_slice(&bytes).unwrap();
+            let prompt = request["system_instruction"].as_str().unwrap();
+            assert!(prompt.contains("put to taste in the amount field, not the prep note"));
+            assert!(prompt.contains("Printed ingredient amounts stay authoritative"));
+            assert!(prompt.contains("keep the handwritten notes in Notes"));
+            assert!(!String::from_utf8(bytes).unwrap().contains(expected.trim()));
+            for line in source
+                .lines()
+                .map(str::trim)
+                .filter(|line| line.len() >= 20)
+            {
+                assert!(
+                    !prompt.contains(line),
+                    "Recipe source leaked into rules: {line}"
+                );
+            }
+        }
+    }
+    for old_example in [
+        "parm ->",
+        "parm means",
+        "mozz means",
+        "grnd",
+        "sm onion",
+        "alspice",
+        "parsely",
+        "worchestershire",
+        "Bake at 375 covered for a while",
+    ] {
+        assert!(!provider::INSTRUCTION.contains(old_example));
     }
 }

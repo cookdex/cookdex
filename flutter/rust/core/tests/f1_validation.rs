@@ -145,6 +145,264 @@ fn op() -> Operation {
 fn connection(root: &Root) -> Connection {
     storage::open(&root.0.join("flutter-v1/cookdex.sqlite3")).unwrap()
 }
+
+#[test]
+fn detail_matches_canonical_library_for_each_kind_of_unreadable_recipe() {
+    for damage in ["json", "identity", "canonical", "head", "conflict"] {
+        let root = Root::new();
+        let service = Service::open(&root).unwrap();
+        let (recipes, _) = seed(&service);
+        let mut db = connection(&root);
+        let id = &recipes[0].id;
+        let original: String = db
+            .query_row("SELECT body FROM recipes WHERE id=?1", [&id.0], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let mut bad: Value = serde_json::from_str(&original).unwrap();
+        bad["updatedAt"] = json!("invalid");
+        match damage {
+            "json" => {
+                db.execute(
+                    "UPDATE recipes SET body='invalid json' WHERE id=?1",
+                    [&id.0],
+                )
+                .unwrap();
+            }
+            "identity" => {
+                bad["updatedAt"] = json!(recipes[0].updated_at);
+                bad["id"] = json!("different-id");
+                db.execute(
+                    "UPDATE recipes SET body=?2 WHERE id=?1",
+                    params![id.0, bad.to_string()],
+                )
+                .unwrap();
+            }
+            "canonical" => {
+                db.execute(
+                    "UPDATE recipes SET body=?2 WHERE id=?1",
+                    params![id.0, bad.to_string()],
+                )
+                .unwrap();
+            }
+            "head" => {
+                let (revision, body): (String, String) = db.query_row("SELECT h.id,h.body FROM history h JOIN heads p ON p.revision_id=h.id WHERE p.recipe_id=?1", [&id.0], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+                let mut event: Value = serde_json::from_str(&body).unwrap();
+                event["recipe"] = bad;
+                db.execute(
+                    "UPDATE history SET body=?2 WHERE id=?1",
+                    params![revision, event.to_string()],
+                )
+                .unwrap();
+            }
+            "conflict" => {
+                db.execute(
+                    "INSERT OR REPLACE INTO local VALUES('syncConflicts',?1)",
+                    [json!([{"recipeId":id.0,"versions":[{"recipe":bad}]}]).to_string()],
+                )
+                .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let before = state(&db);
+        assert!(service.detail(id).unwrap().is_none(), "{damage}");
+        let healthy = service.detail(&recipes[1].id).unwrap().unwrap();
+        assert_eq!(healthy.content, recipes[1].content, "{damage}");
+        assert_eq!(
+            state(&db),
+            before,
+            "reads must preserve recovery data: {damage}"
+        );
+        let snapshot = storage::load(&mut db).unwrap();
+        assert_eq!(snapshot.set_aside, vec![id.0.clone()]);
+        assert_eq!(snapshot.book.recipes.len(), 1);
+    }
+}
+
+#[test]
+fn detail_tracks_edits_delete_restore_recovery_and_incoming_conflict() {
+    let root = Root::new();
+    let service = Service::open(&root).unwrap();
+    let (recipes, bytes) = seed(&service);
+    let id = &recipes[0].id;
+    let base = service.detail(id).unwrap().unwrap();
+    let mut fields = base.content.clone();
+    fields.notes = "Edited locally".into();
+    let edited = service
+        .save(
+            service.snapshot().unwrap().generation,
+            Some(base),
+            fields.clone(),
+            &op(),
+        )
+        .unwrap();
+    assert_eq!(service.detail(id).unwrap().unwrap().content, fields);
+    let deleted = service.delete(edited.generation, id, &op()).unwrap();
+    assert!(service.detail(id).unwrap().is_none());
+    service.recover(deleted.generation, &op()).unwrap();
+    assert_eq!(service.detail(id).unwrap().unwrap().content, fields);
+    let mut peer = memory_db();
+    storage::save(
+        &mut peer,
+        0,
+        &storage::Book {
+            recipes: recipes
+                .iter()
+                .map(|r| serde_json::from_slice(&r.to_json().unwrap()).unwrap())
+                .collect(),
+            ..Default::default()
+        },
+        "peer",
+    )
+    .unwrap();
+    let packet = sync_store::export(&peer).unwrap();
+    sync_store::merge(&mut connection(&root), packet, "incoming").unwrap();
+    let snapshot = service.snapshot().unwrap();
+    assert!(!snapshot.conflicts.is_empty());
+    let expected = storage::load(&mut connection(&root))
+        .unwrap()
+        .book
+        .recipes
+        .into_iter()
+        .find(|r| r["id"] == id.0)
+        .unwrap();
+    assert_eq!(
+        service.detail(id).unwrap().unwrap(),
+        Recipe::from_json(&serde_json::to_vec(&expected).unwrap()).unwrap()
+    );
+    service
+        .restore(&service.preview_restore(&bytes, &op()).unwrap(), &op())
+        .unwrap();
+    assert!(service.detail(id).unwrap().is_some());
+}
+
+#[test]
+fn detail_rejects_target_envelope_and_ancestry_damage_without_writes() {
+    for damage in [
+        "kind",
+        "event-id",
+        "recipe-id",
+        "deleted-at",
+        "stub",
+        "missing-parent",
+        "cycle",
+    ] {
+        let root = Root::new();
+        let service = Service::open(&root).unwrap();
+        let (recipes, _) = seed(&service);
+        let mut db = connection(&root);
+        let id = &recipes[0].id;
+        let (revision, body): (String, String) = db.query_row(
+            "SELECT h.id,h.body FROM heads p JOIN history h ON h.id=p.revision_id WHERE p.recipe_id=?1",
+            [&id.0], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        let mut event: Value = serde_json::from_str(&body).unwrap();
+        match damage {
+            "kind" => event["kind"] = json!("unknown"),
+            "event-id" => event["id"] = json!("wrong"),
+            "recipe-id" => event["recipeId"] = json!("wrong"),
+            "deleted-at" => event["deletedAt"] = json!("unexpected"),
+            "stub" => {
+                event["recipe"] = Value::Null;
+                event["recipeDigest"] = json!("a".repeat(64));
+            }
+            "missing-parent" => event["parents"] = json!(["missing"]),
+            "cycle" => event["parents"] = json!([revision]),
+            _ => unreachable!(),
+        }
+        db.execute(
+            "UPDATE history SET body=?2 WHERE id=?1",
+            params![revision, event.to_string()],
+        )
+        .unwrap();
+        let before = state(&db);
+        assert!(
+            storage::load(&mut db).is_err(),
+            "old collection validation: {damage}"
+        );
+        assert!(service.detail(id).is_err(), "scoped validation: {damage}");
+        assert_eq!(state(&db), before);
+        // Unrelated corrupt projection must not disable validation of this ID.
+        db.execute(
+            "UPDATE recipes SET body='broken' WHERE id=?1",
+            [&recipes[1].id.0],
+        )
+        .unwrap();
+        assert!(
+            service.detail(id).is_err(),
+            "independent target guarantee: {damage}"
+        );
+    }
+}
+
+#[test]
+fn target_set_aside_precedes_history_envelope_error() {
+    for conflict in [false, true] {
+        let root = Root::new();
+        let service = Service::open(&root).unwrap();
+        let (recipes, _) = seed(&service);
+        let db = connection(&root);
+        let id = &recipes[0].id;
+        let (revision, body): (String, String) = db.query_row(
+            "SELECT h.id,h.body FROM heads p JOIN history h ON h.id=p.revision_id WHERE p.recipe_id=?1",
+            [&id.0], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        let mut event: Value = serde_json::from_str(&body).unwrap();
+        let mut bad = event["recipe"].clone();
+        bad["updatedAt"] = json!("invalid");
+        event["id"] = json!("wrong-envelope");
+        if conflict {
+            db.execute(
+                "INSERT OR REPLACE INTO local VALUES('syncConflicts',?1)",
+                [json!([{"recipeId":id.0,"versions":[{"recipe":bad}]}]).to_string()],
+            )
+            .unwrap();
+        } else {
+            event["recipe"] = bad;
+        }
+        db.execute(
+            "UPDATE history SET body=?2 WHERE id=?1",
+            params![revision, event.to_string()],
+        )
+        .unwrap();
+        assert!(service.detail(id).unwrap().is_none());
+    }
+}
+
+#[test]
+fn detail_conflict_filter_preserves_stored_duplicate_identity_semantics() {
+    for target_last in [false, true] {
+        let root = Root::new();
+        let service = Service::open(&root).unwrap();
+        let (recipes, _) = seed(&service);
+        let mut db = connection(&root);
+        let id = &recipes[0].id;
+        let mut bad: Value = serde_json::from_slice(&recipes[0].to_json().unwrap()).unwrap();
+        bad["updatedAt"] = json!("invalid");
+        let (first, last) = if target_last {
+            ("other", id.0.as_str())
+        } else {
+            (id.0.as_str(), "other")
+        };
+        let body = format!(
+            "[{{\"recipeId\":{},\"recipeId\":{},\"versions\":[{{\"recipe\":{}}}]}}]",
+            json!(first),
+            json!(last),
+            bad
+        );
+        db.execute(
+            "INSERT OR REPLACE INTO local VALUES('syncConflicts',?1)",
+            [body],
+        )
+        .unwrap();
+        let snapshot = storage::load(&mut db).unwrap();
+        assert_eq!(
+            snapshot.book.recipes.iter().any(|r| r["id"] == id.0),
+            !target_last
+        );
+        assert_eq!(service.detail(id).unwrap().is_some(), !target_last);
+    }
+}
 fn seed(service: &Service) -> (Vec<Recipe>, Vec<u8>) {
     let mut first = fixture().recipes.remove(0);
     let mut second = first.clone();

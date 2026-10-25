@@ -22,7 +22,7 @@ std::string Field(const flutter::MethodCall<V>& call, const char* key) {
   const auto* value = std::get_if<std::string>(&found->second);
   return value ? *value : std::string();
 }
-struct Settings { std::string model = "gemini-3.5-flash-lite"; std::string key; };
+struct Settings { std::string model = "gemini-3.5-flash-lite"; std::string key; std::string effort = "standard"; };
 Settings Read() {
   PCREDENTIALW credential = nullptr;
   if (!CredReadW(kTarget, CRED_TYPE_GENERIC, 0, &credential)) {
@@ -33,10 +33,14 @@ Settings Read() {
   CredFree(credential);
   const auto split = value.find('\n');
   if (split == std::string::npos) throw std::runtime_error("The saved Gemini settings are invalid.");
-  return {value.substr(0, split), value.substr(split + 1)};
+  const auto effortSplit = value.find('\n', split + 1);
+  if (effortSplit == std::string::npos) return {value.substr(0, split), value.substr(split + 1)};
+  const auto effort = value.substr(effortSplit + 1);
+  if (effort != "standard" && effort != "thorough") throw std::runtime_error("The saved Gemini settings are invalid.");
+  return {value.substr(0, split), value.substr(split + 1, effortSplit - split - 1), effort};
 }
 void Write(const Settings& settings) {
-  std::string data = settings.model + "\n" + settings.key;
+  std::string data = settings.model + "\n" + settings.key + "\n" + settings.effort;
   CREDENTIALW credential{};
   credential.Type = CRED_TYPE_GENERIC;
   credential.TargetName = const_cast<wchar_t*>(kTarget);
@@ -72,14 +76,17 @@ SmartChannel::SmartChannel(flutter::BinaryMessenger* messenger, HWND window) : w
       if (method == "cancel") { ++generation_; result->Success(); return; }
       if (method == "settings") {
         auto settings = Read();
-        result->Success(V(M{{V("hasKey"), V(!settings.key.empty())}, {V("model"), V(settings.model)}}));
+        result->Success(V(M{{V("hasKey"), V(!settings.key.empty())}, {V("model"), V(settings.model)}, {V("effort"), V(settings.effort)}}));
       } else if (method == "saveSettings" || method == "removeKey") {
         auto settings = Read();
         if (method == "removeKey") settings.key.clear();
         else {
           const auto model = Field(call, "model"), key = Field(call, "key");
           if (!std::regex_match(model, std::regex("[A-Za-z0-9._-]{1,120}")) || key.size() > 1024 || std::any_of(key.begin(), key.end(), [](unsigned char c) { return c < 33 || c > 126; })) throw std::runtime_error("Check the key and model.");
+          const auto effort = Field(call, "effort");
+          if (!effort.empty() && effort != "standard" && effort != "thorough") throw std::runtime_error("Check the effort setting.");
           settings.model = model;
+          settings.effort = effort.empty() ? "standard" : effort;
           if (!key.empty()) settings.key = key;
         }
         Write(settings); SecureZeroMemory(settings.key.data(), settings.key.size()); result->Success();

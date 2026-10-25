@@ -1,6 +1,9 @@
 import 'pixel_scroll.dart';
 
 import 'dart:async';
+
+import '../fraction_display.dart';
+
 import 'dart:math' as math;
 
 import '../ingredient_display.dart';
@@ -525,7 +528,11 @@ class _ShoppingScreenState extends State<ShoppingScreen>
               TextSpan(
                 children: [
                   if (item.quantityText.isNotEmpty)
-                    TextSpan(text: '${item.quantityText} '),
+                    TextSpan(
+                      text: '${displayFractions(item.quantityText)} ',
+                      semanticsLabel: '${spokenFractions(item.quantityText)} ',
+                      style: amountDisplayStyle,
+                    ),
                   TextSpan(
                     text: item.name,
                     style: const TextStyle(fontWeight: FontWeight.bold),
@@ -1503,14 +1510,34 @@ class _ShoppingSelectionState extends State<_ShoppingSelection> {
                           value: _selected.contains(i),
                           controlAffinity: ListTileControlAffinity.leading,
                           title: Text(ingredients[i].name),
-                          subtitle: Text(
-                            [
-                              if (_amounts != null) _amounts![i],
-                              if (widget.scale == 2)
-                                displayIngredientUnit(ingredients[i]),
-                              ingredients[i].prepNote,
-                              if (ingredients[i].optional) '(optional)',
-                            ].where((s) => s.isNotEmpty).join(' '),
+                          subtitle: Text.rich(
+                            TextSpan(
+                              children: [
+                                if (_amounts != null)
+                                  TextSpan(
+                                    text: displayFractions(_amounts![i]),
+                                    semanticsLabel: spokenFractions(
+                                      _amounts![i],
+                                    ),
+                                    style: amountDisplayStyle,
+                                  ),
+                                TextSpan(
+                                  text:
+                                      [
+                                            if (widget.scale == 2)
+                                              displayIngredientUnit(
+                                                ingredients[i],
+                                              ),
+                                            ingredients[i].prepNote,
+                                            if (ingredients[i].optional)
+                                              '(optional)',
+                                          ]
+                                          .where((s) => s.isNotEmpty)
+                                          .map((s) => ' $s')
+                                          .join(),
+                                ),
+                              ],
+                            ),
                           ),
                           onChanged: _busy
                               ? null

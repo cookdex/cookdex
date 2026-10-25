@@ -25,7 +25,7 @@ impl Default for Book {
         }
     }
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Snapshot {
     pub generation: i64,
     pub book: Book,
@@ -101,6 +101,91 @@ pub(crate) fn validate_recipe(value: &Value) -> Result<(), String> {
     crate::recipe::Recipe::from_json(&serde_json::to_vec(value).map_err(err)?)
         .map(|_| ())
         .map_err(err)
+}
+
+/// Read the requested projection and the payloads that can set it aside in a
+/// library snapshot. The caller holds a read transaction. Whole-book validation
+/// and history maintenance remain on collection reads and writes.
+pub(crate) fn recipe(
+    db: &Connection,
+    id: &crate::recipe::RecipeId,
+) -> Result<Option<crate::recipe::Recipe>, String> {
+    let body: Option<String> = db
+        .query_row("SELECT body FROM recipes WHERE id=?1", [&id.0], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(err)?;
+    let Some(body) = body else { return Ok(None) };
+    // Match collection loading's JSON-value normalization before canonical
+    // validation (including the existing last-key handling of stored JSON).
+    let value: Value = match serde_json::from_str(&body) {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+    let recipe = match crate::recipe::Recipe::from_json(&serde_json::to_vec(&value).map_err(err)?) {
+        Ok(recipe) if recipe.id == *id => recipe,
+        _ => return Ok(None),
+    };
+    let head: Option<(String, String, String)> = db
+        .query_row(
+            "SELECT h.id,h.recipe_id,h.body FROM heads p JOIN history h ON h.id=p.revision_id WHERE p.recipe_id=?1",
+            [&id.0],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(err)?;
+    let mut head_identity_invalid = false;
+    if let Some((revision, stored_id, body)) = head {
+        let event: crate::sync_store::Event = serde_json::from_str(&body).map_err(err)?;
+        head_identity_invalid =
+            event.id != revision || event.recipe_id != stored_id || stored_id != id.0;
+        if event
+            .recipe
+            .as_ref()
+            .is_some_and(|r| r["id"] != id.0 || validate_recipe(r).is_err())
+        {
+            return Ok(None);
+        }
+    }
+    let conflict_type: Option<String> = db
+        .query_row(
+            "SELECT json_type(body) FROM local WHERE key='syncConflicts'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(err)?;
+    if let Some(kind) = conflict_type {
+        if kind != "array" {
+            return Err("Invalid conflict state".into());
+        }
+        // SQLite filters identities before Rust materializes any alternative
+        // payload; a conflicted library must not turn detail into a book read.
+        let mut statement = db.prepare(
+            "SELECT c.value FROM local l, json_each(l.body) c WHERE l.key='syncConflicts' AND EXISTS (SELECT 1 FROM json_each(c.value) p WHERE p.key='recipeId' AND p.value=?1)",
+        ).map_err(err)?;
+        let rows = statement
+            .query_map([&id.0], |r| r.get::<_, String>(0))
+            .map_err(err)?;
+        for row in rows {
+            let conflict: Value = serde_json::from_str(&row.map_err(err)?).map_err(err)?;
+            if conflict["recipeId"] == id.0
+                && conflict["versions"]
+                    .as_array()
+                    .ok_or("Invalid conflict versions")?
+                    .iter()
+                    .any(|v| !v["recipe"].is_null() && validate_recipe(&v["recipe"]).is_err())
+            {
+                return Ok(None);
+            }
+        }
+    }
+    if head_identity_invalid {
+        return Err("Stored revision identity mismatch; no data changed".into());
+    }
+    crate::sync_store::validate_recipe_history(db, &id.0)?;
+    Ok(Some(recipe))
 }
 fn readable_recipes(db: &Connection) -> Result<(Vec<Value>, Vec<String>), String> {
     let mut statement = db
@@ -253,6 +338,95 @@ pub fn save(
     saved_at: &str,
 ) -> Result<i64, String> {
     save_inner(db, expected, book, saved_at, false)
+}
+
+/// A token for a validated collection on this connection. Generation covers
+/// normal writers (including sync); data_version also detects external writes.
+pub(crate) fn version(db: &Connection) -> Result<(i64, i64), String> {
+    let generation = db
+        .query_row("SELECT generation FROM state WHERE id=1", [], |r| r.get(0))
+        .map_err(err)?;
+    let data_version = db
+        .query_row("PRAGMA data_version", [], |r| r.get(0))
+        .map_err(err)?;
+    Ok((generation, data_version))
+}
+
+/// Only Service's validated, version-bound cache may use this path. Unchanged
+/// bodies retain their validation; canonical validation applies to every input.
+pub(crate) fn save_recipe_changes(
+    db: &mut Connection,
+    token: (i64, i64),
+    old: &Snapshot,
+    book: &Book,
+    changed: &[crate::recipe::Recipe],
+    deleted: &[crate::recipe::RecipeId],
+    saved_at: &str,
+) -> Result<i64, String> {
+    crate::backup::validate_collection(changed).map_err(err)?;
+    if book.recipes.len() > crate::recipe::MAX_ITEMS {
+        return Err("Collection exceeds limit".into());
+    }
+    // Keep the existing whole-book byte bound and previous-save recovery. This
+    // serialization is necessary; reparsing/validating every recipe is not.
+    let mut value = serde_json::to_value(book).map_err(err)?;
+    value
+        .as_object_mut()
+        .ok_or("Invalid collection")?
+        .remove("shoppingSetup");
+    if serde_json::to_vec(&value).map_err(err)?.len() > crate::recipe::MAX_COLLECTION_BYTES {
+        return Err("Collection exceeds 32 MB native save limit.".into());
+    }
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(err)?;
+    if version(&tx)? != token || old.generation != token.0 {
+        return Err("STALE_WRITE: collection changed; reload before saving.".into());
+    }
+    let ids: HashSet<&str> = changed
+        .iter()
+        .map(|r| r.id.0.as_str())
+        .chain(deleted.iter().map(|id| id.0.as_str()))
+        .collect();
+    let conflicts = local(&tx, "syncConflicts")?.unwrap_or(json!([]));
+    if conflicts
+        .as_array()
+        .ok_or("Invalid conflict state")?
+        .iter()
+        .any(|c| {
+            c["recipeId"].as_str().is_some_and(|id| {
+                ids.contains(id) && !old.set_aside.iter().any(|excluded| excluded == id)
+            })
+        })
+    {
+        return Err("Resolve this recipe's sync conflict before editing it.".into());
+    }
+    if old.set_aside.is_empty() {
+        put_local(
+            &tx,
+            "previous",
+            &json!({"savedAt":saved_at,"book":old.book}),
+        )?;
+    }
+    for recipe in changed {
+        let value = serde_json::to_value(recipe).map_err(err)?;
+        let rev = record(&tx, &recipe.id.0, json!({"kind":"put","recipe":value}))?;
+        tx.execute("INSERT INTO recipes VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET body=excluded.body,revision_id=excluded.revision_id", params![recipe.id.0,value.to_string(),rev]).map_err(err)?;
+    }
+    for id in deleted {
+        record(&tx, &id.0, json!({"kind":"delete","deletedAt":saved_at}))?;
+        tx.execute("DELETE FROM recipes WHERE id=?1", [&id.0])
+            .map_err(err)?;
+    }
+    put_local(&tx, "deletedRecipes", &json!(book.deleted_recipes))?;
+    let generation = token.0.checked_add(1).ok_or("Generation overflow")?;
+    tx.execute("UPDATE state SET generation=?1 WHERE id=1", [generation])
+        .map_err(err)?;
+    if old.set_aside.is_empty() {
+        crate::sync_store::compact_recipes(&tx, &ids)?;
+    }
+    tx.commit().map_err(err)?;
+    Ok(generation)
 }
 fn save_inner(
     db: &mut Connection,

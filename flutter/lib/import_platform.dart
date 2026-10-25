@@ -7,9 +7,14 @@ import 'src/rust/api.dart';
 import 'import_page_fetcher.dart';
 
 class SmartImportSettings {
-  const SmartImportSettings({required this.hasKey, required this.model});
+  const SmartImportSettings({
+    required this.hasKey,
+    required this.model,
+    this.effort = 'standard',
+  });
   final bool hasKey;
   final String model;
+  final String effort;
 }
 
 class ImportPhoto {
@@ -51,7 +56,11 @@ class ProviderReply {
 
 abstract class ImportPlatform {
   Future<SmartImportSettings> settings();
-  Future<void> saveSettings({required String key, required String model});
+  Future<void> saveSettings({
+    required String key,
+    required String model,
+    String effort = 'standard',
+  });
   Future<void> removeKey();
   Future<String?> pickText();
   Future<PhotoSelection> pickPhotos({
@@ -98,12 +107,20 @@ class NativeImportPlatform
     return SmartImportSettings(
       hasKey: result['hasKey'] as bool,
       model: result['model'] as String,
+      effort: result['effort'] == 'thorough' ? 'thorough' : 'standard',
     );
   }
 
   @override
-  Future<void> saveSettings({required String key, required String model}) =>
-      _channel.invokeMethod<void>('saveSettings', {'key': key, 'model': model});
+  Future<void> saveSettings({
+    required String key,
+    required String model,
+    String effort = 'standard',
+  }) => _channel.invokeMethod<void>('saveSettings', {
+    'key': key,
+    'model': model,
+    'effort': effort,
+  });
   @override
   Future<void> removeKey() => _channel.invokeMethod<void>('removeKey');
   @override

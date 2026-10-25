@@ -23,6 +23,7 @@ void main() {
         c.draft.steps.addAll(
           List.generate(8, (i) => EditableStep('Synthetic step $i')),
         );
+        section.rows.last.showNote = true;
         await editor(tester, c);
         final values = {
           'Title': 'Updated title',
@@ -38,7 +39,6 @@ void main() {
           await enterFieldText(tester, field(entry.key), entry.value);
         }
         final row = section.rows.last;
-        row.showNote = true;
         for (final entry in {
           'amount': '3/4',
           'unit': 'cup',
@@ -74,6 +74,8 @@ void main() {
           await enterFieldText(tester, field(entry.key), entry.value);
         }
         FocusManager.instance.primaryFocus?.unfocus();
+        // Drain the native field's queued caret reveal before a programmatic jump.
+        await tester.pumpAndSettle();
         await reveal(tester, field('Title'));
         final title = tester.widget<TextField>(field('Title')).controller!;
         if (!appendAfterReturn) {

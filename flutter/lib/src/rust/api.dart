@@ -10,7 +10,9 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'api.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `prompt_tags`, `service`, `sync_error`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderState`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`
 
 Future<Amount> parseAmount({required String written}) =>
     RustLib.instance.api.crateApiParseAmount(written: written);
@@ -126,6 +128,12 @@ abstract class CoreSession implements RustOpaqueInterface {
   Future<CollectionSnapshot> delete({
     required int generation,
     required String id,
+    required Operation operation,
+  });
+
+  Future<CollectionSnapshot> deleteMany({
+    required int generation,
+    required List<String> ids,
     required Operation operation,
   });
 
@@ -264,6 +272,8 @@ abstract class ProviderTask implements RustOpaqueInterface {
 
   Future<AiReview> review();
 
+  Future<void> setEffort({required String effort});
+
   Future<String?> validationProblem();
 
   Future<List<String>> warnings();
@@ -280,22 +290,30 @@ abstract class RestorePreview implements RustOpaqueInterface {
 abstract class ShoppingUndo implements RustOpaqueInterface {}
 
 class AiReview {
+  /// True only when the app used the recitation rewrite fallback.
+  final bool rewrittenSteps;
   final List<String> guessedFields;
   final Uint32List guessedSteps;
 
-  const AiReview({required this.guessedFields, required this.guessedSteps});
+  const AiReview({
+    this.rewrittenSteps = false,
+    required this.guessedFields,
+    required this.guessedSteps,
+  });
 
   static Future<AiReview> default_() =>
       RustLib.instance.api.crateApiAiReviewDefault();
 
   @override
-  int get hashCode => guessedFields.hashCode ^ guessedSteps.hashCode;
+  int get hashCode =>
+      rewrittenSteps.hashCode ^ guessedFields.hashCode ^ guessedSteps.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is AiReview &&
           runtimeType == other.runtimeType &&
+          rewrittenSteps == other.rewrittenSteps &&
           guessedFields == other.guessedFields &&
           guessedSteps == other.guessedSteps;
 }

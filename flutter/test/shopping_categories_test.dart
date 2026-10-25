@@ -128,7 +128,17 @@ void main() {
         tester.getTopLeft(find.text('Produce').first).dy,
         lessThan(tester.getTopLeft(find.text('Pantry').first).dy),
       );
-      await tester.longPress(find.text('2–3 Carrots'));
+      // Text finders include semantics labels; the visual range stays compact
+      // while its accessible wording now says "to".
+      final quantity = find.text('2 to 3 Carrots');
+      expect(
+        tester
+            .widget<Text>(quantity)
+            .textSpan!
+            .toPlainText(includeSemanticsLabels: false),
+        '2–3 Carrots',
+      );
+      await tester.longPress(quantity);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Move to category'));
       await tester.pumpAndSettle();

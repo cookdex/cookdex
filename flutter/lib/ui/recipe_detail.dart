@@ -1,6 +1,7 @@
 import 'recipe_scale_control.dart';
 import 'pixel_scroll.dart';
 import '../ingredient_display.dart';
+import '../fraction_display.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -94,7 +95,11 @@ class _RecipeDetailState extends State<RecipeDetail> {
   }
 
   void _changed() {
-    if (widget.store.cachedDetail(widget.recipeId) != _recipe) _load();
+    if (widget.store.cachedDetail(widget.recipeId) != _recipe) {
+      _load();
+    } else {
+      setState(() {});
+    }
   }
 
   Future<void> _load() async {
@@ -296,13 +301,13 @@ class _RecipeDetailState extends State<RecipeDetail> {
                       icon: const Icon(Symbols.edit),
                     ),
                     IconButton(
-                      tooltip: recipe?.favorite == true
+                      tooltip: widget.store.isFavorite(widget.recipeId)
                           ? 'Unfavorite recipe'
                           : 'Favorite recipe',
                       onPressed: recipe == null ? null : _favorite,
                       icon: Icon(
                         Symbols.star,
-                        fill: recipe?.favorite == true ? 1 : 0,
+                        fill: widget.store.isFavorite(widget.recipeId) ? 1 : 0,
                       ),
                     ),
                     IconButton(
@@ -1029,8 +1034,9 @@ TextSpan _ingredientLabel(
     children: [
       if (quantity.isNotEmpty)
         TextSpan(
-          text: '$quantity ',
-          style: const TextStyle(fontWeight: FontWeight.w500),
+          text: '${displayFractions(quantity)} ',
+          semanticsLabel: '${spokenFractions(quantity)} ',
+          style: amountDisplayStyle,
         ),
       TextSpan(text: ingredient.optional ? '$name (optional)' : name),
     ],

@@ -6,12 +6,16 @@ use crate::{
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
+#[path = "provider_review.rs"]
+mod local_review;
 pub const REQUEST_LIMIT: usize = 16 * 1024 * 1024;
 pub const RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 pub const PHOTO_BASE64_LIMIT: usize = 12 * 1024 * 1024;
 pub const INSTRUCTION: &str = include_str!("import_rules.txt");
+pub const REWRITE_STEPS: &str = "For this import only, rewrite all directions in your own words while retaining every source cooking fact, ingredient and amount exactly. This overrides copying source step wording. Mark every rewritten step in aiGuessedSteps. Do not rewrite ingredient amounts or add unmentioned ingredients.";
+pub const RECITATION_MESSAGE: &str = "Gemini could not import this recipe. Try copying the text with Google Lens and pasting it into Smart Import.";
 pub const MAX_OUTPUT_TOKENS: u32 = 65_536;
-const JSON_OUTPUT: &str = "Return JSON with every schema field. Set status to ok when any title, ingredients or steps can be extracted; otherwise use unreadable, not_a_recipe or retrieval_failed and give a short reason. Always return the status and reason fields. Use empty strings/arrays for absent fields. Set aiGuessedFields to every guessed nonempty servings, totalTime or tags field (shown as AI guess). Set aiGuessedSteps to the zero-based indices of EVERY step whose wording you wrote (shown as AI-written), including steps based on source facts or expanded from fragments. Do not mark verbatim copied steps or source-provided fields; unit-abbreviation normalization alone does not make a copied step AI-written.";
+const JSON_OUTPUT: &str = "Return JSON with every schema field. Set status to ok when any title, ingredients or steps can be extracted; otherwise use unreadable, not_a_recipe or retrieval_failed and give a short reason. Always return the status and reason fields. Use empty strings/arrays for absent fields. Set aiGuessedFields to every guessed nonempty servings, prepTime, cookTime, totalTime or tags field (shown as AI guess). Set aiGuessedSteps to the zero-based indices of EVERY step whose wording you wrote (shown as AI-written), including inserted missing actions, steps based on source facts or expanded from fragments, and deliberately rewritten fallback steps. Do not mark verbatim copied steps or source-provided fields; unit-abbreviation normalization alone does not make a copied step AI-written.";
 pub fn json_prompt(mode: &Mode, photos: bool, tags: &[String]) -> String {
     let mode_rules = if *mode == Mode::UrlRecipe {
         "Read only the supplied downloaded recipe text. Do not fetch source links."
@@ -101,7 +105,7 @@ pub fn schema(_mode: &Mode) -> Value {
     let ingredients = json!({"type":"array","items":object(json!({"amount":string,"unit":string,"name":string,"prepNote":string,"section":string,"optional":{"type":"boolean"}}))});
     let list = json!({"type":"array","items":string});
     object(
-        json!({"status":{"type":"string","enum":["ok","unreadable","not_a_recipe","retrieval_failed"]},"reason":string,"title":string,"description":string,"servings":string,"prepTime":string,"cookTime":string,"totalTime":string,"source":string,"notes":string,"tags":list,"steps":list,"ingredients":ingredients,"aiGuessedFields":{"type":"array","items":{"type":"string","enum":["servings","totalTime","tags"]}},"aiGuessedSteps":{"type":"array","items":{"type":"integer","minimum":0}}}),
+        json!({"status":{"type":"string","enum":["ok","unreadable","not_a_recipe","retrieval_failed"]},"reason":string,"title":string,"description":string,"servings":string,"prepTime":string,"cookTime":string,"totalTime":string,"source":string,"notes":string,"tags":list,"steps":list,"ingredients":ingredients,"aiGuessedFields":{"type":"array","items":{"type":"string","enum":["servings","prepTime","cookTime","totalTime","tags"]}},"aiGuessedSteps":{"type":"array","items":{"type":"integer","minimum":0}}}),
     )
 }
 pub fn request(input: &Input, model: &str, retry: bool) -> Result<Vec<u8>> {
@@ -120,6 +124,26 @@ pub fn request_with_problems(
     model: &str,
     problems: Option<&str>,
 ) -> Result<Vec<u8>> {
+    request_with_effort(input, model, problems, "standard")
+}
+pub fn request_with_effort(
+    input: &Input,
+    model: &str,
+    problems: Option<&str>,
+    effort: &str,
+) -> Result<Vec<u8>> {
+    request_with_options(input, model, problems, effort, false)
+}
+pub fn request_with_options(
+    input: &Input,
+    model: &str,
+    problems: Option<&str>,
+    effort: &str,
+    rewrite: bool,
+) -> Result<Vec<u8>> {
+    if !["standard", "thorough"].contains(&effort) {
+        return Err(Error::Validation);
+    }
     if model.is_empty()
         || model.len() > 120
         || !model
@@ -172,11 +196,19 @@ pub fn request_with_problems(
     if let Some(problems) = problems {
         instruction.push_str(&format!("\nThe previous reply failed local validation: {}. Correct these specific problems and return a complete response.", safe_reason(problems)));
     }
+    if rewrite {
+        instruction.push_str("\n");
+        instruction.push_str(REWRITE_STEPS);
+    }
     let mut payload = json!({"model":model,"input":parts,"system_instruction":instruction,"response_format":{"type":"text","mime_type":"application/json","schema":schema(&input.mode)},"generation_config":{"max_output_tokens":MAX_OUTPUT_TOKENS},"store":false});
     // Retain the tested existing baseline explicitly. Low did not improve the
     // round-2 matrix; regular Flash was unavailable. This is not a quality win.
-    if model == "gemini-3.5-flash-lite" {
-        payload["generation_config"]["thinking_level"] = json!("minimal");
+    {
+        payload["generation_config"]["thinking_level"] = json!(if effort == "thorough" {
+            "high"
+        } else {
+            "minimal"
+        });
     }
     let body = serde_json::to_vec(&payload).map_err(|_| Error::Validation)?;
     if body.len() >= REQUEST_LIMIT {
@@ -195,6 +227,30 @@ fn problem(message: impl Into<String>, retryable: bool) -> ResponseProblem {
         retryable,
     }
 }
+/// Recognize only explicit provider recitation diagnostics, never source/model text.
+pub fn is_recitation(bytes: &[u8]) -> bool {
+    if bytes.len() > RESPONSE_LIMIT {
+        return false;
+    }
+    let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
+        return false;
+    };
+    let reason = |value: &Value| {
+        value
+            .as_str()
+            .is_some_and(|s| s.eq_ignore_ascii_case("RECITATION"))
+    };
+    reason(&v["finish_reason"])
+        || reason(&v["error"]["status"])
+        || reason(&v["error"]["code"])
+        || v["error"]["message"].as_str().is_some_and(|s| {
+            s.to_ascii_lowercase()
+                .contains("blocked due to copyright/recitation")
+        })
+        || v["steps"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|s| reason(&s["finish_reason"])))
+}
 pub fn response_text(bytes: &[u8]) -> std::result::Result<String, ResponseProblem> {
     if bytes.len() > RESPONSE_LIMIT {
         return Err(problem(
@@ -208,6 +264,9 @@ pub fn response_text(bytes: &[u8]) -> std::result::Result<String, ResponseProble
             true,
         )
     })?;
+    if is_recitation(bytes) {
+        return Err(problem(RECITATION_MESSAGE, false));
+    }
     if value["status"] == "incomplete"
         || value["finish_reason"] == "MAX_TOKENS"
         || value["finish_reason"] == "max_output_tokens"
@@ -329,10 +388,15 @@ pub fn review_response(bytes: &[u8], input: &Input, recipe: &mut Recipe) -> Resu
     let allowed = allowed_tags(input);
     recipe.content.tags.retain(|tag| allowed.contains(tag));
     recipe.content.tags.truncate(3);
+    if input.photos.is_empty() {
+        return Ok(local_review::from_source(&input.text, recipe));
+    }
     review
         .ai_guessed_fields
         .retain(|field| match field.as_str() {
             "servings" => !recipe.content.servings.is_empty(),
+            "prepTime" => !recipe.content.prep_time.is_empty(),
+            "cookTime" => !recipe.content.cook_time.is_empty(),
             "totalTime" => !recipe.content.total_time.is_empty(),
             "tags" => !recipe.content.tags.is_empty(),
             _ => false,

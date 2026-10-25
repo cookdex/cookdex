@@ -12,6 +12,7 @@ void main() {
     ('320-large', const Size(320, 1100), 2.0),
     ('390-large', const Size(390, 1100), 2.0),
     ('tablet', const Size(1280, 900), 1.0),
+    ('desktop', const Size(1440, 900), 1.0),
   ]) {
     testWidgets(
       '${profile.$1}: package unit and amounts fit before and after activation',
@@ -25,7 +26,7 @@ void main() {
           ),
           EditableIngredient(
             amount: '6–7',
-            unit: '(14 oz) cans',
+            unit: profile.$2.width >= 600 ? '(8 oz) container' : '(14 oz) cans',
             name: 'beans',
           ),
         ];
@@ -44,6 +45,22 @@ void main() {
           final unit = find.byKey(ValueKey('${row.id}-unit'));
           final name = find.byKey(ValueKey('${row.id}-name'));
           await reveal(tester, name);
+          final allowance = TextPainter(
+            text: TextSpan(
+              text: profile.$2.width >= 600
+                  ? '(14 oz) containers'
+                  : '(14 oz) cans',
+              style: Theme.of(tester.element(unit)).textTheme.bodyMedium,
+            ),
+            textDirection: TextDirection.ltr,
+            textScaler: TextScaler.linear(profile.$3),
+          )..layout();
+          expect(
+            tester.getSize(unit).width,
+            closeTo(allowance.width + 27, .5),
+            reason: 'Fixed phone allowance is unchanged; wide layouts reserve containers',
+          );
+          allowance.dispose();
           expect(
             tester.getSize(name).width,
             greaterThan(tester.getSize(unit).width),

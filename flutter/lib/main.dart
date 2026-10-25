@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'app_platform.dart';
 import 'app_identity.dart';
@@ -12,9 +14,15 @@ import 'recipe_store.dart';
 import 'src/rust/api.dart';
 import 'ui/app.dart';
 import 'settings_platform.dart';
+import 'startup_splash.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks([
+      'Noto Sans',
+    ], await rootBundle.loadString('assets/fonts/OFL.txt'));
+  });
   // Owner-selected shipping feel. Profiling config stays separate from delivery.
   if (Platform.isAndroid) {
     GestureBinding.instance.resamplingEnabled = true;
@@ -60,34 +68,32 @@ Future<void> main(List<String> args) async {
     }
     final store = RecipeStore(RustRecipeRepository(session), preferences);
     await store.initialize();
-    runApp(
-      CookdexApp(
-        store: store,
-        platform: platform,
-        drafts: FileDraftStorage('$root/editor-draft.json'),
-        importDrafts: FileDraftStorage(
-          '$root/import-draft.json',
-          limitBytes: 16 * 1024 * 1024,
-        ),
+    final app = CookdexApp(
+      store: store,
+      platform: platform,
+      drafts: FileDraftStorage('$root/editor-draft.json'),
+      importDrafts: FileDraftStorage(
+        '$root/import-draft.json',
+        limitBytes: 16 * 1024 * 1024,
       ),
     );
+    runApp(Platform.isAndroid ? StartupReady(store: store, child: app) : app);
   } catch (_) {
-    runApp(
-      MaterialApp(
-        theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
-        home: const Scaffold(
-          body: SafeArea(
-            child: Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  '$appName could not open its private storage. Close the app and try again.',
-                ),
+    final error = MaterialApp(
+      theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
+      home: const Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                '$appName could not open its private storage. Close the app and try again.',
               ),
             ),
           ),
         ),
       ),
     );
+    runApp(Platform.isAndroid ? StartupReady(child: error) : error);
   }
 }

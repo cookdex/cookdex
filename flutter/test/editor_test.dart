@@ -314,22 +314,26 @@ void main() {
     'review labels identify guessed metadata and follow written steps',
     (tester) async {
       final (c, _, _) = await controller();
-      c.draft.aiGuessedFields.addAll(['servings', 'totalTime', 'tags']);
+      c.draft.aiGuessedFields.addAll([
+        'servings',
+        'prepTime',
+        'cookTime',
+        'totalTime',
+        'tags',
+      ]);
       c.draft.steps.first.aiGuess = true;
       c.draft.steps.first.text = 'Mix ingredients.';
       c.draft.steps.add(EditableStep('Original instruction.'));
       await editor(tester, c);
       await reveal(tester, find.text('AI guess').first);
-      expect(find.text('AI guess'), findsNWidgets(2));
-      expect(find.text('Total time: AI guess'), findsOneWidget);
+      expect(find.text('AI guess'), findsNWidgets(5));
       await reveal(tester, find.text('AI-written'));
       expect(find.text('AI-written'), findsOneWidget);
       c.reorder(c.draft.steps, 0, 1);
       await tester.pumpAndSettle();
       expect(c.draft.steps.last.aiGuess, true);
       await reveal(tester, find.text('AI guess').first);
-      expect(find.text('AI guess'), findsNWidgets(2));
-      expect(find.text('Total time: AI guess'), findsOneWidget);
+      expect(find.text('AI guess'), findsNWidgets(5));
       await reveal(tester, find.text('AI-written'));
       expect(find.text('AI-written'), findsOneWidget);
       c.draft.aiGuessedFields.clear();

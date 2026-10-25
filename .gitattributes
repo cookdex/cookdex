@@ -2,3 +2,5 @@
 flutter/windows/flutter/generated_plugin_registrant.cc text eol=lf
 flutter/windows/flutter/generated_plugin_registrant.h text eol=lf
 flutter/windows/flutter/generated_plugins.cmake text eol=lf
+# The selected Smart Import rule snapshot has an exact-byte contract hash.
+flutter/rust/core/src/import_rules.txt text eol=lf

@@ -72,6 +72,7 @@ class FakeRepository implements RecipeRepository {
   final events = StreamController<CollectionEvent>.broadcast(sync: true);
   Completer<Recipe?>? detailGate;
   Completer<CollectionSnapshot>? snapshotGate;
+  Completer<void>? favoriteGate;
   CollectionSnapshot get current => CollectionSnapshot(
     setAsideCount: 0,
     shoppingCategories: const [ShoppingCategory(id: 'other', name: 'Other')],
@@ -129,6 +130,7 @@ class FakeRepository implements RecipeRepository {
     bool value,
   ) async {
     favoriteCalls++;
+    await favoriteGate?.future;
     if (generation != this.generation) {
       throw const ServiceError(code: ErrorCode.staleWrite, message: 'Changed');
     }
@@ -139,7 +141,7 @@ class FakeRepository implements RecipeRepository {
         fields: old.fields,
         favorite: value,
         createdAt: old.createdAt,
-        updatedAt: '2026-02-01',
+        updatedAt: old.updatedAt,
         revision: old.revision + 1,
       ),
     );
@@ -198,6 +200,56 @@ void main() {
     prefs.dispose();
   });
 
+  test(
+    'favorite is synchronous at 500 recipes and failure rolls back',
+    () async {
+      for (var i = 2; i < 500; i++) {
+        repository.recipes['r$i'] = recipe('r$i');
+      }
+      await store.refresh();
+      final gate = repository.favoriteGate = Completer<void>();
+      final saving = store.toggleFavorite('a');
+      expect(store.isFavorite('a'), true);
+      expect(repository.recipes['a']!.favorite, false);
+      final failure = expectLater(saving, throwsStateError);
+      gate.completeError(StateError('Synthetic save failure'));
+      await failure;
+      expect(store.isFavorite('a'), false);
+      await settle();
+    },
+  );
+  test(
+    'rapid favorite taps retain the latest intent while saves are queued',
+    () async {
+      final gate = repository.favoriteGate = Completer<void>();
+      final first = store.toggleFavorite('a');
+      final second = store.toggleFavorite('a');
+      final third = store.toggleFavorite('a');
+      expect(store.isFavorite('a'), true);
+      gate.complete();
+      await Future.wait([first, second, third]);
+      expect(store.isFavorite('a'), true);
+      expect(repository.recipes['a']!.favorite, true);
+      expect(repository.favoriteCalls, 3);
+    },
+  );
+  test(
+    'favorite and unfavorite preserve Recently edited ordering and timestamps',
+    () async {
+      repository.changed(recipe('b', title: 'Soup', revision: 4));
+      await settle();
+      prefs.setSort(RecipeSort.edited);
+      final order = store.visibleRecipes.map((r) => r.id).toList();
+      final timestamps = {for (final r in store.summaries) r.id: r.updatedAt};
+      for (var i = 0; i < 2; i++) {
+        await store.toggleFavorite('a');
+        expect(store.visibleRecipes.map((r) => r.id), order);
+        expect({
+          for (final r in store.summaries) r.id: r.updatedAt,
+        }, timestamps);
+      }
+    },
+  );
   test(
     'five-field literal every-word search stays entirely in cached summaries',
     () {

@@ -10,6 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 class _Platform implements ImportPlatform {
   bool hasKey = true;
   String model = 'chosen-model';
+  String effort = 'standard';
+  String? receivedEffort;
   String? receivedKey;
   String? receivedModel;
   bool failSave = false;
@@ -22,21 +24,24 @@ class _Platform implements ImportPlatform {
   @override
   Future<SmartImportSettings> settings() async {
     if (failLoad) throw StateError('synthetic read failure');
-    return SmartImportSettings(hasKey: hasKey, model: model);
+    return SmartImportSettings(hasKey: hasKey, model: model, effort: effort);
   }
 
   @override
   Future<void> saveSettings({
     required String key,
     required String model,
+    String effort = 'standard',
   }) async {
     saves++;
     receivedKey = key;
     receivedModel = model;
+    receivedEffort = effort;
     if (saveGate != null) await saveGate!.future;
     if (failSave) throw StateError('synthetic save failure');
     if (key.isNotEmpty) hasKey = true;
     this.model = model;
+    this.effort = effort;
   }
 
   @override
@@ -137,6 +142,71 @@ bool _testEnabled(WidgetTester tester) =>
     null;
 
 void main() {
+  testWidgets('Advanced starts collapsed and effort saves without testing', (
+    tester,
+  ) async {
+    final service = _Service()..platform.model = 'gemini-3.5-flash-lite';
+    var tests = 0;
+    await _pump(tester, service, testKey: () async => tests++);
+    expect(find.text('Effort'), findsNothing);
+    await _tap(tester, 'Advanced');
+    expect(find.text('Standard'), findsOneWidget);
+    await _tap(tester, 'Standard');
+    await _tap(tester, 'Thorough');
+    expect(_testEnabled(tester), isFalse);
+    await _tap(tester, 'Save');
+    expect(service.platform.receivedEffort, 'thorough');
+    expect(service.platform.receivedModel, 'gemini-3.5-flash-lite');
+    expect(service.platform.receivedKey, isEmpty);
+    expect(_testEnabled(tester), isTrue);
+    expect(tests, 0);
+  });
+
+  testWidgets(
+    'reset restores recommended model and effort but keeps entered key',
+    (tester) async {
+      final service = _Service()..platform.effort = 'thorough';
+      await _pump(tester, service);
+      await tester.enterText(_field('Gemini key'), 'synthetic-new-key');
+      await _tap(tester, 'Advanced');
+      expect(find.text('Thorough'), findsOneWidget);
+      await _tap(tester, 'Reset to recommended');
+      expect(find.text('Standard'), findsOneWidget);
+      expect(find.text('Recommended'), findsOneWidget);
+      expect(_field('Custom model ID'), findsNothing);
+      expect(service.platform.saves, 0);
+      expect(service.platform.removes, 0);
+      await _tap(tester, 'Save');
+      expect(service.platform.receivedKey, 'synthetic-new-key');
+      expect(service.platform.receivedModel, 'gemini-3.5-flash-lite');
+      expect(service.platform.receivedEffort, 'standard');
+    },
+  );
+
+  testWidgets('custom model choice requires an ID and persists with effort', (
+    tester,
+  ) async {
+    final service = _Service()
+      ..platform.model = 'gemini-3.5-flash-lite'
+      ..platform.effort = 'thorough';
+    await _pump(tester, service);
+    await _tap(tester, 'Advanced');
+    await _tap(tester, 'Recommended');
+    await _tap(tester, 'Custom model ID');
+    final save = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Save'),
+    );
+    expect(save.onPressed, isNull);
+    await tester.enterText(
+      _field('Custom model ID'),
+      ' synthetic-custom-model ',
+    );
+    await _tap(tester, 'Save');
+    expect(service.platform.receivedModel, 'synthetic-custom-model');
+    expect(service.platform.receivedEffort, 'thorough');
+    expect(service.platform.hasKey, isTrue);
+  });
+
   testWidgets('saved key stays hidden and testing requires an explicit tap', (
     tester,
   ) async {
@@ -162,7 +232,8 @@ void main() {
     await tester.pump();
     expect(_testEnabled(tester), isFalse);
     await tester.enterText(_field('Gemini key'), '');
-    await tester.enterText(_field('Model'), 'unsaved-model');
+    await _tap(tester, 'Advanced');
+    await tester.enterText(_field('Custom model ID'), 'unsaved-model');
     await tester.pump();
     expect(_testEnabled(tester), isFalse);
     expect(tests, 1);
@@ -195,7 +266,8 @@ void main() {
     final service = _Service();
     var tests = 0;
     await _pump(tester, service, testKey: () async => tests++);
-    await tester.enterText(_field('Model'), ' another-model ');
+    await _tap(tester, 'Advanced');
+    await tester.enterText(_field('Custom model ID'), ' another-model ');
     await _tap(tester, 'Save');
     expect(service.platform.receivedKey, '');
     expect(service.platform.receivedModel, 'another-model');
@@ -359,6 +431,8 @@ void main() {
     tester,
   ) async {
     await _pump(tester, _Service(), width: 320, textScale: 2);
+    await _tap(tester, 'Advanced');
+    await _tap(tester, 'Reset to recommended');
     for (final label in [
       'Save',
       'Test key',

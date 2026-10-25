@@ -1,5 +1,20 @@
 [
   {
+    "classification": "false-positive",
+    "reason": "Reviewed Android View listener and AndroidX lifecycle class descriptors, Flutter scale/persistent-hash-map private symbols, and two four-byte matches inside binary rodata. No personal identifier or filesystem location. Exact member/string/context only.",
+    "fingerprints": [
+      "63d0aa68b3892378c78956a1889f7d1cd25feda8aa3c17de88110f4b9e91a03b",
+      "6a40eeb08dc91d510bf72a53248eda93478a54059775968369aef3d9d1bd6566",
+      "cf995e21222aad16eb86eefbd5a404439187bb40606c1001c8e62b1083086856",
+      "d262f7cfd027eba2fb92c8c82055197864e7aadd039c66d5cfb5d9f69e278ae3",
+      "62562d634b602f469417df4590d11062ba604d1caad52751ac34adde824ff1f7",
+      "7cc3bde1118353f4d5a6c4e0a26721c9b9ec0a2a99235d09e333891c4416e38e",
+      "823fc83d52151c8db4b4cf4093d3f4988d0f7907369c526cd8bfb82cc872cef9",
+      "f08b8405f52b01e3e9746887ecd55ef0ca3f7694c897b20bd7533237429ae42b",
+      "11e3713a1481a920abeb710f6dbb4c345412d37fbf7098a53fe551533747c5f0"
+    ]
+  },
+  {
     "classification": "generic-build-path",
     "reason": "Reviewed generic Rust compiler library paths in the Windows bridge for decimal parsing and IP address support; no personal component. Exact member/string/context only.",
     "fingerprints": [
@@ -1578,6 +1593,119 @@
       "5cbeaf98a5ae0bc78e2361d44f7bd53004fab9846cf00d0d399c8f0ef45ed79b",
       "5f8391b02361ccc2e1820570eeadbfcd26bd6f322cfdd2b300c4f3344ec86e27",
       "83169de1fc3fb8f05e5da41c149f735d89b2f7244626f66fb7051b27b7ab4284"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed four-byte compiled Dart fragment with a drive-root-like suffix; the complete fragment contains no filesystem location or owner identifier.",
+    "fingerprints": [
+      "c74fd9bbdbec6ad105bd942e06e8701785bba5a0eb76ed1dd4a052ce9d2cf5e1"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed Flutter private PointerPanZoom symbol with its numeric Dart library suffix and constructor name; not an email address.",
+    "fingerprints": [
+      "defee1799e0c1fbb549d79270c0945267685c278e00d89d24f8f82ade323fe66"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed generic connection-timeout message adjacent to the app's View prompt label in compiled Dart data; no recorded hostname or device value.",
+    "fingerprints": [
+      "80d7965150c9ad6afe09cb2c8ace405426b0375385c3f7b837891a24f7c49984"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed Dart SDK private Future.zoneValue constructor symbol with its numeric library suffix; matches the pinned SDK async implementation and is not an email address.",
+    "fingerprints": [
+      "83defba2110b0ccfb7c8ce8a1779169d764693f217a97b03d2db9f3c42aac5ab"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed pinned Flutter persistent-hash-map/PointerPanZoom constructors and Dart GrowableList.filled compiler symbols with numeric library suffixes; not email addresses. A trailing printable byte in the filled symbol is compiled string adjacency.",
+    "fingerprints": [
+      "2995a0dc6b94ba23a4b3aaa16a2cdad4c22085ff6a9d305d00b6fe50762e5057",
+      "8068e02cdf5ca03cc0ee46e90cf4c9015042d790abc598fc6faa1895f08e89e1",
+      "5a57ae81776971f41c5f193e0a39dd7aba6544ae8f8dd8485572bb8eb02126fc",
+      "a813b8eed1736dcf522766d54a0b12fec4ed1ef6de8c12c8a78ca785839b6b8d",
+      "a2418c25e89b2054c2399054767746122cba70845851c57a29b091602a3d0530",
+      "5557c8c8d3d0cf6ff763e32cb997e3300bcd4528e0f1bc68a44078f787a1f2ed",
+      "3a76986211951f97fa1bf64042f7c78ecbf3023c771e5f616d396e18bba2fcca",
+      "898c2e9da0fe057cab2bad7c7b9f722bb222e348d6ef254746a0fdc6040cc756",
+      "327642c5f30a70982ae1eff84d4e71a42894d5ee747d0df18d1bee247f8c8b76"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed generic socket host-label text adjacent to Flutter HitTestableAtOrigin and engine PlatformConfigurationNativeApi symbols in compiled data; neither is a recorded host or device identifier.",
+    "fingerprints": [
+      "9ddcfd2369b00f9757266c88d20fdce8b43911f7824716b085a68d6ce92f1256",
+      "ee9d6526b5219951dbf550fa2003ca7231ff53723fd1c7760d87b4fda0edf9a7"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed binary outline/instruction bytes in the unmodified official Noto Sans Medium font (SHA-256 7bbe267354704c6ad18bde24b1dbc756c8e4380ca1c3f3c25c45ec5c4471510b); packaged font bytes match the source exactly. These are not paths or addresses.",
+    "fingerprints": [
+      "e8bc942442f127ec2af7624afbc8d1549405dbeb73db5f996adbda0353bddbe6",
+      "d28ea4ef19aea99e8e4491839f878fe57c1bf167dedc1bbcd15c45632f8e8629",
+      "6237c29d3488bda8453aeecb6f5c9682df1095d0f0cab6fbc1338b7ccf48beea",
+      "8853cbcc4ec24bf51a97deec53942c9f994e8a04c62b4d68de0cbc499fd3e15f",
+      "3cc8a6ffa65aa31768901a573cdc1d8d1771180784e88345f4c3d3daed29cc61",
+      "9f5bca8424e3e1c6c7b05704f792c8a1af731edf4eebbfa4cdc77b96507ab706",
+      "e6b82eea8736e7269b233d4e1119bb53d66b9771afeb4f3826781ea04e8e8e23",
+      "cdaaa8bc9b92c65ff3bf7fa9502410f039d9e879adc0db94ab516b218b5781d4",
+      "cf2d4c956db64e4ad547000061bfd1cdcd38b9cbfd4952cd538046b403d43669",
+      "8094339c97ab2bab83f9a34e36a3cfa76db59a105609080f19c06f5cde82077c",
+      "e2e9c4f0b4e138375c49e0331f214989462587f2dc305f50c6822385911d9192",
+      "743a92e1878ae30c5cb106a8568f774255cc39face7f6cfec72b89471687dcb1",
+      "ae379c769c2a20a4ad81631786b657ee298df3918f682fcefb06291c9ba91e0b",
+      "8ccfdb68bda9f6536ab49aa5ed06038de8fe4ced26c48714725b9f9b73c57dab",
+      "542e08e5778d34bf71e58f3580b741cb06b5e96bddf67c97cee7594aa48d2bbd",
+      "90320fbc662485597fbcd4e937195fdf39d086bfa136892b2fe04cdefc5ce0f5",
+      "e32a4284d036572a636dafc4839a7aaee64fd14a640d2bef71d1223049a8561c",
+      "efc50dacfa702d11f4b9abd8e060e6f282a0442e5fbecd9a66c13d9b817cca60",
+      "8a18adf5218ae9d6f4e2c6f3e50141458af73f36a744db9b942a79134df3a159",
+      "eeb6a72d52608d752dcd334ab7f9be695a5d03dca3f6fd9091b92dff608ed46f"
+    ]
+  },
+  {
+    "classification": "runtime-path",
+    "reason": "Reviewed standard ARM64 Flutter engine archive member name in APK container metadata; not a personal filesystem path.",
+    "fingerprints": [
+      "26942415beb53c6730558b630ee3c1ac0a751f5a4a36cc6c5c70162e976b0bf0"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed generic socket host-label string adjacent to Flutter primaryEnabled and HitTestableAtOrigin symbols in compiled Dart data; no recorded host or device identifier.",
+    "fingerprints": [
+      "bd1d90de7ec390d7624b371ec070230ce39030a33436de7e19ae96471fbf2d05",
+      "88347f0eb9ee488f5f7ea8d83dfeb1ec13421c8b5c3bc4027c0780c99dd920c6"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed short slash fragment in the native bridge executable instruction section; machine-code bytes, not a filesystem path.",
+    "fingerprints": [
+      "1aaf1cc689cda454677093392b48c981aa2db793af09c1ce1dfe7de95bc78741"
+    ]
+  },
+  {
+    "classification": "loopback",
+    "reason": "Reviewed loopback Cargo registry compiler-source metadata for serde_json; adjacent type names are compiled string boundaries, not a remote address or owner identifier.",
+    "fingerprints": [
+      "90cbb7a7a770e357cc659f3eba847073851e1b2c6d95e33d1ce9fa8a7332b090"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed four-byte fragment inside the 64-byte signed-content digest of the APK v2 signing block. Digest bytes resemble a drive-root path; no filesystem location or personal identifier. Exact member/string/context only.",
+    "fingerprints": [
+      "042750b2c4633c772816742fbd528f34b0462cddb4a57958a1d9d8758d430f39"
     ]
   }
 ]

@@ -124,7 +124,9 @@ class PackageHygieneTests(unittest.TestCase):
 
     def test_allowlist_has_only_runtime_and_helpers(self):
         names = hygiene.load_allowlist()
-        self.assertEqual(29, len(names))
+        self.assertEqual(31, len(names))
+        self.assertIn('data/flutter_assets/assets/fonts/NotoSans-Medium.ttf', names)
+        self.assertIn('data/flutter_assets/assets/fonts/OFL.txt', names)
         self.assertNotIn('SWITCH.md', names)
         self.assertNotIn('README.txt', names)
         self.assertIn('Create shortcut.cmd', names)

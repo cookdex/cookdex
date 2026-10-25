@@ -60,7 +60,8 @@ class SettingsPlatform {
     );
     if (response.status < 200 || response.status >= 300) {
       throw StateError(
-        'Gemini key test failed (HTTP ${response.status}). Check the key, model and quota.',
+        'Gemini key test failed (HTTP ${response.status}). Check the key, model and quota.'
+        '${settings.model != 'gemini-3.5-flash-lite' && [400, 403, 404, 429, 503].contains(response.status) ? ' Try switching back to the recommended model in Smart Import settings.' : ''}',
       );
     }
   }

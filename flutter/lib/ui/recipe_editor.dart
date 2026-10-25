@@ -1,4 +1,5 @@
 import 'pixel_scroll.dart';
+import 'idle_build_ahead.dart';
 
 import 'dart:async';
 
@@ -63,29 +64,12 @@ class _RecipeEditorState extends State<RecipeEditor>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     final summaries = c.store.summaries;
-    List<String> grouped(bool tags) => groupNameSuggestions([
-      for (final recipe in summaries)
-        for (final name in tags ? recipe.tags : recipe.ingredients)
-          NameObservation(
-            name: name,
-            recipeId: recipe.id,
-            updatedAt: recipe.updatedAt,
-          ),
-    ]).map((suggestion) => suggestion.name).toList();
     _ingredientNames = summaries.isEmpty
-        ? rankEditorSuggestions(
-            summaries.isEmpty
-                ? widget.ingredientSuggestions
-                : summaries.expand((recipe) => recipe.ingredients),
-          )
-        : grouped(false);
+        ? rankEditorSuggestions(widget.ingredientSuggestions)
+        : c.store.editorIngredientNames;
     _tags = summaries.isEmpty
-        ? rankEditorSuggestions(
-            summaries.isEmpty
-                ? widget.tagSuggestions
-                : summaries.expand((recipe) => recipe.tags),
-          )
-        : grouped(true);
+        ? rankEditorSuggestions(widget.tagSuggestions)
+        : c.store.editorTags;
     _unitTimer = Timer(
       const Duration(milliseconds: 350),
       () => unawaited(_loadUnitSuggestions()),
@@ -347,10 +331,8 @@ class _RecipeEditorState extends State<RecipeEditor>
     bool timeField = false,
     String? hint,
     List<String> suggestions = const [],
-  }) => Padding(
-    key: ValueKey('field-$key'),
-    padding: const EdgeInsets.only(bottom: 12),
-    child: _EditorField(
+  }) {
+    final field = _EditorField(
       key: ValueKey(key),
       label: label,
       hint: hint,
@@ -365,8 +347,31 @@ class _RecipeEditorState extends State<RecipeEditor>
           ? 'AI guess'
           : null,
       onChanged: (s) => _edit(() => change(s)),
-    ),
-  );
+    );
+    return Padding(
+      key: ValueKey('field-$key'),
+      padding: const EdgeInsets.only(bottom: 12),
+      child: timeField
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                field,
+                if (d.aiGuessedFields.contains('${key}Time'))
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 0, 0),
+                    child: Text(
+                      'AI guess',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+              ],
+            )
+          : field,
+    );
+  }
 
   Future<void> _rename(EditableSection section) async {
     final text = TextEditingController(text: section.name);
@@ -495,12 +500,14 @@ class _RecipeEditorState extends State<RecipeEditor>
               '1 1/2',
               minimum: _hintWidth('Amount', minimum: 80),
             ).clamp(0.0, constraints.maxWidth);
-            // Reserve a complete package unit on phones before typing, so
-            // activation does not resize the fields. Wider layouts retain
-            // their compact units unless a package size needs this room.
+            // Fixed allowances avoid resizing while typing. Phones retain
+            // their compact package width; wider layouts can show containers.
+            // Ordinary wide-layout units keep their existing compact width.
             final unitWidth =
-                (phone || sizedUnit
+                (phone
                         ? _hintWidth('(14 oz) cans') + 3
+                        : sizedUnit
+                        ? _hintWidth('(14 oz) containers') + 3
                         : _hintWidth('clove', minimum: 64))
                     .clamp(0.0, constraints.maxWidth);
             final nameWidth = _hintWidth(
@@ -981,8 +988,6 @@ class _RecipeEditorState extends State<RecipeEditor>
                                   : 16.0;
                               final entries = _ingredientEntries();
                               return _EditorScrollView(
-                                // Retain Flutter's default look-ahead cache;
-                                // zero cache increased field creation on flings.
                                 keyboardDismissBehavior:
                                     ScrollViewKeyboardDismissBehavior.manual,
                                 slivers: [
@@ -993,7 +998,7 @@ class _RecipeEditorState extends State<RecipeEditor>
                                       inset,
                                       0,
                                     ),
-                                    sliver: SliverList.list(
+                                    sliver: BuiltSliverList(
                                       children: [
                                         if (c.saving)
                                           const LinearProgressIndicator(),
@@ -1004,6 +1009,15 @@ class _RecipeEditorState extends State<RecipeEditor>
                                             ),
                                             child: Text(
                                               'Imported, review and save',
+                                            ),
+                                          ),
+                                        if (d.aiRewrittenSteps)
+                                          const Padding(
+                                            padding: EdgeInsets.only(
+                                              bottom: 12,
+                                            ),
+                                            child: Text(
+                                              "Google's AI wouldn't copy this recipe word for word, so it rewrote the steps in its own words. Check them against the original before saving.",
                                             ),
                                           ),
                                         for (final warning in d.importWarnings)
@@ -1206,25 +1220,6 @@ class _RecipeEditorState extends State<RecipeEditor>
                                             );
                                           },
                                         ),
-                                        if (d.aiGuessedFields.contains(
-                                          'totalTime',
-                                        ))
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 12,
-                                            ),
-                                            child: Text(
-                                              'Total time: AI guess',
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall
-                                                  ?.copyWith(
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .onSurfaceVariant,
-                                                  ),
-                                            ),
-                                          ),
                                         _heading(
                                           'Tags',
                                           actions: [
@@ -1347,7 +1342,16 @@ class _RecipeEditorState extends State<RecipeEditor>
                                         animation,
                                       ) => Material(child: child),
                                       itemCount: entries.length,
-                                      itemBuilder: (_, i) => entries[i].$2(i),
+                                      itemBuilder: (_, i) {
+                                        final child = entries[i].$2(i);
+                                        return KeepBuilt(
+                                          key: ValueKey((
+                                            'built-ingredient',
+                                            child.key,
+                                          )),
+                                          child: child,
+                                        );
+                                      },
                                       onReorderItem: (a, b) =>
                                           _reorderIngredientEntries(
                                             entries,
@@ -1397,8 +1401,13 @@ class _RecipeEditorState extends State<RecipeEditor>
                                         animation,
                                       ) => Material(child: child),
                                       itemCount: d.steps.length,
-                                      itemBuilder: (_, i) =>
-                                          _step(d.steps[i], i),
+                                      itemBuilder: (_, i) => KeepBuilt(
+                                        key: ValueKey((
+                                          'built-step',
+                                          d.steps[i].id,
+                                        )),
+                                        child: _step(d.steps[i], i),
+                                      ),
                                       onReorderItem: (a, b) =>
                                           c.reorder(d.steps, a, b),
                                     ),
@@ -1410,7 +1419,7 @@ class _RecipeEditorState extends State<RecipeEditor>
                                       inset,
                                       32,
                                     ),
-                                    sliver: SliverList.list(
+                                    sliver: BuiltSliverList(
                                       children: [
                                         Align(
                                           alignment: Alignment.centerLeft,
@@ -1465,11 +1474,13 @@ class _RecipeEditorState extends State<RecipeEditor>
   );
 }
 
-class _EditorScrollView extends PixelCustomScrollView {
+class _EditorScrollView extends StatelessWidget {
   const _EditorScrollView({
-    required super.slivers,
-    super.keyboardDismissBehavior,
+    required this.slivers,
+    required this.keyboardDismissBehavior,
   });
+  final List<Widget> slivers;
+  final ScrollViewKeyboardDismissBehavior keyboardDismissBehavior;
 
   @override
   Widget build(
@@ -1487,7 +1498,14 @@ class _EditorScrollView extends PixelCustomScrollView {
       }
       return false;
     },
-    child: super.build(context),
+    child: IdleBuildAhead(
+      allRows: true,
+      builder: (context, cache) => PixelCustomScrollView(
+        scrollCacheExtent: ScrollCacheExtent.pixels(cache),
+        slivers: slivers,
+        keyboardDismissBehavior: keyboardDismissBehavior,
+      ),
+    ),
   );
 }
 
@@ -2056,6 +2074,8 @@ class _EditorFieldState extends State<_EditorField> {
         key: _idleText,
         style: style,
         maxLines: widget.multiline ? null : 1,
+        // Single-line native fields lay out horizontally, even at spaces.
+        softWrap: widget.multiline,
         overflow: TextOverflow.clip,
       );
       return _cachedField = _activationGestures(

@@ -159,6 +159,7 @@ class NativeImportService
         model: settings.model,
         operation: operation,
       );
+      await task.setEffort(effort: settings.effort);
       while (true) {
         _check(epoch);
         final body = await task.request();

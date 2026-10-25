@@ -9,6 +9,8 @@
   "data/flutter_assets/FontManifest.json",
   "data/flutter_assets/NOTICES.Z",
   "data/flutter_assets/NativeAssetsManifest.json",
+  "data/flutter_assets/assets/fonts/NotoSans-Medium.ttf",
+  "data/flutter_assets/assets/fonts/OFL.txt",
   "data/flutter_assets/fonts/MaterialIcons-Regular.otf",
   "data/flutter_assets/packages/material_symbols_icons/lib/fonts/MaterialSymbolsOutlined.ttf",
   "data/flutter_assets/packages/material_symbols_icons/lib/fonts/MaterialSymbolsRounded.ttf",

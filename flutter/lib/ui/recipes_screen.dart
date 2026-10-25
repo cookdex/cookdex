@@ -1,8 +1,10 @@
 import 'pixel_scroll.dart';
+import 'idle_build_ahead.dart';
 import 'retained_screen.dart';
 import '../sync_controller.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -41,6 +43,7 @@ class RecipesScreen extends StatefulWidget {
     this.onSelectAll,
     this.onShareSelection,
     this.onShoppingSelection,
+    this.onDeleteSelection,
   });
 
   /// Null means normal browsing; an empty set keeps selection mode active.
@@ -49,7 +52,8 @@ class RecipesScreen extends StatefulWidget {
   final VoidCallback? onCloseSelection,
       onSelectAll,
       onShareSelection,
-      onShoppingSelection;
+      onShoppingSelection,
+      onDeleteSelection;
   final SyncPresentation? syncStatus;
   final SyncController? syncController;
   final VoidCallback? onSyncStatus, onHelp, onRestore;
@@ -72,6 +76,67 @@ class _RecipesScreenState extends State<RecipesScreen> {
   late final ScrollController _scroll;
   final _showAdd = ValueNotifier(true);
   final Map<String, _RecipeRow> _rows = {};
+  final _builtCards = BuiltRowBudget(32);
+  Widget? _list;
+  List<RecipeSummary>? _listRecipes;
+  int? _listColumns;
+  double? _listHeight;
+  RecipeView? _listView;
+  Set<String>? _listSelection;
+
+  Widget _recipeList(
+    List<RecipeSummary> recipes,
+    int columns,
+    double? cardHeight,
+  ) {
+    if (_list != null &&
+        identical(recipes, _listRecipes) &&
+        columns == _listColumns &&
+        cardHeight == _listHeight &&
+        widget.preferences.view == _listView &&
+        setEquals(widget.selectedIds, _listSelection)) {
+      return _list!;
+    }
+    _listRecipes = recipes;
+    _listColumns = columns;
+    _listHeight = cardHeight;
+    _listView = widget.preferences.view;
+    _listSelection = widget.selectedIds == null
+        ? null
+        : Set.of(widget.selectedIds!);
+    final view = widget.preferences.view;
+    final grid = columns > 1 && view == RecipeView.cards;
+    final rowIndices = <String, int>{
+      for (var i = 0; i < recipes.length; i += columns)
+        'group-${recipes[i].id}': i ~/ columns,
+    };
+    return _list = SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 112),
+      sliver: SliverList.builder(
+        itemCount: (recipes.length / columns).ceil(),
+        findChildIndexCallback: (key) =>
+            key is ValueKey<String> ? rowIndices[key.value] : null,
+        itemBuilder: (context, row) => KeepBuilt(
+          key: ValueKey('group-${recipes[row * columns].id}'),
+          enabled: view == RecipeView.cards,
+          budget: _builtCards,
+          weight: columns,
+          child: Padding(
+            padding: EdgeInsets.only(bottom: view == RecipeView.cards ? 10 : 0),
+            child: RecipeGridRow(
+              columns: columns,
+              fixedHeight: cardHeight,
+              children: [
+                for (var col = 0; col < columns; col++)
+                  if (row * columns + col < recipes.length)
+                    _row(recipes[row * columns + col], grid: grid),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _row(RecipeSummary recipe, {required bool grid}) {
     final existing = _rows[recipe.id];
@@ -210,39 +275,71 @@ class _RecipesScreenState extends State<RecipesScreen> {
     ),
   );
 
-  Widget _selectionBar() => Row(
-    children: [
-      IconButton(
+  Widget _selectionBar() => LayoutBuilder(
+    builder: (context, constraints) {
+      final label = Text(
+        '${widget.selectedIds!.length} selected',
+        style: Theme.of(context).textTheme.titleMedium,
+      );
+      final close = IconButton(
         tooltip: 'Close selection',
         onPressed: widget.onCloseSelection,
         icon: const Icon(Symbols.close),
-      ),
-      Expanded(
-        child: Text(
-          '${widget.selectedIds!.length} selected',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleMedium,
+      );
+      final actions = [
+        IconButton(
+          tooltip: 'Select all',
+          onPressed: widget.onSelectAll,
+          icon: const Icon(Symbols.select_all),
         ),
-      ),
-      IconButton(
-        tooltip: 'Select all',
-        onPressed: widget.onSelectAll,
-        icon: const Icon(Symbols.select_all),
-      ),
-      IconButton(
-        tooltip: 'Share selected recipes',
-        onPressed: widget.selectedIds!.isEmpty ? null : widget.onShareSelection,
-        icon: const Icon(Symbols.share),
-      ),
-      IconButton(
-        tooltip: 'Add selected recipes to shopping list',
-        onPressed: widget.selectedIds!.isEmpty
-            ? null
-            : widget.onShoppingSelection,
-        icon: const Icon(Symbols.shopping_cart),
-      ),
-    ],
+        IconButton(
+          tooltip: 'Share selected recipes',
+          onPressed: widget.selectedIds!.isEmpty
+              ? null
+              : widget.onShareSelection,
+          icon: const Icon(Symbols.share),
+        ),
+        IconButton(
+          tooltip: 'Add selected recipes to shopping list',
+          onPressed: widget.selectedIds!.isEmpty
+              ? null
+              : widget.onShoppingSelection,
+          icon: const Icon(Symbols.shopping_cart),
+        ),
+        IconButton(
+          tooltip: 'Delete selected recipes',
+          onPressed: widget.selectedIds!.isEmpty
+              ? null
+              : widget.onDeleteSelection,
+          icon: const Icon(Symbols.delete),
+        ),
+      ];
+      final split =
+          constraints.maxWidth < 360 ||
+          MediaQuery.textScalerOf(context).scale(14) > 20;
+      return split
+          ? Column(
+              children: [
+                Row(
+                  children: [
+                    close,
+                    Expanded(child: label),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: actions,
+                ),
+              ],
+            )
+          : Row(
+              children: [
+                close,
+                Expanded(child: label),
+                ...actions,
+              ],
+            );
+    },
   );
 
   Widget _controls() {
@@ -515,10 +612,6 @@ class _RecipesScreenState extends State<RecipesScreen> {
         final columns = recipeGridColumns(constraints.maxWidth - 32);
         final grid = columns > 1 && widget.preferences.view == RecipeView.cards;
         final cardHeight = grid ? recipeGridCardHeight(context) : null;
-        final rowIndices = <String, int>{
-          for (var i = 0; i < recipes.length; i += columns)
-            'group-${recipes[i].id}': i ~/ columns,
-        };
         final scale = MediaQuery.textScalerOf(context).scale(1);
         final searchHeight = 72.0 + (scale - 1).clamp(0, 3) * 24;
         final wide = MediaQuery.sizeOf(context).width >= 600;
@@ -535,10 +628,9 @@ class _RecipesScreenState extends State<RecipesScreen> {
               },
               child: RefreshIndicator(
                 onRefresh: widget.onSync ?? () async {},
-                child: PixelCustomScrollView(
-                  key: const PageStorageKey('recipes-scroll'),
+                child: _RecipeScrollView(
+                  enabled: widget.preferences.view == RecipeView.cards,
                   controller: _scroll,
-                  physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
                     SliverPersistentHeader(
                       pinned:
@@ -546,7 +638,16 @@ class _RecipesScreenState extends State<RecipesScreen> {
                           widget.syncStatus != null ||
                           widget.syncController != null,
                       delegate: _PinnedSearch(
-                        height: 56 + (scale - 1).clamp(0, 3) * 24,
+                        height:
+                            56 +
+                            (scale - 1).clamp(0, 3) * 24 +
+                            (widget.selectedIds != null &&
+                                    (constraints.maxWidth - 32 < 360 ||
+                                        MediaQuery.textScalerOf(context)
+                                                .scale(14) >
+                                            20)
+                                ? 48
+                                : 0),
                         child: ColoredBox(
                           color: Theme.of(context).scaffoldBackgroundColor,
                           child: Padding(
@@ -677,37 +778,7 @@ class _RecipesScreenState extends State<RecipesScreen> {
                               ),
                       ),
                     if (recipes.isNotEmpty)
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 112),
-                        sliver: SliverList.builder(
-                          itemCount: (recipes.length / columns).ceil(),
-                          findChildIndexCallback: (key) =>
-                              key is ValueKey<String>
-                              ? rowIndices[key.value]
-                              : null,
-                          itemBuilder: (context, row) => Padding(
-                            key: ValueKey('group-${recipes[row * columns].id}'),
-                            padding: EdgeInsets.only(
-                              bottom:
-                                  widget.preferences.view == RecipeView.cards
-                                  ? 10
-                                  : 0,
-                            ),
-                            child: RecipeGridRow(
-                              columns: columns,
-                              fixedHeight: cardHeight,
-                              children: [
-                                for (var col = 0; col < columns; col++)
-                                  if (row * columns + col < recipes.length)
-                                    _row(
-                                      recipes[row * columns + col],
-                                      grid: grid,
-                                    ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
+                      _recipeList(recipes, columns, cardHeight),
                   ],
                 ),
               ),
@@ -747,6 +818,30 @@ class _RecipesScreenState extends State<RecipesScreen> {
       }
     }
   }
+}
+
+/// Keep the sliver delegates stable while only the viewport cache grows.
+class _RecipeScrollView extends StatelessWidget {
+  const _RecipeScrollView({
+    required this.enabled,
+    required this.controller,
+    required this.slivers,
+  });
+  final bool enabled;
+  final ScrollController controller;
+  final List<Widget> slivers;
+
+  @override
+  Widget build(BuildContext context) => IdleBuildAhead(
+    enabled: enabled,
+    builder: (context, cache) => PixelCustomScrollView(
+      key: const PageStorageKey('recipes-scroll'),
+      scrollCacheExtent: ScrollCacheExtent.pixels(cache),
+      controller: controller,
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: slivers,
+    ),
+  );
 }
 
 class _RecipeRow extends StatelessWidget {

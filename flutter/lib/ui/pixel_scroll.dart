@@ -193,6 +193,7 @@ class PixelCustomScrollView extends CustomScrollView {
     super.scrollDirection,
     super.reverse,
     super.controller,
+    super.scrollCacheExtent,
     super.physics,
     super.shrinkWrap,
     super.slivers,

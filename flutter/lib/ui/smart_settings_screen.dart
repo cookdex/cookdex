@@ -28,13 +28,19 @@ class SmartSettingsScreen extends StatefulWidget {
 }
 
 class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
+  static const _recommendedModel = 'gemini-3.5-flash-lite';
   final _key = TextEditingController();
   final _model = TextEditingController();
+  String _effort = 'standard';
+  bool _customModel = false;
   SmartImportSettings? _saved;
   bool _busy = true;
   String? _error;
 
-  bool get _unsaved => _key.text.isNotEmpty || _model.text != _saved?.model;
+  bool get _unsaved =>
+      _key.text.isNotEmpty ||
+      _model.text != _saved?.model ||
+      _effort != _saved?.effort;
 
   @override
   void initState() {
@@ -65,6 +71,8 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
       if (!mounted) return;
       _saved = settings;
       _model.text = settings.model;
+      _effort = settings.effort;
+      _customModel = settings.model != _recommendedModel;
     } catch (_) {
       if (mounted) _error = 'Could not load Smart Import settings.';
     } finally {
@@ -111,6 +119,7 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
       await widget.service.platform.saveSettings(
         key: _key.text.trim(),
         model: _model.text.trim(),
+        effort: _effort,
       );
       if (!mounted) return;
       // Clear immediately after the successful write, before refreshing state.
@@ -119,6 +128,8 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
       if (!mounted) return;
       _saved = saved;
       _model.text = saved.model;
+      _effort = saved.effort;
+      _customModel = saved.model != _recommendedModel;
     },
     failure: 'Could not save Smart Import settings.',
     success: 'Smart Import settings saved',
@@ -139,7 +150,11 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
       await widget.service.platform.removeKey();
       if (!mounted) return;
       _key.clear();
-      _saved = SmartImportSettings(hasKey: false, model: _saved!.model);
+      _saved = SmartImportSettings(
+        hasKey: false,
+        model: _saved!.model,
+        effort: _saved!.effort,
+      );
     }, failure: 'Could not remove the key.');
   }
 
@@ -313,22 +328,99 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              PixelScrollScope(
-                axis: Axis.horizontal,
-                builder: (context) => TextField(
-                  scrollController: PrimaryScrollController.of(context),
-                  controller: _model,
-                  enabled: !_busy && _saved != null,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  enableIMEPersonalizedLearning: false,
-                  textCapitalization: TextCapitalization.none,
-                  maxLength: 100,
-                  decoration: const InputDecoration(
-                    labelText: 'Model',
-                    counterText: '',
+              ExpansionTile(
+                title: const Text('Advanced'),
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(top: 8, bottom: 16),
+                children: [
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('effort-$_effort'),
+                    initialValue: _effort,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Effort'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'standard',
+                        child: Text('Standard'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'thorough',
+                        child: Text('Thorough'),
+                      ),
+                    ],
+                    onChanged: _busy || _saved == null
+                        ? null
+                        : (value) => setState(() => _effort = value!),
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Thorough is slower and uses more of your free daily limit.',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<bool>(
+                    key: ValueKey('model-$_customModel'),
+                    initialValue: _customModel,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Model'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: false,
+                        child: Text('Recommended'),
+                      ),
+                      DropdownMenuItem(
+                        value: true,
+                        child: Text('Custom model ID'),
+                      ),
+                    ],
+                    onChanged: _busy || _saved == null
+                        ? null
+                        : (value) => setState(() {
+                            _customModel = value!;
+                            _model.text = _customModel ? '' : _recommendedModel;
+                          }),
+                  ),
+                  SizedBox(height: _customModel ? 16 : 8),
+                  if (!_customModel)
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(_recommendedModel),
+                    ),
+                  if (_customModel)
+                    PixelScrollScope(
+                      axis: Axis.horizontal,
+                      builder: (context) => TextField(
+                        scrollController: PrimaryScrollController.of(context),
+                        controller: _model,
+                        enabled: !_busy && _saved != null,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        enableIMEPersonalizedLearning: false,
+                        textCapitalization: TextCapitalization.none,
+                        maxLength: 100,
+                        decoration: const InputDecoration(
+                          labelText: 'Custom model ID',
+                          counterText: '',
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: _busy || _saved == null
+                          ? null
+                          : () => setState(() {
+                              _effort = 'standard';
+                              _customModel = false;
+                              _model.text = _recommendedModel;
+                            }),
+                      child: const Text('Reset to recommended'),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               Wrap(

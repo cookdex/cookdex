@@ -25,7 +25,7 @@ void main() {
       matching: find.byType(EditableText),
     );
     expect(tester.widget<EditableText>(input).keyboardType, TextInputType.text);
-    for (final text in ['1/2-3/4', '1 1/2–2', '2—3', '2 to 3']) {
+    for (final text in ['1/2-3/4', '1 1/2–2', '2—3', '2 to 3', '1-1/4']) {
       await tester.enterText(input, text);
       expect(row.amount, text);
     }

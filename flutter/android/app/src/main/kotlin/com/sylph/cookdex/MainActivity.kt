@@ -4,15 +4,54 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.view.WindowManager
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.android.FlutterFragment
+import io.flutter.embedding.android.RenderMode
+import io.flutter.embedding.android.TransparencyMode
+import io.flutter.embedding.engine.FlutterShellArgs
+import io.flutter.embedding.engine.renderer.FlutterUiDisplayListener
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.Executors
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
+    private var platformChannel: MethodChannel? = null
+    private val startupSplash = StartupSplash(this)
+    private val firstFrame = object : FlutterUiDisplayListener {
+        override fun onFlutterUiDisplayed() = startupSplash.firstFrame()
+        override fun onFlutterUiNoLongerDisplayed() = Unit
+    }
+
+    // Keep Flutter's SurfaceView renderer. The fragment builder exposes the
+    // first-draw gate that FlutterActivity hard-codes on for SurfaceView. A
+    // native cover must be drawable/removable even if Dart never starts.
+    override fun createFlutterFragment(): FlutterFragment = FlutterFragment.withNewEngine()
+        .dartEntrypoint(dartEntrypointFunctionName)
+        .apply {
+            this@MainActivity.dartEntrypointLibraryUri?.let { dartLibraryUri(it) }
+            this@MainActivity.dartEntrypointArgs?.let { dartEntrypointArgs(it) }
+        }
+        .initialRoute(initialRoute)
+        .appBundlePath(appBundlePath)
+        .flutterShellArgs(FlutterShellArgs.fromIntent(intent))
+        .handleDeeplinking(shouldHandleDeeplinking())
+        .renderMode(RenderMode.surface)
+        .transparencyMode(TransparencyMode.opaque)
+        .shouldAttachEngineToActivity(true)
+        .shouldAutomaticallyHandleOnBackPressed(true)
+        .shouldDelayFirstAndroidViewDraw(false)
+        .build()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        startupSplash.start()
+        super.onCreate(savedInstanceState)
+        startupSplash.attach()
+    }
+
     private var importHost: ImportHost? = null
     private var incomingShareHost: IncomingShareHost? = null
     private var exportHost: ExportHost? = null
@@ -23,6 +62,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        flutterEngine.renderer.addIsDisplayingFlutterUiListener(firstFrame)
         importHost = ImportHost(this)
         exportHost = ExportHost(this)
         incomingShareHost = IncomingShareHost(this, importHost!!,
@@ -32,9 +72,13 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result -> exportHost!!.handle(call, result) }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.sylph.cookdex.dev/import")
             .setMethodCallHandler { call, result -> importHost!!.handle(call, result) }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.sylph.cookdex.dev/platform")
-            .setMethodCallHandler { call, result ->
+        platformChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.sylph.cookdex.dev/platform")
+        platformChannel!!.setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "startupReady" -> {
+                        startupSplash.ready(call.arguments == true)
+                        result.success(null)
+                    }
                     "applicationId" -> result.success(packageName)
                     "deviceName" -> result.success(Build.MODEL)
                     "appVersion" -> {
@@ -148,6 +192,10 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        flutterEngine?.renderer?.removeIsDisplayingFlutterUiListener(firstFrame)
+        startupSplash.close()
+        platformChannel?.setMethodCallHandler(null)
+        platformChannel = null
         networkPermission?.success(false); networkPermission = null
         incomingShareHost?.close()
         importHost?.close()

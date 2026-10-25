@@ -80,7 +80,7 @@ Future<(EditorController, RecipeStore)> timeController({
   return (c, store);
 }
 
-Finder timeBox(String key) => find.byKey(ValueKey('field-$key'));
+Finder timeBox(String key) => find.byKey(ValueKey(key));
 
 void main() {
   for (final config in timeConfigurations) {
@@ -171,14 +171,14 @@ void main() {
           expect(c.draft.cookTime, contains('overnight'));
           expect(c.draft.totalTime, contains('overnight'));
           if (imported) {
-            await reveal(tester, find.text('Total time: AI guess'));
-            expect(find.text('Total time: AI guess'), findsOneWidget);
+            await reveal(tester, find.text('AI guess'));
+            expect(find.text('AI guess'), findsOneWidget);
             expect(
               find.descendant(
-                of: timeBox('total'),
-                matching: find.text('Total time: AI guess'),
+                of: find.byKey(const ValueKey('field-total')),
+                matching: find.text('AI guess'),
               ),
-              findsNothing,
+              findsOneWidget,
             );
           }
           expect(tester.takeException(), isNull);

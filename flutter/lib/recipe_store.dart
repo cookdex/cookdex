@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'local_preferences.dart';
+import 'name_matching.dart';
 import 'src/rust/api.dart' as core;
 
 class BackupPreview {
@@ -27,8 +28,17 @@ abstract interface class RecipeRepository {
   Future<void> close();
 }
 
+/// Its subscription begins with a snapshot registered atomically with changes.
+/// Repositories without this guarantee still use an explicit initial refresh.
+abstract interface class SnapshotSubscriptionRepository
+    implements RecipeRepository {}
+
 abstract interface class SetAsideRepository {
   Future<core.CollectionSnapshot> discardSetAside(int generation);
+}
+
+abstract interface class BatchDeleteRepository {
+  Future<core.CollectionSnapshot> deleteMany(int generation, List<String> ids);
 }
 
 /// Editor operations remain typed; only Rust normalizes recipe input.
@@ -89,13 +99,24 @@ abstract interface class ScalingRepository {
 class RustRecipeRepository
     implements
         RecipeRepository,
+        SnapshotSubscriptionRepository,
         EditorRecipeRepository,
         ShoppingRepository,
         ImportRecipeRepository,
         SetAsideRepository,
+        BatchDeleteRepository,
         ScalingRepository {
   RustRecipeRepository(this.session);
   final core.CoreSession session;
+  @override
+  Future<core.CollectionSnapshot> deleteMany(
+    int generation,
+    List<String> ids,
+  ) => session.deleteMany(
+    generation: generation,
+    ids: ids,
+    operation: core.Operation(),
+  );
   @override
   Future<core.CollectionSnapshot> discardSetAside(int generation) => session
       .discardSetAside(generation: generation, operation: core.Operation());
@@ -258,17 +279,77 @@ class RecipeStore extends ChangeNotifier {
   final Map<String, core.Recipe> _details = {};
   final Map<String, List<String>> _amounts = {};
   final Map<String, Map<SearchField, String>> _search = {};
+  final Map<RecipeSort, List<core.RecipeSummary>> _ordered = {};
+  List<core.RecipeSummary>? _visible;
+  List<String> _visibleWords = const [];
+  RecipeSort? _visibleSort;
+  Set<SearchField> _visibleFields = const {};
+  bool? _visibleFavorites;
+  List<String>? _editorIngredientNames;
+  List<String>? _editorTags;
+  List<String> _groupEditorNames(bool tags) => List.unmodifiable(
+    groupNameSuggestions([
+      for (final recipe in summaries)
+        for (final name in tags ? recipe.tags : recipe.ingredients)
+          NameObservation(
+            name: name,
+            recipeId: recipe.id,
+            updatedAt: recipe.updatedAt,
+          ),
+    ]).map((suggestion) => suggestion.name),
+  );
+  List<String> get editorIngredientNames =>
+      _editorIngredientNames ??= _groupEditorNames(false);
+  List<String> get editorTags => _editorTags ??= _groupEditorNames(true);
   final Map<String, int> _versions = {};
   final Map<String, Future<core.Recipe?>> _pending = {};
   final Map<String, Future<List<String>>> _pendingAmounts = {};
   StreamSubscription<core.CollectionEvent>? _subscription;
+  Completer<void>? _subscriptionReady;
   Timer? _reconnect;
   Future<void>? _refresh;
   bool _refreshAgain = false;
   Future<void> _mutations = Future.value();
   bool _writing = false;
   int _deferredGeneration = -1;
-  List<core.RecipeSummary> get summaries => _snapshot?.summaries ?? const [];
+  final Map<String, List<({Object token, bool value})>> _favoriteWrites = {};
+  List<core.RecipeSummary>? _optimisticSummaries;
+  List<core.RecipeSummary> get _savedSummaries =>
+      _snapshot?.summaries ?? const [];
+  List<core.RecipeSummary> get summaries =>
+      _optimisticSummaries ?? _savedSummaries;
+  bool isFavorite(String id) => _summary(id)?.favorite ?? false;
+
+  void _projectFavorites() {
+    if (_favoriteWrites.isEmpty && _optimisticSummaries == null) return;
+    _optimisticSummaries = _favoriteWrites.isEmpty
+        ? null
+        : [
+            for (final r in _savedSummaries)
+              if (_favoriteWrites[r.id]?.lastOrNull case final pending?)
+                core.RecipeSummary(
+                  id: r.id,
+                  title: r.title,
+                  description: r.description,
+                  ingredients: r.ingredients,
+                  tags: r.tags,
+                  notes: r.notes,
+                  favorite: pending.value,
+                  createdAt: r.createdAt,
+                  updatedAt: r.updatedAt,
+                  revision: r.revision,
+                  servings: r.servings,
+                  prepTime: r.prepTime,
+                  cookTime: r.cookTime,
+                  totalTime: r.totalTime,
+                )
+              else
+                r,
+          ];
+    _ordered.clear();
+    _visible = null;
+  }
+
   List<core.ShoppingCategory> get shoppingCategories =>
       _snapshot?.shoppingCategories ?? const [];
 
@@ -333,7 +414,36 @@ class RecipeStore extends ChangeNotifier {
         .split(RegExp(r'\s+'))
         .where((w) => w.isNotEmpty)
         .toList();
-    final result = summaries.where((r) {
+    final sameOptions =
+        _visible != null &&
+        _visibleSort == preferences.sort &&
+        _visibleFavorites == preferences.favoritesOnly &&
+        setEquals(_visibleFields, preferences.searchFields);
+    if (sameOptions && listEquals(words, _visibleWords)) return _visible!;
+    final ordered = _ordered.putIfAbsent(preferences.sort, () {
+      final result = summaries.toList();
+      result.sort((a, b) {
+        final primary = switch (preferences.sort) {
+          RecipeSort.edited => b.updatedAt.compareTo(a.updatedAt),
+          RecipeSort.added => b.createdAt.compareTo(a.createdAt),
+          RecipeSort.title => _search[a.id]![SearchField.title]!.compareTo(
+            _search[b.id]![SearchField.title]!,
+          ),
+        };
+        return primary == 0 ? a.id.compareTo(b.id) : primary;
+      });
+      return result;
+    });
+    // Every match for a stronger query also matched its weaker predecessor.
+    // Backspacing, changing fields or widening favorites starts from all rows.
+    final source =
+        sameOptions &&
+            _visibleWords.every(
+              (old) => words.any((word) => word.contains(old)),
+            )
+        ? _visible!
+        : ordered;
+    final result = source.where((r) {
       if (preferences.favoritesOnly && !r.favorite) return false;
       final projection = _search[r.id]!;
       return words.every(
@@ -342,55 +452,72 @@ class RecipeStore extends ChangeNotifier {
         ),
       );
     }).toList();
-    result.sort((a, b) {
-      final primary = switch (preferences.sort) {
-        RecipeSort.edited => b.updatedAt.compareTo(a.updatedAt),
-        RecipeSort.added => b.createdAt.compareTo(a.createdAt),
-        RecipeSort.title => a.title.toLowerCase().compareTo(
-          b.title.toLowerCase(),
-        ),
-      };
-      return primary == 0 ? a.id.compareTo(b.id) : primary;
-    });
-    return result;
+    if (!listEquals(result, _visible)) {
+      _visible = List.unmodifiable(result);
+    }
+    _visibleWords = words;
+    _visibleSort = preferences.sort;
+    _visibleFields = Set.of(preferences.searchFields);
+    _visibleFavorites = preferences.favoritesOnly;
+    return _visible!;
   }
 
   Future<void> initialize() async {
-    _listen();
-    await refresh();
+    final ready = _listen();
+    await (repository is SnapshotSubscriptionRepository ? ready : refresh());
   }
 
-  void _listen() {
-    if (_disposed) return;
-    _subscription = repository.subscribe().listen(
-      (event) {
-        if (_disposed) return;
-        switch (event) {
-          case core.CollectionEvent_Snapshot(:final field0):
-            _apply(field0, external: true);
-          case core.CollectionEvent_Change(:final field0):
-            if (field0.generation <= generation) return;
-            _observedGeneration = field0.generation;
-            notifyListeners();
-            if (_writing) {
-              if (field0.generation > _deferredGeneration) {
-                _deferredGeneration = field0.generation;
+  Future<void> _listen() {
+    if (_disposed) return Future.value();
+    final ready = Completer<void>();
+    var fallbackStarted = false;
+    _subscriptionReady = ready;
+    void complete() {
+      if (!ready.isCompleted) ready.complete();
+    }
+
+    void lost(Object? error) {
+      _connectionLost(error);
+      // A failed initial subscription must still allow the ordinary snapshot
+      // and Retry path. A successful subscription never needs that second read.
+      if (!ready.isCompleted && !fallbackStarted) {
+        fallbackStarted = true;
+        unawaited(refresh().whenComplete(complete));
+      }
+    }
+
+    try {
+      _subscription = repository.subscribe().listen(
+        (event) {
+          if (_disposed) return;
+          switch (event) {
+            case core.CollectionEvent_Snapshot(:final field0):
+              error = null;
+              _apply(field0, external: true);
+              complete();
+            case core.CollectionEvent_Change(:final field0):
+              if (field0.generation <= generation) return;
+              _observedGeneration = field0.generation;
+              notifyListeners();
+              if (_writing) {
+                if (field0.generation > _deferredGeneration) {
+                  _deferredGeneration = field0.generation;
+                }
+                return;
               }
-              return;
-            }
-            for (final id in {...field0.changed, ...field0.deleted}) {
-              _invalidate(id);
-            }
-            unawaited(refresh());
-        }
-      },
-      onError: (Object e) {
-        _connectionLost(e);
-      },
-      onDone: () {
-        _connectionLost(null);
-      },
-    );
+              for (final id in {...field0.changed, ...field0.deleted}) {
+                _invalidate(id);
+              }
+              unawaited(refresh());
+          }
+        },
+        onError: (Object e) => lost(e),
+        onDone: () => lost(null),
+      );
+    } catch (e) {
+      lost(e);
+    }
+    return ready.future;
   }
 
   void _connectionLost(Object? e) {
@@ -403,8 +530,7 @@ class RecipeStore extends ChangeNotifier {
       _reconnect = null;
       await _subscription?.cancel();
       if (!_disposed) {
-        _listen();
-        await refresh();
+        await initialize();
       }
     });
   }
@@ -472,7 +598,7 @@ class RecipeStore extends ChangeNotifier {
         _invalidate(id);
       }
     }
-    final before = {for (final r in summaries) r.id: r};
+    final before = {for (final r in _savedSummaries) r.id: r};
     // FRB decodes a fresh object graph for every snapshot. Retain equal row
     // objects so visible rows can skip rebuilding after unrelated mutations.
     final stableSummaries = snapshot.summaries
@@ -482,6 +608,12 @@ class RecipeStore extends ChangeNotifier {
         })
         .toList(growable: false);
     final after = {for (final r in stableSummaries) r.id: r};
+    if (!listEquals(stableSummaries, _savedSummaries)) {
+      _ordered.clear();
+      _visible = null;
+      _editorIngredientNames = null;
+      _editorTags = null;
+    }
     for (final id in {...before.keys, ...after.keys}) {
       if (!identical(before[id], after[id])) {
         _invalidate(id);
@@ -511,6 +643,7 @@ class RecipeStore extends ChangeNotifier {
       hasPrevious: snapshot.hasPrevious,
     );
     generation = snapshot.generation;
+    _projectFavorites();
     loading = false;
     if (notify) notifyListeners();
   }
@@ -594,18 +727,34 @@ class RecipeStore extends ChangeNotifier {
     return completer.future;
   }
 
-  Future<FavoriteUndo?> toggleFavorite(String id) => _mutate(() async {
+  Future<FavoriteUndo?> toggleFavorite(String id) {
     final before = _summary(id);
-    if (before == null) return null;
-    final snapshot = await _favorite(id, !before.favorite);
-    final after = snapshot.summaries.where((r) => r.id == id).first;
-    return FavoriteUndo(
-      id: id,
-      before: before.favorite,
-      after: after.favorite,
-      revision: after.revision,
-    );
-  });
+    if (before == null) return Future.value(null);
+    final token = Object();
+    final value = !before.favorite;
+    (_favoriteWrites[id] ??= []).add((token: token, value: value));
+    _projectFavorites();
+    notifyListeners();
+    return _mutate(() async {
+      try {
+        final snapshot = await _favorite(id, value);
+        final after = snapshot.summaries.where((r) => r.id == id).first;
+        return FavoriteUndo(
+          id: id,
+          before: before.favorite,
+          after: after.favorite,
+          revision: after.revision,
+        );
+      } finally {
+        final pending = _favoriteWrites[id]!;
+        pending.removeWhere((write) => identical(write.token, token));
+        if (pending.isEmpty) _favoriteWrites.remove(id);
+        _projectFavorites();
+        if (!_disposed) notifyListeners();
+      }
+    });
+  }
+
   Future<core.CollectionSnapshot> _favorite(String id, bool value) async {
     final cached = _details[id];
     final amounts = _amounts[id];
@@ -647,6 +796,16 @@ class RecipeStore extends ChangeNotifier {
     _apply(await repository.delete(generation, id));
     error = null;
   });
+  Future<void> deleteRecipes(int expectedGeneration, List<String> ids) =>
+      _mutate(() async {
+        _apply(
+          await (repository as BatchDeleteRepository).deleteMany(
+            expectedGeneration,
+            ids,
+          ),
+        );
+        error = null;
+      });
   Future<core.Recipe> saveRecipe({
     core.Recipe? base,
     required core.RecipeFields fields,
@@ -726,6 +885,9 @@ class RecipeStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    if (_subscriptionReady?.isCompleted == false) {
+      _subscriptionReady!.complete();
+    }
     preferences.removeListener(_preferencesChanged);
     _reconnect?.cancel();
     unawaited(_subscription?.cancel());

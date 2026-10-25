@@ -36,44 +36,55 @@ void main() {
     },
   );
 
-  testWidgets(
-    'large editor builds a viewport of rows and typing leaves rows alone',
-    (tester) async {
-      final (c, _, _) = await controller();
-      c.draft.sections.first.rows
-        ..clear()
-        ..addAll(
-          List.generate(80, (i) => EditableIngredient(name: 'Ingredient $i')),
-        );
-      c.draft.steps
-        ..clear()
-        ..addAll(List.generate(50, (i) => EditableStep('Step $i')));
-      await editor(tester, c);
-      final ids = {
-        ...c.draft.sections.first.rows.map((r) => r.id),
-        ...c.draft.steps.map((s) => s.id),
-      };
-      final mounted = find.byWidgetPredicate(
-        (w) =>
-            w.key is ValueKey<String> &&
-            ids.contains((w.key as ValueKey<String>).value),
+  testWidgets('large editor retains built rows and typing leaves rows alone', (
+    tester,
+  ) async {
+    final (c, _, _) = await controller();
+    c.draft.sections.first.rows
+      ..clear()
+      ..addAll(
+        List.generate(80, (i) => EditableIngredient(name: 'Ingredient $i')),
       );
-      expect(mounted.evaluate().length, lessThan(15));
-      var rebuilt = 0;
-      debugOnRebuildDirtyWidget = (element, builtOnce) {
-        final key = element.widget.key;
-        if (builtOnce &&
-            key is ValueKey<String> &&
-            ids.any((id) => key.value.startsWith(id))) {
-          rebuilt++;
-        }
-      };
-      await enterFieldText(tester, field('Title'), 'New title');
-      await tester.pump();
-      debugOnRebuildDirtyWidget = null;
-      expect(rebuilt, 0);
-      await c.flush();
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+    c.draft.steps
+      ..clear()
+      ..addAll(List.generate(50, (i) => EditableStep('Step $i')));
+    await editor(tester, c);
+    final ids = {
+      ...c.draft.sections.first.rows.map((r) => r.id),
+      ...c.draft.steps.map((s) => s.id),
+    };
+    final mounted = find.byWidgetPredicate(
+      (w) =>
+          w.key is ValueKey<String> &&
+          ids.contains((w.key as ValueKey<String>).value),
+    );
+    expect(mounted.evaluate().length, lessThan(15));
+    expect(
+      find
+          .byWidgetPredicate(
+            (w) =>
+                w.key is ValueKey<String> &&
+                ids.contains((w.key as ValueKey<String>).value),
+            skipOffstage: false,
+          )
+          .evaluate()
+          .length,
+      ids.length,
+    );
+    var rebuilt = 0;
+    debugOnRebuildDirtyWidget = (element, builtOnce) {
+      final key = element.widget.key;
+      if (builtOnce &&
+          key is ValueKey<String> &&
+          ids.any((id) => key.value.startsWith(id))) {
+        rebuilt++;
+      }
+    };
+    await enterFieldText(tester, field('Title'), 'New title');
+    await tester.pump();
+    debugOnRebuildDirtyWidget = null;
+    expect(rebuilt, 0);
+    await c.flush();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }

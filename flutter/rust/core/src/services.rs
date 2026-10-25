@@ -237,6 +237,12 @@ pub struct ShoppingResult {
 pub struct Service {
     session: Session,
     subscribers: Arc<Mutex<Vec<mpsc::SyncSender<Change>>>>,
+    recipe_cache: Mutex<Option<RecipeCache>>,
+}
+struct RecipeCache {
+    token: (i64, i64),
+    stored: storage::Snapshot,
+    view: Snapshot,
 }
 impl Service {
     pub fn open(paths: &impl AppPaths) -> Result<Self> {
@@ -267,16 +273,27 @@ impl Service {
         Ok(Self {
             session,
             subscribers,
+            recipe_cache: Mutex::new(None),
         })
     }
     pub fn editor_units(&self) -> Result<Vec<String>> {
         let mut db = self.session.connection().map_err(db_error)?;
-        Ok(
-            Self::recipes(&storage::load(&mut db).map_err(db_error)?.book)?
-                .into_iter()
-                .flat_map(|r| r.content.ingredients.into_iter().map(|i| i.unit))
-                .collect(),
-        )
+        let mut cache = self.recipe_cache.lock().map_err(|_| Error::Closed)?;
+        Self::ensure_recipe_cache(&mut db, &mut cache)?;
+        let mut recipes: Vec<_> = cache.as_ref().unwrap().stored.book.recipes.iter().collect();
+        recipes.sort_by_key(|r| r["id"].as_str().unwrap());
+        // Units are plain text in every supported recipe schema. These bodies
+        // already passed canonical validation for this database version.
+        Ok(recipes
+            .into_iter()
+            .flat_map(|r| {
+                r["ingredients"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i["unit"].as_str().unwrap().to_owned())
+            })
+            .collect())
     }
     pub fn sync_status(&self) -> std::result::Result<serde_json::Value, String> {
         self.session.sync.status()
@@ -457,26 +474,157 @@ impl Service {
     }
     pub fn snapshot(&self) -> Result<Snapshot> {
         let mut db = self.session.connection().map_err(db_error)?;
-        let s = storage::load(&mut db).map_err(db_error)?;
-        Self::snapshot_from(&db, &s)
+        let mut cache = self.recipe_cache.lock().map_err(|_| Error::Closed)?;
+        Self::ensure_recipe_cache(&mut db, &mut cache)?;
+        Ok(cache.as_ref().unwrap().view.clone())
     }
     /// Registration and snapshot occur while holding the same lock as commits.
     /// A slow subscriber is disconnected on overflow and must obtain a new snapshot.
     pub fn subscribe(&self) -> Result<Subscription> {
         let mut db = self.session.connection().map_err(db_error)?;
-        let s = storage::load(&mut db).map_err(db_error)?;
-        let snapshot = Self::snapshot_from(&db, &s)?;
+        let mut cache = self.recipe_cache.lock().map_err(|_| Error::Closed)?;
+        Self::ensure_recipe_cache(&mut db, &mut cache)?;
+        let snapshot = cache.as_ref().unwrap().view.clone();
         let (tx, receiver) = mpsc::sync_channel(64);
         self.subscribers.lock().map_err(|_| Error::Closed)?.push(tx);
         Ok(Subscription { snapshot, receiver })
     }
     pub fn detail(&self, id: &RecipeId) -> Result<Option<Recipe>> {
         let mut db = self.session.connection().map_err(db_error)?;
-        Ok(
-            Self::recipes(&storage::load(&mut db).map_err(db_error)?.book)?
-                .into_iter()
-                .find(|r| &r.id == id),
-        )
+        let tx = db.transaction().map_err(|_| Error::Storage)?;
+        let recipe = storage::recipe(&tx, id).map_err(db_error)?;
+        tx.commit().map_err(|_| Error::Storage)?;
+        Ok(recipe)
+    }
+
+    fn ensure_recipe_cache(
+        db: &mut rusqlite::Connection,
+        cache: &mut Option<RecipeCache>,
+    ) -> Result<()> {
+        let token = storage::version(db).map_err(db_error)?;
+        if cache.as_ref().is_some_and(|c| c.token == token) {
+            return Ok(());
+        }
+        *cache = None;
+        let stored = storage::load(db).map_err(db_error)?;
+        let view = Self::snapshot_from(db, &stored)?;
+        if storage::version(db).map_err(db_error)? != (stored.generation, token.1) {
+            return Err(Error::StaleWrite);
+        }
+        *cache = Some(RecipeCache {
+            token: (stored.generation, token.1),
+            stored,
+            view,
+        });
+        Ok(())
+    }
+
+    fn mutate_recipes(
+        &self,
+        generation: i64,
+        operation: &Operation,
+        snapshot_before_delete: bool,
+        edit: impl FnOnce(&storage::Book) -> Result<(Vec<Recipe>, Vec<RecipeId>)>,
+    ) -> Result<Snapshot> {
+        operation.check()?;
+        let mut db = self.session.connection().map_err(db_error)?;
+        let mut cache = self.recipe_cache.lock().map_err(|_| Error::Closed)?;
+        Self::ensure_recipe_cache(&mut db, &mut cache)?;
+        let current = cache.take().unwrap();
+        if generation != current.token.0 {
+            return Err(Error::StaleWrite);
+        }
+        let (changed, deleted) = edit(&current.stored.book)?;
+        backup::validate_collection(&changed)?;
+        let mut book = current.stored.book.clone();
+        let saved_at = now();
+        for r in &changed {
+            put_recipe(&mut book, r.clone())?;
+        }
+        let deleted_ids: HashSet<_> = deleted.iter().map(|id| id.0.as_str()).collect();
+        book.recipes
+            .retain(|r| !r["id"].as_str().is_some_and(|id| deleted_ids.contains(id)));
+        book.deleted_recipes
+            .retain(|r| !r["id"].as_str().is_some_and(|id| deleted_ids.contains(id)));
+        for id in &deleted {
+            book.deleted_recipes
+                .push(serde_json::json!({"id":id.0,"deletedAt":saved_at}));
+        }
+        // Project only changed recipes, before committing; never turn a durable
+        // write into a failure due to a subsequent whole-collection read.
+        let mut reply = current.view.clone();
+        let changed_ids: HashSet<_> = changed.iter().map(|r| r.id.0.as_str()).collect();
+        reply.summaries.retain(|r| {
+            !changed_ids.contains(r.id.0.as_str()) && !deleted_ids.contains(r.id.0.as_str())
+        });
+        for r in &changed {
+            reply.summaries.push(Summary {
+                id: r.id.clone(),
+                title: r.content.title.clone(),
+                description: r.content.description.clone(),
+                ingredients: r
+                    .content
+                    .ingredients
+                    .iter()
+                    .map(|i| i.name.clone())
+                    .collect(),
+                tags: r.content.tags.clone(),
+                notes: r.content.notes.clone(),
+                favorite: r.favorite,
+                created_at: r.created_at.clone(),
+                updated_at: r.updated_at.clone(),
+                servings: r.content.servings.clone(),
+                prep_time: r.content.prep_time.clone(),
+                cook_time: r.content.cook_time.clone(),
+                total_time: r.content.total_time.clone(),
+                revision: r.revision,
+            });
+        }
+        reply.summaries.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+        operation.commit(|| {
+            if snapshot_before_delete {
+                rolling_snapshots::before_delete(&mut db).map_err(db_error)?;
+            } else {
+                rolling_snapshots::attempt(&mut db, "automatic");
+            }
+            let next = storage::save_recipe_changes(
+                &mut db,
+                current.token,
+                &current.stored,
+                &book,
+                &changed,
+                &deleted,
+                &saved_at,
+            )
+            .map_err(db_error)?;
+            if !snapshot_before_delete {
+                rolling_snapshots::attempt(&mut db, "automatic");
+            }
+            reply.generation = next;
+            reply.has_previous |= current.stored.set_aside.is_empty();
+            let change = Change {
+                generation: next,
+                changed: changed.iter().map(|r| r.id.clone()).collect(),
+                deleted,
+                shopping_changed: false,
+                conflicts_changed: false,
+            };
+            self.subscribers
+                .lock()
+                .unwrap()
+                .retain(|tx| tx.try_send(change.clone()).is_ok());
+            self.session.sync.local_recipe_changed();
+            *cache = Some(RecipeCache {
+                token: (next, current.token.1),
+                stored: storage::Snapshot {
+                    generation: next,
+                    book,
+                    set_aside: current.stored.set_aside.clone(),
+                },
+                view: reply.clone(),
+            });
+            Ok(reply)
+        })
     }
     fn mutate(
         &self,
@@ -566,12 +714,9 @@ impl Service {
     ) -> Result<Snapshot> {
         content.validate()?;
         content.tidy_names();
-        self.mutate(generation, operation, |book| {
+        self.mutate_recipes(generation, operation, false, |book| {
             let mut recipe = if let Some(base) = base {
-                let current = Self::recipes(book)?
-                    .into_iter()
-                    .find(|r| r.id == base.id)
-                    .ok_or(Error::StaleWrite)?;
+                let current = recipe_from_book(book, &base.id)?;
                 if current != base {
                     return Err(Error::StaleWrite);
                 }
@@ -585,7 +730,7 @@ impl Service {
             recipe.content = content;
             recipe.updated_at = now();
             recipe.validate()?;
-            put_recipe(book, recipe)
+            Ok((vec![recipe], vec![]))
         })
     }
     pub fn import_one(
@@ -628,15 +773,13 @@ impl Service {
         value: bool,
         operation: &Operation,
     ) -> Result<Snapshot> {
-        self.mutate(generation, operation, |book| {
-            let mut recipe = Self::recipes(book)?
-                .into_iter()
-                .find(|r| &r.id == id)
-                .ok_or(Error::StaleWrite)?;
+        self.mutate_recipes(generation, operation, false, |book| {
+            let mut recipe = recipe_from_book(book, id)?;
             recipe.favorite = value;
-            recipe.updated_at = now();
-            recipe.revision += 1;
-            put_recipe(book, recipe)
+            // Favorites are metadata: history still advances for sync, while
+            // Recently edited continues to describe content edits.
+            recipe.revision = recipe.revision.checked_add(1).ok_or(Error::Limit)?;
+            Ok((vec![recipe], vec![]))
         })
     }
     pub fn delete(
@@ -645,17 +788,34 @@ impl Service {
         id: &RecipeId,
         operation: &Operation,
     ) -> Result<Snapshot> {
-        self.mutate(generation, operation, |book| {
-            let i = book
+        self.mutate_recipes(generation, operation, false, |book| {
+            recipe_from_book(book, id)?;
+            Ok((vec![], vec![id.clone()]))
+        })
+    }
+    pub fn delete_many(
+        &self,
+        generation: i64,
+        ids: &[RecipeId],
+        operation: &Operation,
+    ) -> Result<Snapshot> {
+        if ids.is_empty() || ids.len() > recipe::MAX_ITEMS {
+            return Err(Error::Validation);
+        }
+        let unique: HashSet<_> = ids.iter().collect();
+        if unique.len() != ids.len() {
+            return Err(Error::Validation);
+        }
+        self.mutate_recipes(generation, operation, true, |book| {
+            let existing: HashSet<_> = book
                 .recipes
                 .iter()
-                .position(|r| r["id"] == id.0)
-                .ok_or(Error::StaleWrite)?;
-            book.recipes.remove(i);
-            book.deleted_recipes.retain(|r| r["id"] != id.0);
-            book.deleted_recipes
-                .push(serde_json::json!({"id":id.0,"deletedAt":now()}));
-            Ok(())
+                .filter_map(|r| r["id"].as_str())
+                .collect();
+            if ids.iter().any(|id| !existing.contains(id.0.as_str())) {
+                return Err(Error::StaleWrite);
+            }
+            Ok((vec![], ids.to_vec()))
         })
     }
     pub fn rolling_snapshot_maintenance(&self) -> bool {
@@ -1002,6 +1162,15 @@ impl Service {
 }
 pub fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+fn recipe_from_book(book: &storage::Book, id: &RecipeId) -> Result<Recipe> {
+    let value = book
+        .recipes
+        .iter()
+        .find(|r| r["id"] == id.0)
+        .ok_or(Error::StaleWrite)?;
+    Recipe::from_json(&serde_json::to_vec(value).map_err(|_| Error::InvalidData)?)
+        .map_err(Into::into)
 }
 fn put_recipe(book: &mut storage::Book, recipe: Recipe) -> Result<()> {
     recipe.validate()?;

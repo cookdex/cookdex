@@ -248,6 +248,120 @@ fn single_import_requires_review_and_replacement_keeps_identity() {
     );
 }
 #[test]
+fn batch_delete_500_is_one_commit_with_a_complete_recoverable_snapshot() {
+    let root = Root::new();
+    let s = Service::open(&root).unwrap();
+    let mut recipes = vec![];
+    for i in 0..500 {
+        let mut r = fixture()[i % 2].clone();
+        r.id = RecipeId(format!("batch-{i:03}"));
+        recipes.push(r);
+    }
+    let before = s
+        .restore(
+            &s.preview_restore(&backup::write(&recipes).unwrap(), &op())
+                .unwrap(),
+            &op(),
+        )
+        .unwrap();
+    let subscription = s.subscribe().unwrap();
+    let ids: Vec<_> = recipes.iter().map(|r| r.id.clone()).collect();
+    let after = s.delete_many(before.generation, &ids, &op()).unwrap();
+    assert_eq!(after.generation, before.generation + 1);
+    assert!(after.summaries.is_empty());
+    let event = subscription.receiver.recv().unwrap();
+    assert_eq!(event.deleted, ids);
+    assert!(subscription.receiver.try_recv().is_err());
+    let entry = s.rolling_snapshots().unwrap().0.pop().unwrap();
+    assert_eq!(entry.reason, "before_delete");
+    assert_eq!(entry.recipe_count, 500);
+    let bytes = s.rolling_snapshot_bytes(&entry.id).unwrap();
+    assert_eq!(backup::read(&bytes).unwrap(), recipes);
+    let restored = s
+        .restore(&s.preview_restore(&bytes, &op()).unwrap(), &op())
+        .unwrap();
+    assert_eq!(restored.summaries.len(), 500);
+    for r in recipes {
+        assert_eq!(s.detail(&r.id).unwrap(), Some(r));
+    }
+}
+
+#[test]
+fn batch_delete_rejects_stale_missing_duplicate_cancelled_and_failed_snapshot() {
+    let root = Root::new();
+    let s = Service::open(&root).unwrap();
+    let before = seed(&s);
+    let ids: Vec<_> = before.summaries.iter().map(|r| r.id.clone()).collect();
+    let snapshots = s.rolling_snapshots().unwrap().0.len();
+    assert_eq!(s.delete_many(0, &ids, &op()), Err(Error::StaleWrite));
+    assert_eq!(
+        s.delete_many(
+            before.generation,
+            &[ids[0].clone(), RecipeId("missing".into())],
+            &op()
+        ),
+        Err(Error::StaleWrite)
+    );
+    assert_eq!(
+        s.delete_many(before.generation, &[ids[0].clone(), ids[0].clone()], &op()),
+        Err(Error::Validation)
+    );
+    let cancelled = op();
+    cancelled.cancel();
+    assert_eq!(
+        s.delete_many(before.generation, &ids, &cancelled),
+        Err(Error::Cancelled)
+    );
+    assert_eq!(s.rolling_snapshots().unwrap().0.len(), snapshots);
+    let snapshot_path = root.0.join("flutter-v1/snapshots");
+    std::fs::remove_dir_all(&snapshot_path).unwrap();
+    std::fs::write(&snapshot_path, b"synthetic unavailable directory").unwrap();
+    assert!(s.delete_many(before.generation, &ids, &op()).is_err());
+    assert_eq!(s.snapshot().unwrap(), before);
+}
+
+#[test]
+fn targeted_writes_preserve_unrelated_rows_and_previous_save() {
+    let root = Root::new();
+    let s = Service::open(&root).unwrap();
+    let initial = seed(&s);
+    let original = s.snapshot().unwrap();
+    let id = original.summaries[0].id.clone();
+    let other = s.detail(&original.summaries[1].id).unwrap().unwrap();
+    let db = rusqlite::Connection::open(root.0.join("flutter-v1/cookdex.sqlite3")).unwrap();
+    // Prime again after installing a trigger, so the external-version change
+    // cannot accidentally make the test exercise only the uncached path.
+    db.execute_batch("CREATE TRIGGER guard_other BEFORE UPDATE ON recipes WHEN OLD.id != (SELECT id FROM recipes ORDER BY id LIMIT 1) BEGIN SELECT RAISE(ABORT,'unrelated row rewritten'); END;").unwrap();
+    s.snapshot().unwrap();
+    let saved = s.favorite(initial.generation, &id, true, &op()).unwrap();
+    assert_eq!(s.detail(&other.id).unwrap(), Some(other));
+    let previous: serde_json::Value = serde_json::from_str(
+        &db.query_row("SELECT body FROM local WHERE key='previous'", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        previous["book"]["recipes"].as_array().unwrap().len(),
+        original.summaries.len()
+    );
+    let before =
+        Recipe::from_json(&serde_json::to_vec(&previous["book"]["recipes"][0]).unwrap()).unwrap();
+    assert_eq!(before.updated_at, original.summaries[0].updated_at);
+    assert_eq!(s.snapshot().unwrap(), saved);
+    // An external change without a generation increment must invalidate the
+    // validation cache and prevent writing a now unreadable target.
+    db.execute("UPDATE recipes SET body='{}' WHERE id=?1", [&id.0])
+        .unwrap();
+    assert_eq!(
+        s.favorite(saved.generation, &id, false, &op()),
+        Err(Error::StaleWrite)
+    );
+    assert_eq!(s.snapshot().unwrap().set_aside_count, 1);
+}
+
+#[test]
 fn cancellation_staleness_validation_and_database_failure_are_atomic() {
     let root = Root::new();
     let s = Service::open(&root).unwrap();

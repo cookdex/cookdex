@@ -98,6 +98,7 @@ class EditorController extends ChangeNotifier {
       final review = imported.aiReview;
       if (review != null) {
         draft.aiGuessedFields.addAll(review.guessedFields);
+        draft.aiRewrittenSteps = review.rewrittenSteps;
         for (final index in review.guessedSteps) {
           if (index < draft.steps.length) draft.steps[index].aiGuess = true;
         }
@@ -355,6 +356,7 @@ class EditorController extends ChangeNotifier {
       _finished = true;
       dirty = false;
       draft.aiGuessedFields.clear();
+      draft.aiRewrittenSteps = false;
       for (final step in draft.steps) {
         step.aiGuess = false;
       }

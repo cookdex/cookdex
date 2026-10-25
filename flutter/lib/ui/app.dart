@@ -638,6 +638,69 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
+  Future<void> _deleteSelection(BuildContext context) async {
+    if (_selectionBusy || _selection?.isNotEmpty != true) return;
+    final ids = _selection!.toList(growable: false);
+    final generation = widget.store.generation;
+    setState(() => _selectionBusy = true);
+    try {
+      if (!await confirmCookdex(
+            context,
+            title:
+                'Delete ${ids.length} ${ids.length == 1 ? 'recipe' : 'recipes'}?',
+            action: 'Delete',
+            destructive: true,
+            content: const Text(
+              'A snapshot will be saved first. Deletions also reach your synced devices.',
+            ),
+          ) ||
+          !context.mounted) {
+        return;
+      }
+      final navigator = Navigator.of(context, rootNavigator: true);
+      final progress = DialogRoute<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const PopScope(
+          canPop: false,
+          child: AlertDialog(
+            title: Text('Deleting recipes'),
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 24),
+                Expanded(child: Text('Saving a snapshot and deleting…')),
+              ],
+            ),
+          ),
+        ),
+      );
+      unawaited(navigator.push(progress));
+      try {
+        await widget.store.deleteRecipes(generation, ids);
+      } finally {
+        if (progress.isActive) navigator.removeRoute(progress);
+      }
+      if (mounted) setState(() => _selection = null);
+      if (context.mounted) {
+        showFeedback(
+          context,
+          'Deleted ${ids.length} ${ids.length == 1 ? 'recipe' : 'recipes'}',
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        showFeedback(
+          context,
+          'Could not delete recipes. Nothing was deleted. Please try again.',
+          kind: FeedbackKind.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _selectionBusy = false);
+    }
+  }
+
   Future<void> _selectionAction(
     BuildContext context, {
     bool shopping = false,
@@ -1227,6 +1290,9 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
                                             context,
                                             shopping: true,
                                           ),
+                                    onDeleteSelection: _selectionBusy
+                                        ? null
+                                        : () => _deleteSelection(context),
                                     store: widget.store,
                                     preferences: widget.store.preferences,
                                     controller: _recipesScroll,

@@ -36,6 +36,7 @@ class ImportFakePlatform implements ImportPlatform {
   Future<void> saveSettings({
     required String key,
     required String model,
+    String effort = 'standard',
   }) async {}
   @override
   Future<void> removeKey() async {}
@@ -311,6 +312,7 @@ void main() {
         warnings: const [],
         ingredientSources: const [],
         aiReview: AiReview(
+          rewrittenSteps: true,
           guessedFields: const ['servings', 'totalTime', 'tags'],
           guessedSteps: Uint32List.fromList([0]),
         ),
@@ -325,6 +327,10 @@ void main() {
     final recovered = EditorDraft.fromJson(savedDraft);
     expect(recovered.aiGuessedFields, {'servings', 'totalTime', 'tags'});
     expect(recovered.steps.first.aiGuess, true);
+    expect(recovered.aiRewrittenSteps, true);
+    final legacyDraft = Map<String, dynamic>.of(savedDraft)
+      ..remove('aiRewrittenSteps');
+    expect(EditorDraft.fromJson(legacyDraft).aiRewrittenSteps, false);
     final guessed = recovered.steps.first;
     c.reorder(c.draft.steps, 0, c.draft.steps.length - 1);
     expect(c.draft.steps.any((s) => s.aiGuess), true);
@@ -340,6 +346,7 @@ void main() {
     expect(saved!.id, 'existing');
     expect(repository.imports, 1);
     expect(c.draft.aiGuessedFields, isEmpty);
+    expect(c.draft.aiRewrittenSteps, false);
     expect(c.draft.steps.any((s) => s.aiGuess), false);
     expect(saved.createdAt, repository.savedBase!.createdAt);
     expect(saved.revision, repository.savedBase!.revision + 1);

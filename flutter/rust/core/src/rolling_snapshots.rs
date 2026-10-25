@@ -100,6 +100,20 @@ pub fn before_sync(db: &mut Connection, pairing: &str) {
     }
 }
 
+/// A selected deletion is recoverable only after its archive is durable.
+/// Unlike periodic maintenance, failure must leave all selected recipes intact.
+pub fn before_delete(db: &mut Connection) -> Result<(), String> {
+    take(
+        db,
+        "before_delete",
+        Utc::now(),
+        Local::now().date_naive(),
+        SIZE_CAP,
+    )?
+    .ok_or("Could not create a snapshot before deleting recipes")?;
+    Ok(())
+}
+
 /// Automatic attempts are throttled after failure; risky operations still try immediately.
 /// Errors are recorded quietly and never returned to a save or sync caller.
 pub fn attempt(db: &mut Connection, reason: &str) -> bool {
@@ -162,7 +176,7 @@ fn take(
         prune(db, &entries, day, cap)?;
         return Ok(None);
     }
-    if bytes.len() as u64 > cap && reason != "before_restore" {
+    if bytes.len() as u64 > cap && !matches!(reason, "before_restore" | "before_delete") {
         return Err("Snapshot exceeds storage cap".into());
     }
     let entry = Entry {
@@ -208,7 +222,7 @@ fn retained(entries: &[Entry], day: NaiveDate, cap: u64) -> HashSet<String> {
     let mut weeks = HashSet::new();
     let protected = entries
         .last()
-        .filter(|e| e.reason == "before_restore")
+        .filter(|e| matches!(e.reason.as_str(), "before_restore" | "before_delete"))
         .map(|e| &e.id);
     // An unchanged library must not age out its last recovery point.
     if let Some(latest) = entries.last() {

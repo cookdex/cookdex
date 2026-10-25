@@ -67,13 +67,29 @@ fn exact_endpoints_separators_snapping_and_invalid_input() {
 }
 #[test]
 fn all_local_import_routes_accept_ranges_without_quantity_warnings() {
-    for amount in ["6-7", "6 - 7", "6 to 7", "6–7", "1/2–1", "1 1/2–2"] {
+    for amount in [
+        "6-7",
+        "6 - 7",
+        "6 to 7",
+        "6–7",
+        "1/2–1",
+        "1 1/2–2",
+        "2-3/8",
+        "2 - 3/8",
+        "2-3/8–4-1/2",
+        "1/4-1/2",
+        "1-3/2",
+    ] {
         let expected = Amount::parse_new(amount).unwrap();
         let written = json!({"status":"ok","reason":"","title":"Garlic","description":"","servings":"","prepTime":"","cookTime":"","totalTime":"","source":"","notes":"","tags":[],"ingredients":[{"amount":amount,"unit":"cloves","name":"garlic","prepNote":"minced","optional":false,"section":""}],"steps":["Mix."]});
         let reply = serde_json::to_vec(&json!({"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":written.to_string()}]}]})).unwrap();
         let (ai, warnings) = provider::validated_response(&reply).unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
-        let text = recipe::text::export_recipe(&ai).unwrap();
+        // Import the actual written spelling through Text v1, not just the
+        // already-normalized export produced by the provider boundary.
+        let text = recipe::text::export_recipe(&ai)
+            .unwrap()
+            .replace(&expected.text(), amount);
         let own = recipe::text::import_text(&text, NOW)
             .unwrap()
             .candidates
@@ -113,6 +129,58 @@ fn all_local_import_routes_accept_ranges_without_quantity_warnings() {
         assert_eq!(r.ingredient.amount, Amount::Unspecified);
         assert_eq!(r.ingredient.name, s);
     }
+}
+#[test]
+fn hyphenated_mixed_numbers_have_precedence_only_for_proper_fractional_parts() {
+    for (written, plain, is_range) in [
+        ("1-1/4", "1 1/4", false),
+        ("3 - 2/5", "3 2/5", false),
+        ("0-3/8", "3/8", false),
+        ("2-0/7", "2", false),
+        ("1-2", "1–2", true),
+        ("1/4-1/2", "1/4–1/2", true),
+        ("1-4/4", "1", false),
+        ("1-5/4", "1–1 1/4", true),
+        ("1-1/4-2-1/2", "1 1/4–2 1/2", true),
+        ("1-1/4 to 2", "1 1/4–2", true),
+    ] {
+        for parsed in [Amount::parse_new(written), Amount::parse_exact(written)] {
+            let parsed = parsed.unwrap();
+            assert_eq!(parsed.text(), plain, "{written}");
+            assert_eq!(
+                matches!(parsed, Amount::Range { .. }),
+                is_range,
+                "{written}"
+            );
+        }
+    }
+    for invalid in [
+        "1–1/4",
+        "1 to 1/4",
+        "2-5/4",
+        "1-1/0",
+        "1--1/4",
+        "1-1/4-1",
+        "1-1/4-2-1/2-3",
+        "-1-1/4",
+        "9007199254740991-1/2",
+    ] {
+        assert!(Amount::parse_exact(invalid).is_err(), "{invalid}");
+    }
+    let written = recipe::WrittenIngredient {
+        amount: "2-3/8".into(),
+        unit: "cups".into(),
+        name: "rye flakes".into(),
+        prep_note: String::new(),
+        optional: false,
+        section: String::new(),
+    };
+    let edited = written.parse().unwrap();
+    assert_eq!(edited.amount.text(), "2 3/8");
+    assert_eq!(
+        serde_json::to_value(edited.amount).unwrap(),
+        json!({"kind":"number","numerator":19,"denominator":8})
+    );
 }
 #[test]
 fn save_cleanup_recovery_is_conservative_and_idempotent() {
