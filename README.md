@@ -56,6 +56,7 @@ Most phones from the last several years are supported (64-bit ARM).
 3. Run cookdex from that folder. If Windows says "Windows protected your PC," click **More info → Run anyway**. That happens because the app isn't code-signed.
 
 **Updating:** replace the folder with the new one. Your recipes are stored separately in your Windows user data, so they aren't affected.
+**Update notices:** turn on Check automatically in Settings > About, and cookdex will let you know when a new version is out.
 
 ## Using cookdex
 
