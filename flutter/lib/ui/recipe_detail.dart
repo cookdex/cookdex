@@ -30,6 +30,7 @@ class RecipeDetail extends StatefulWidget {
     required this.onAddToShopping,
     this.showControls = true,
     this.onControlsHeight,
+    this.backTooltip = 'Back to recipes',
   });
   final RecipeStore store;
   final String recipeId;
@@ -41,6 +42,7 @@ class RecipeDetail extends StatefulWidget {
   final VoidCallback onAddToShopping;
   final bool showControls;
   final ValueChanged<double>? onControlsHeight;
+  final String backTooltip;
 
   @override
   State<RecipeDetail> createState() => _RecipeDetailState();
@@ -252,7 +254,7 @@ class _RecipeDetailState extends State<RecipeDetail> {
                   final actionsWidth = buttonWidth + 144;
                   final split = actionsWidth + 48 > constraints.maxWidth;
                   final back = IconButton(
-                    tooltip: 'Back to recipes',
+                    tooltip: widget.backTooltip,
                     onPressed: widget.onBack,
                     icon: const Icon(Symbols.arrow_back),
                   );

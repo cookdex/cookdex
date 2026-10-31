@@ -48,6 +48,7 @@ android {
         applicationId = if (production) "com.sylph.cookdex" else "com.sylph.cookdex.dev"
         manifestPlaceholders["appLabel"] = if (production) "cookdex" else "cookdex dev"
         manifestPlaceholders["appIcon"] = if (production) "@mipmap/ic_launcher_production" else "@mipmap/ic_launcher"
+        manifestPlaceholders["appRoundIcon"] = if (production) "@mipmap/ic_launcher_production_round" else "@mipmap/ic_launcher_round"
         // Filter every dependency, including scanner libraries, to shipped ARM64.
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.

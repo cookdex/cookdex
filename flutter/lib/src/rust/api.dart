@@ -99,6 +99,13 @@ abstract class CleanupPreview implements RustOpaqueInterface {
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<CoreSession>>
 abstract class CoreSession implements RustOpaqueInterface {
+  Future<LibraryResult> addLibraryTag({
+    required int generation,
+    required List<String> ids,
+    required String tag,
+    required Operation operation,
+  });
+
   Future<ShoppingResult> addShopping({
     required int generation,
     required String id,
@@ -117,6 +124,14 @@ abstract class CoreSession implements RustOpaqueInterface {
   Future<Uint8List> backup({required Operation operation});
 
   Future<RecipeBackup> backupReport({required Operation operation});
+
+  Future<LibraryResult> changeLibraryNames({
+    required int generation,
+    required bool tags,
+    required List<String> sources,
+    String? target,
+    required Operation operation,
+  });
 
   Future<CollectionSnapshot> cleanup({
     required CleanupPreview preview,
@@ -233,12 +248,21 @@ abstract class CoreSession implements RustOpaqueInterface {
 
   Future<SyncStatus> syncStatus();
 
+  Future<CollectionSnapshot> undoLibraryNames({
+    required int generation,
+    required LibraryUndo undo,
+    required Operation operation,
+  });
+
   Future<CollectionSnapshot> undoShopping({
     required int generation,
     required ShoppingUndo undo,
     required Operation operation,
   });
 }
+
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<LibraryUndo>>
+abstract class LibraryUndo implements RustOpaqueInterface {}
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<Operation>>
 abstract class Operation implements RustOpaqueInterface {
@@ -591,6 +615,30 @@ class Ingredient {
           prepNote == other.prepNote &&
           optional == other.optional &&
           section == other.section;
+}
+
+class LibraryResult {
+  final CollectionSnapshot snapshot;
+  final LibraryUndo undo;
+  final int count;
+
+  const LibraryResult({
+    required this.snapshot,
+    required this.undo,
+    required this.count,
+  });
+
+  @override
+  int get hashCode => snapshot.hashCode ^ undo.hashCode ^ count.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is LibraryResult &&
+          runtimeType == other.runtimeType &&
+          snapshot == other.snapshot &&
+          undo == other.undo &&
+          count == other.count;
 }
 
 class LocalSnapshotEntry {

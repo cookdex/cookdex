@@ -274,6 +274,38 @@ class EditorController extends ChangeNotifier {
     };
   }
 
+  VoidCallback? removeSection(EditableSection section) {
+    final index = draft.sections.indexOf(section);
+    if (_disposed || _finished || index <= 0) return null;
+    if (draft.unappliedPaste && draft.pasteSectionId == section.id) {
+      draft.error = 'Apply or discard this section’s pasted text first.';
+      changed(clearError: false);
+      return null;
+    }
+    final previous = draft.sections[index - 1];
+    final moved = section.rows.toList();
+    previous.rows.addAll(moved);
+    section.rows.clear();
+    draft.sections.removeAt(index);
+    changed();
+    var restored = false;
+    return () {
+      if (_disposed ||
+          _finished ||
+          restored ||
+          draft.sections.contains(section) ||
+          !draft.sections.contains(previous)) {
+        return;
+      }
+      restored = true;
+      // Preserve subsequent edits, deletions and moves. Restore only rows still
+      // in the group that received them; never duplicate or resurrect a row.
+      section.rows.addAll(moved.where(previous.rows.remove));
+      draft.sections.insert(draft.sections.indexOf(previous) + 1, section);
+      changed();
+    };
+  }
+
   Future<core.Recipe?> save({
     Future<Set<int>?> Function(List<NameMatch>)? reviewNames,
     Future<core.DuplicateChoice?> Function(List<core.RecipeSummary>)?

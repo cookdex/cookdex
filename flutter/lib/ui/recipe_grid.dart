@@ -3,11 +3,15 @@ import 'pixel_scroll.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 
 import '../tag_labels.dart';
 import 'components.dart';
 import 'recipe_metadata.dart';
+
+double recipeGridColumnWidth(double width, int columns) =>
+    math.min(420, (width - 12 * (columns - 1)) / columns);
 
 double _textLineHeight(BuildContext context, TextStyle? style) {
   final painter = TextPainter(
@@ -42,8 +46,12 @@ class RecipeCardTextBudget extends StatelessWidget {
     super.key,
     required this.title,
     required this.description,
+    this.preparedTitle,
+    this.preparedTitleLines,
   });
   final String title, description;
+  final Widget? preparedTitle;
+  final int? preparedTitleLines;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
@@ -51,25 +59,31 @@ class RecipeCardTextBudget extends StatelessWidget {
       final titleStyle = theme.textTheme.titleMedium?.copyWith(
         fontWeight: FontWeight.w700,
       );
-      final painter = TextPainter(
-        text: TextSpan(text: title, style: titleStyle),
-        textDirection: Directionality.of(context),
-        textScaler: MediaQuery.textScalerOf(context),
-        maxLines: 2,
-        ellipsis: '…',
-      )..layout(maxWidth: constraints.maxWidth);
-      final titleLines = painter.computeLineMetrics().length.clamp(1, 2);
-      painter.dispose();
+      final painter = preparedTitle == null
+          ? TextPainter(
+              text: TextSpan(text: title, style: titleStyle),
+              textDirection: Directionality.of(context),
+              textScaler: MediaQuery.textScalerOf(context),
+              maxLines: 2,
+              ellipsis: '…',
+            )
+          : null;
+      painter?.layout(maxWidth: constraints.maxWidth);
+      final titleLines =
+          preparedTitleLines ??
+          painter!.computeLineMetrics().length.clamp(1, 2);
+      painter?.dispose();
       return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: titleStyle,
-          ),
+          preparedTitle ??
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: titleStyle,
+              ),
           if (description.isNotEmpty) ...[
             const SizedBox(height: 4),
             Text(
@@ -332,8 +346,7 @@ class _RenderRecipeGridRow extends RenderBox
     }
   }
 
-  double _columnWidth(double width) =>
-      math.min(420, (width - 12 * (_columns - 1)) / _columns);
+  double _columnWidth(double width) => recipeGridColumnWidth(width, _columns);
 
   @override
   Size computeDryLayout(BoxConstraints constraints) {
@@ -455,16 +468,73 @@ class _RenderRecipeGridRow extends RenderBox
 
 /// Static tags occupy one line; the overflow count always remains visible.
 class RecipeTagLine extends StatelessWidget {
-  const RecipeTagLine(this.tags, {super.key});
+  const RecipeTagLine(
+    this.tags, {
+    super.key,
+    this.preparedValues,
+    this.preparedVisible,
+    this.preparedWidth,
+  });
+  final List<String>? preparedValues;
+  final int? preparedVisible;
+  final double? preparedWidth;
 
   final List<String> tags;
 
   @override
   Widget build(BuildContext context) {
-    final values = normalizeTags(tags);
+    final values = preparedValues ?? normalizeTags(tags);
     if (values.isEmpty) return const SizedBox.shrink();
     final style = Theme.of(context).textTheme.labelSmall;
     final scaler = MediaQuery.textScalerOf(context);
+    final inherited = DefaultTextStyle.of(context);
+    final paintedStyle = inherited.style.merge(
+      style?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+    );
+    final locale = Localizations.maybeLocaleOf(context);
+    // The original fit measurement deliberately uses the theme style, while
+    // Text also applies inherited/accessibility overrides. Keep that original
+    // path whenever the two have different metrics or nonstandard behavior.
+    final sameMetrics =
+        style != null &&
+        style
+                .copyWith(inherit: false)
+                .compareTo(paintedStyle.copyWith(inherit: false))
+                .index <=
+            RenderComparison.paint.index;
+    if (sameMetrics &&
+        Directionality.of(context) == TextDirection.ltr &&
+        !MediaQuery.boldTextOf(context) &&
+        MediaQuery.maybeLineHeightScaleFactorOverrideOf(context) == null &&
+        MediaQuery.maybeLetterSpacingOverrideOf(context) == null &&
+        MediaQuery.maybeWordSpacingOverrideOf(context) == null &&
+        SelectionContainer.maybeOf(context) == null &&
+        (locale == null || locale.languageCode == 'en') &&
+        (inherited.textAlign == null ||
+            inherited.textAlign == TextAlign.start) &&
+        inherited.softWrap &&
+        inherited.maxLines == null &&
+        inherited.overflow == TextOverflow.clip &&
+        paintedStyle.overflow == null &&
+        inherited.textWidthBasis == TextWidthBasis.parent &&
+        inherited.textHeightBehavior == null &&
+        DefaultTextHeightBehavior.maybeOf(context) == null) {
+      return Semantics(
+        label: 'Tags: ${values.join(', ')}',
+        excludeSemantics: true,
+        child: Tooltip(
+          message: values.join(', '),
+          child: _PaintedRecipeTags(
+            values,
+            style: paintedStyle,
+            scaler: scaler,
+            direction: Directionality.of(context),
+            locale: locale,
+            background: Theme.of(context).colorScheme.surfaceContainerHighest,
+          ),
+        ),
+      );
+    }
     double labelWidth(String text) {
       final painter = TextPainter(
         text: TextSpan(text: text, style: style),
@@ -479,9 +549,15 @@ class RecipeTagLine extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final widths = values.map(labelWidth).toList();
-        var visible = values.length;
-        while (visible > 0) {
+        final prepared =
+            preparedVisible != null &&
+            preparedWidth == constraints.maxWidth &&
+            values.every((value) => !value.contains('\n'));
+        final widths = prepared
+            ? const <double>[]
+            : values.map(labelWidth).toList();
+        var visible = prepared ? preparedVisible! : values.length;
+        while (!prepared && visible > 0) {
           final hidden = values.length - visible;
           final occupied =
               widths.take(visible).fold(0.0, (a, b) => a + b) +
@@ -512,5 +588,253 @@ class RecipeTagLine extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+/// Owns each shaped label for both fitting and painting. There is no cache
+/// shared by recipes, and labels beyond the first non-fitting one are unshaped.
+class _PaintedRecipeTags extends LeafRenderObjectWidget {
+  const _PaintedRecipeTags(
+    this.values, {
+    required this.style,
+    required this.scaler,
+    required this.direction,
+    required this.locale,
+    required this.background,
+  });
+
+  final List<String> values;
+  final TextStyle style;
+  final TextScaler scaler;
+  final TextDirection direction;
+  final Locale? locale;
+  final Color background;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderRecipeTags(
+    _TagParagraphs(values, style, scaler, direction, locale),
+    background,
+  );
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderRecipeTags renderObject,
+  ) {
+    renderObject.update(values, style, scaler, direction, locale, background);
+  }
+}
+
+class _RenderRecipeTags extends RenderBox
+    with RelayoutWhenSystemFontsChangeMixin {
+  _RenderRecipeTags(this.paragraphs, this.background);
+
+  _TagParagraphs paragraphs;
+  Color background;
+
+  void update(
+    List<String> values,
+    TextStyle style,
+    TextScaler scaler,
+    TextDirection direction,
+    Locale? locale,
+    Color background,
+  ) {
+    if (!listEquals(values, paragraphs.values) ||
+        style != paragraphs.style ||
+        scaler != paragraphs.scaler ||
+        direction != paragraphs.direction ||
+        locale != paragraphs.locale) {
+      paragraphs.dispose();
+      paragraphs = _TagParagraphs(values, style, scaler, direction, locale);
+      markNeedsLayout();
+    }
+    if (this.background != background) {
+      this.background = background;
+      markNeedsPaint();
+    }
+  }
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) {
+    final dry = _TagParagraphs(
+      paragraphs.values,
+      paragraphs.style,
+      paragraphs.scaler,
+      paragraphs.direction,
+      paragraphs.locale,
+    );
+    try {
+      return dry.layout(constraints);
+    } finally {
+      dry.dispose();
+    }
+  }
+
+  @override
+  void performLayout() => size = paragraphs.layout(constraints);
+
+  @override
+  bool hitTestSelf(Offset position) => paragraphs.hitTest(position, size);
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      paragraphs.paint(context.canvas, offset, size, background);
+
+  @override
+  void systemFontsDidChange() {
+    super.systemFontsDidChange();
+    paragraphs.invalidateFonts();
+  }
+
+  @override
+  void dispose() {
+    paragraphs.dispose();
+    super.dispose();
+  }
+}
+
+class _TagParagraphs {
+  _TagParagraphs(
+    this.values,
+    this.style,
+    this.scaler,
+    this.direction,
+    this.locale,
+  ) : labels = List.filled(values.length, null);
+
+  final List<String> values;
+  final TextStyle style;
+  final TextScaler scaler;
+  final TextDirection direction;
+  final Locale? locale;
+  final List<TextPainter?> labels;
+  TextPainter? counter;
+  int visible = 0;
+  final List<Size> boxes = [];
+
+  TextPainter _paragraph(String text) => TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: direction,
+    textScaler: scaler,
+    locale: locale,
+  );
+
+  TextPainter _label(int index) {
+    final painter = labels[index] ??= _paragraph(values[index]);
+    painter.layout();
+    return painter;
+  }
+
+  Size layout(BoxConstraints constraints) {
+    var occupied = 0.0;
+    visible = 0;
+    boxes.clear();
+    while (visible < values.length) {
+      final width = _label(visible).width + 16;
+      final next = occupied + (visible > 0 ? 6 : 0) + width;
+      if (next > constraints.maxWidth) break;
+      occupied = next;
+      visible++;
+    }
+    if (visible < values.length) {
+      counter ??= _paragraph('');
+      while (true) {
+        counter!.text = TextSpan(
+          text: '+${values.length - visible}',
+          style: style,
+        );
+        counter!.layout();
+        final next = occupied + (visible > 0 ? 6 : 0) + counter!.width + 16;
+        if (next <= constraints.maxWidth || visible == 0) break;
+        visible--;
+        occupied -= labels[visible]!.width + 16 + (visible > 0 ? 6 : 0);
+      }
+    }
+    var height = 0.0;
+    for (var i = 0; i < visible; i++) {
+      final box = Size(
+        labels[i]!.width + 16,
+        math.min(constraints.maxHeight, labels[i]!.height + 8),
+      );
+      boxes.add(box);
+      height = math.max(height, box.height);
+    }
+    if (visible < values.length) {
+      final remaining = math.max(
+        0.0,
+        constraints.maxWidth - occupied - (visible > 0 ? 6 : 0),
+      );
+      counter!.layout(maxWidth: math.max(0, remaining - 16));
+      final box = Size(
+        math.min(remaining, counter!.width + 16),
+        math.min(constraints.maxHeight, counter!.height + 8),
+      );
+      boxes.add(box);
+      height = math.max(height, box.height);
+      occupied += (visible > 0 ? 6 : 0) + box.width;
+    }
+    return constraints.constrain(
+      Size(
+        constraints.hasBoundedWidth ? constraints.maxWidth : occupied,
+        height,
+      ),
+    );
+  }
+
+  bool hitTest(Offset position, Size size) {
+    var x = 0.0;
+    for (final box in boxes) {
+      final rect = Offset(x, (size.height - box.height) / 2) & box;
+      if (RRect.fromRectAndRadius(
+        rect,
+        const Radius.circular(4),
+      ).contains(position)) {
+        return true;
+      }
+      x += box.width + 6;
+    }
+    return false;
+  }
+
+  void invalidateFonts() {
+    for (final painter in labels) {
+      painter?.markNeedsLayout();
+    }
+    counter?.markNeedsLayout();
+  }
+
+  void paint(Canvas canvas, Offset offset, Size size, Color background) {
+    final paint = Paint()..color = background;
+    var x = 0.0;
+    for (var i = 0; i < boxes.length; i++) {
+      final box = boxes[i];
+      final origin = offset + Offset(x, (size.height - box.height) / 2);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(origin & box, const Radius.circular(4)),
+        paint,
+      );
+      final text = i < visible ? labels[i]! : counter!;
+      final textOrigin = origin + const Offset(8, 4);
+      final textBox = Size(
+        math.max(0, box.width - 16),
+        math.max(0, box.height - 8),
+      );
+      final clip = text.width > textBox.width || text.height > textBox.height;
+      if (clip) {
+        canvas.save();
+        canvas.clipRect(textOrigin & textBox);
+      }
+      text.paint(canvas, textOrigin);
+      if (clip) canvas.restore();
+      x += box.width + 6;
+    }
+  }
+
+  void dispose() {
+    for (final painter in labels) {
+      painter?.dispose();
+    }
+    counter?.dispose();
   }
 }

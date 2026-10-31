@@ -227,7 +227,12 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Settings').last);
         await tester.pumpAndSettle();
-        await reveal(tester, find.text('Smart Import settings'));
+        await tester.scrollUntilVisible(
+          find.text('Smart Import settings'),
+          200,
+          scrollable: find.byType(Scrollable).last,
+        );
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Smart Import settings'));
         await tester.pumpAndSettle();
         expect(find.byType(SmartSettingsScreen), findsOneWidget);

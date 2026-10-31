@@ -362,28 +362,32 @@ class _ImportScreenState extends State<ImportScreen>
                 children: [
                   PixelScrollScope(
                     axis: Axis.horizontal,
-                    builder: (context) => TextField(
-                      scrollController: PrimaryScrollController.of(context),
-                      controller: key,
-                      obscureText: true,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      enableIMEPersonalizedLearning: false,
-                      textCapitalization: TextCapitalization.none,
-                      decoration: InputDecoration(
-                        labelText: 'Gemini key',
-                        hintText: settings.hasKey ? 'Key saved' : null,
+                    builder: (context) => DialogFieldPadding(
+                      child: TextField(
+                        scrollController: PrimaryScrollController.of(context),
+                        controller: key,
+                        obscureText: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        enableIMEPersonalizedLearning: false,
+                        textCapitalization: TextCapitalization.none,
+                        decoration: InputDecoration(
+                          labelText: 'Gemini key',
+                          hintText: settings.hasKey ? 'Key saved' : null,
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(height: 12),
                   PixelScrollScope(
                     axis: Axis.horizontal,
-                    builder: (context) => TextField(
-                      scrollController: PrimaryScrollController.of(context),
-                      controller: model,
-                      autocorrect: false,
-                      decoration: const InputDecoration(labelText: 'Model'),
+                    builder: (context) => DialogFieldPadding(
+                      child: TextField(
+                        scrollController: PrimaryScrollController.of(context),
+                        controller: model,
+                        autocorrect: false,
+                        decoration: const InputDecoration(labelText: 'Model'),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),

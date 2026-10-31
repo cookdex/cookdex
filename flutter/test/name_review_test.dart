@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'editor_test.dart' show controller, DuplicateEditorFake;
+import 'library_screen_test.dart' show LibraryFakeRepository;
 
 Recipe namedRecipe(String id, String name, {String tag = 'Dinner'}) => Recipe(
   id: id,
@@ -63,6 +64,48 @@ Future<void> reviewHarness(WidgetTester tester, EditorController c) async {
 }
 
 void main() {
+  test(
+    'Library rename and Undo carry deliberate ingredient and tag spellings',
+    () async {
+      final base = namedRecipe('deliberate', 'SALT.', tag: 'DINNER.');
+      final library = [
+        base,
+        namedRecipe('a', 'Sea salt', tag: 'Dinner'),
+        namedRecipe('b', 'Sea salt', tag: 'Dinner'),
+      ];
+      final repo = LibraryFakeRepository(library);
+      final prefs = LocalPreferences.memory();
+      final store = RecipeStore(repo, prefs);
+      await store.initialize();
+      addTearDown(() {
+        store.dispose();
+        prefs.dispose();
+      });
+      for (final tags in [false, true]) {
+        final result = await store.changeLibraryNames(store.generation, tags, [
+          tags ? 'DINNER.' : 'SALT.',
+        ], tags ? 'Dinner!' : 'SEA SALT.');
+        final changed = repo.recipes[base.id]!;
+        final (editor, _, _) = await controller(
+          base: changed,
+          recipes: repo.recipes.values.toList(),
+        );
+        editor.draft.description = 'An unrelated edit';
+        editor.draft.sections.single.rows.single.amount = '2';
+        expect(editor.nameMatches(), isEmpty);
+        await store.undoLibraryNames(result.undo);
+        final restored = repo.recipes[base.id]!;
+        final (reopened, _, _) = await controller(
+          base: restored,
+          recipes: repo.recipes.values.toList(),
+        );
+        reopened.draft.notes = 'Another unrelated edit';
+        expect(reopened.nameMatches(), isEmpty);
+        expect(recipeToJson(restored)['fields'], recipeToJson(base)['fields']);
+      }
+    },
+  );
+
   test(
     'only changed names are offered after amount edits and moving rows',
     () async {

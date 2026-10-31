@@ -4,12 +4,35 @@ import 'package:flutter/foundation.dart';
 
 import 'local_preferences.dart';
 import 'name_matching.dart';
+import 'recipe_search.dart';
 import 'src/rust/api.dart' as core;
 
 class BackupPreview {
   const BackupPreview(this.report, this.token);
   final core.RestoreReport report;
   final Object token;
+}
+
+class LibraryChangeResult {
+  const LibraryChangeResult(this.snapshot, this.undo, this.count);
+  final core.CollectionSnapshot snapshot;
+  final Object undo;
+  final int count;
+}
+
+abstract interface class LibraryRepository {
+  Future<LibraryChangeResult> addLibraryTag(
+    int generation,
+    List<String> ids,
+    String tag,
+  );
+  Future<LibraryChangeResult> changeLibraryNames(
+    int generation,
+    bool tags,
+    List<String> sources,
+    String? target,
+  );
+  Future<core.CollectionSnapshot> undoLibraryNames(int generation, Object undo);
 }
 
 abstract interface class RecipeRepository {
@@ -105,9 +128,51 @@ class RustRecipeRepository
         ImportRecipeRepository,
         SetAsideRepository,
         BatchDeleteRepository,
+        LibraryRepository,
         ScalingRepository {
   RustRecipeRepository(this.session);
   final core.CoreSession session;
+  @override
+  Future<LibraryChangeResult> addLibraryTag(
+    int generation,
+    List<String> ids,
+    String tag,
+  ) async {
+    final result = await session.addLibraryTag(
+      generation: generation,
+      ids: ids,
+      tag: tag,
+      operation: core.Operation(),
+    );
+    return LibraryChangeResult(result.snapshot, result.undo, result.count);
+  }
+
+  @override
+  Future<LibraryChangeResult> changeLibraryNames(
+    int generation,
+    bool tags,
+    List<String> sources,
+    String? target,
+  ) async {
+    final result = await session.changeLibraryNames(
+      generation: generation,
+      tags: tags,
+      sources: sources,
+      target: target,
+      operation: core.Operation(),
+    );
+    return LibraryChangeResult(result.snapshot, result.undo, result.count);
+  }
+
+  @override
+  Future<core.CollectionSnapshot> undoLibraryNames(
+    int generation,
+    Object undo,
+  ) => session.undoLibraryNames(
+    generation: generation,
+    undo: undo as core.LibraryUndo,
+    operation: core.Operation(),
+  );
   @override
   Future<core.CollectionSnapshot> deleteMany(
     int generation,
@@ -281,7 +346,9 @@ class RecipeStore extends ChangeNotifier {
   final Map<String, Map<SearchField, String>> _search = {};
   final Map<RecipeSort, List<core.RecipeSummary>> _ordered = {};
   List<core.RecipeSummary>? _visible;
-  List<String> _visibleWords = const [];
+  String? _visibleQuery;
+  int? _partialMatchStart;
+  int? get partialMatchStart => _partialMatchStart;
   RecipeSort? _visibleSort;
   Set<SearchField> _visibleFields = const {};
   bool? _visibleFavorites;
@@ -348,6 +415,7 @@ class RecipeStore extends ChangeNotifier {
           ];
     _ordered.clear();
     _visible = null;
+    _refreshVisible();
   }
 
   List<core.ShoppingCategory> get shoppingCategories =>
@@ -407,59 +475,69 @@ class RecipeStore extends ChangeNotifier {
   int get uncheckedShoppingCount =>
       _snapshot?.shopping.where((i) => !i.checked).length ?? 0;
 
-  /// Literal every-word matching over cached fields: this getter does no I/O.
-  List<core.RecipeSummary> get visibleRecipes {
-    final words = preferences.query
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .where((w) => w.isNotEmpty)
-        .toList();
+  /// Computed on query/filter/collection changes, never while building/scrolling.
+  List<core.RecipeSummary> get visibleRecipes => _visible ?? const [];
+
+  void _refreshVisible() {
     final sameOptions =
         _visible != null &&
         _visibleSort == preferences.sort &&
         _visibleFavorites == preferences.favoritesOnly &&
         setEquals(_visibleFields, preferences.searchFields);
-    if (sameOptions && listEquals(words, _visibleWords)) return _visible!;
-    final ordered = _ordered.putIfAbsent(preferences.sort, () {
-      final result = summaries.toList();
-      result.sort((a, b) {
-        final primary = switch (preferences.sort) {
-          RecipeSort.edited => b.updatedAt.compareTo(a.updatedAt),
-          RecipeSort.added => b.createdAt.compareTo(a.createdAt),
-          RecipeSort.title => _search[a.id]![SearchField.title]!.compareTo(
-            _search[b.id]![SearchField.title]!,
-          ),
-        };
-        return primary == 0 ? a.id.compareTo(b.id) : primary;
-      });
-      return result;
-    });
-    // Every match for a stronger query also matched its weaker predecessor.
-    // Backspacing, changing fields or widening favorites starts from all rows.
-    final source =
-        sameOptions &&
-            _visibleWords.every(
-              (old) => words.any((word) => word.contains(old)),
-            )
-        ? _visible!
-        : ordered;
-    final result = source.where((r) {
-      if (preferences.favoritesOnly && !r.favorite) return false;
-      final projection = _search[r.id]!;
-      return words.every(
-        (word) => preferences.searchFields.any(
-          (field) => projection[field]!.contains(word),
-        ),
-      );
-    }).toList();
-    if (!listEquals(result, _visible)) {
-      _visible = List.unmodifiable(result);
+    if (sameOptions && _visibleQuery == preferences.query) return;
+    final ordered = _orderedRecipes(preferences.sort);
+    final result = rankRecipes(
+      ordered,
+      _search,
+      query: preferences.query,
+      fields: preferences.searchFields,
+      favoritesOnly: preferences.favoritesOnly,
+    );
+    if (!listEquals(result.recipes, _visible)) {
+      _visible = result.recipes;
     }
-    _visibleWords = words;
+    _partialMatchStart = result.partialStart;
+    _visibleQuery = preferences.query;
     _visibleSort = preferences.sort;
     _visibleFields = Set.of(preferences.searchFields);
     _visibleFavorites = preferences.favoritesOnly;
-    return _visible!;
+  }
+
+  List<core.RecipeSummary> _orderedRecipes(RecipeSort sort) =>
+      _ordered.putIfAbsent(sort, () {
+        final result = summaries.toList();
+        result.sort((a, b) {
+          final primary = switch (sort) {
+            RecipeSort.edited => b.updatedAt.compareTo(a.updatedAt),
+            RecipeSort.added => b.createdAt.compareTo(a.createdAt),
+            RecipeSort.title => _search[a.id]![SearchField.title]!.compareTo(
+              _search[b.id]![SearchField.title]!,
+            ),
+          };
+          return primary == 0 ? a.id.compareTo(b.id) : primary;
+        });
+        return result;
+      });
+
+  /// Picker-local filters retain their existing literal all-word search.
+  /// Reads only summary projections; never loads every recipe detail.
+  List<core.RecipeSummary> recipesMatching(LocalPreferences filters) {
+    final ordered = _orderedRecipes(filters.sort);
+    final words = filters.query
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty);
+    return ordered
+        .where(
+          (r) =>
+              (!filters.favoritesOnly || r.favorite) &&
+              words.every(
+                (word) => filters.searchFields.any(
+                  (field) => _search[r.id]![field]!.contains(word),
+                ),
+              ),
+        )
+        .toList();
   }
 
   Future<void> initialize() async {
@@ -644,6 +722,7 @@ class RecipeStore extends ChangeNotifier {
     );
     generation = snapshot.generation;
     _projectFavorites();
+    _refreshVisible();
     loading = false;
     if (notify) notifyListeners();
   }
@@ -754,6 +833,50 @@ class RecipeStore extends ChangeNotifier {
       }
     });
   }
+
+  Future<LibraryChangeResult> addLibraryTag(
+    int expected,
+    List<String> ids,
+    String tag,
+  ) => _mutate(() async {
+    if (generation != expected) throw StateError('The Library changed.');
+    final result = await (repository as LibraryRepository).addLibraryTag(
+      expected,
+      ids,
+      tag,
+    );
+    _apply(result.snapshot);
+    error = null;
+    return result;
+  });
+
+  Future<LibraryChangeResult> changeLibraryNames(
+    int expectedGeneration,
+    bool tags,
+    List<String> sources,
+    String? target,
+  ) => _mutate(() async {
+    if (generation != expectedGeneration) {
+      throw StateError('The Library changed. Review the names again.');
+    }
+    final result = await (repository as LibraryRepository).changeLibraryNames(
+      generation,
+      tags,
+      sources,
+      target,
+    );
+    _apply(result.snapshot);
+    return result;
+  });
+
+  Future<void> undoLibraryNames(Object undo) => _mutate(() async {
+    _apply(
+      await (repository as LibraryRepository).undoLibraryNames(
+        generation,
+        undo,
+      ),
+    );
+  });
 
   Future<core.CollectionSnapshot> _favorite(String id, bool value) async {
     final cached = _details[id];
@@ -879,7 +1002,10 @@ class RecipeStore extends ChangeNotifier {
   String _message(Object e) =>
       e is core.ServiceError ? e.message : e.toString();
   void _preferencesChanged() {
-    if (!_disposed) notifyListeners();
+    if (!_disposed) {
+      _refreshVisible();
+      notifyListeners();
+    }
   }
 
   @override

@@ -1,5 +1,6 @@
 import 'pixel_scroll.dart';
 import 'idle_build_ahead.dart';
+import 'window_size.dart';
 
 import 'dart:async';
 
@@ -52,8 +53,23 @@ class _RecipeEditorState extends State<RecipeEditor>
   EditorController get c => widget.controller;
   EditorDraft get d => c.draft;
   bool _leaving = false, _backDialog = false;
+  String? _placingSection;
+  _SectionDragSession? _sectionDragSession;
+  bool get _sectionDrag => _sectionDragSession != null;
+  Duration get _sectionTransition => MediaQuery.disableAnimationsOf(context)
+      ? Duration.zero
+      : const Duration(milliseconds: 220);
+  final _editorViewportKey = GlobalKey();
+  double _sectionFocusSpace = 0;
+  final _scroll = PixelScrollController();
+  final _sectionKeys = <String, GlobalKey>{};
+  final _ingredientLinks = <String, LayerLink>{};
+  final _ingredientsHeadingKey = GlobalKey();
+  final _ingredientListKey = GlobalKey<SliverReorderableListState>();
   final _suggestions = _EditorSuggestions();
   final _keyboardVisible = ValueNotifier(false);
+  Timer? _keyboardSettleTimer;
+  double _keyboardInset = 0;
   List<String> _usedUnits = const [];
   final _hintWidths = <String, double>{};
   Timer? _unitTimer;
@@ -104,11 +120,15 @@ class _RecipeEditorState extends State<RecipeEditor>
     super.didChangeDependencies();
     // Font, scale and direction can all change the actual hint width.
     _hintWidths.clear();
+    _updateKeyboardInset();
   }
 
   @override
   void dispose() {
+    _sectionDragSession?.dispose();
+    _scroll.dispose();
     _unitTimer?.cancel();
+    _keyboardSettleTimer?.cancel();
     unawaited(c.flush());
     WidgetsBinding.instance.removeObserver(this);
     _keyboardVisible.dispose();
@@ -118,8 +138,22 @@ class _RecipeEditorState extends State<RecipeEditor>
 
   @override
   void didChangeMetrics() {
-    final view = WidgetsBinding.instance.platformDispatcher.views.first;
-    _keyboardVisible.value = view.viewInsets.bottom > 0;
+    _updateKeyboardInset();
+  }
+
+  void _updateKeyboardInset() {
+    final inset = View.of(context).viewInsets.bottom;
+    if (inset == _keyboardInset) return;
+    _keyboardInset = inset;
+    _keyboardSettleTimer?.cancel();
+    // The strip does not ride the IME's inset animation. Hide at the first
+    // movement and reveal once metrics settle, without rebuilding editor rows.
+    _keyboardVisible.value = false;
+    if (inset > 0) {
+      _keyboardSettleTimer = Timer(const Duration(milliseconds: 80), () {
+        if (mounted) _keyboardVisible.value = true;
+      });
+    }
   }
 
   @override
@@ -128,6 +162,14 @@ class _RecipeEditorState extends State<RecipeEditor>
   }
 
   Future<void> _back() async {
+    if (_placingSection != null) {
+      setState(() => _placingSection = null);
+      return;
+    }
+    if (_sectionDrag) {
+      unawaited(_finishSectionDrag(cancel: true));
+      return;
+    }
     if (c.saving || _backDialog || _leaving) return;
     await c.flush();
     if (!mounted) return;
@@ -310,18 +352,47 @@ class _RecipeEditorState extends State<RecipeEditor>
     showUndo(context, message: '$label deleted', onUndo: undo);
   }
 
-  Widget _heading(String text, {List<Widget> actions = const []}) => Padding(
-    padding: const EdgeInsets.only(top: 24, bottom: 8),
-    child: Wrap(
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 12,
-      children: [
-        Text(text, style: Theme.of(context).textTheme.titleLarge),
-        ...actions,
-      ],
-    ),
-  );
+  Future<void> _deleteSection(EditableSection section) async {
+    if (d.unappliedPaste && d.pasteSectionId == section.id) {
+      _delete(d.sections, section, 'Section');
+      return;
+    }
+    final name = section.name.isEmpty
+        ? 'this unnamed section'
+        : '“${section.name}”';
+    final confirmed = await confirmCookdex(
+      context,
+      title: 'Delete section?',
+      action: 'Delete section',
+      destructive: true,
+      content: Text('Delete $name and all its ingredients?'),
+    );
+    if (mounted && confirmed && d.sections.contains(section)) {
+      _delete(d.sections, section, 'Section');
+    }
+  }
+
+  void _removeSection(EditableSection section) {
+    final undo = c.removeSection(section);
+    if (undo != null) {
+      showUndo(context, message: 'Section removed', onUndo: undo);
+    }
+  }
+
+  Widget _heading(String text, {List<Widget> actions = const [], Key? key}) =>
+      Padding(
+        key: key,
+        padding: const EdgeInsets.only(top: 24, bottom: 8),
+        child: Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          children: [
+            Text(text, style: Theme.of(context).textTheme.titleLarge),
+            ...actions,
+          ],
+        ),
+      );
   Widget _field(
     String key,
     String label,
@@ -381,13 +452,15 @@ class _RecipeEditorState extends State<RecipeEditor>
         title: const Text('Section name'),
         content: PixelScrollScope(
           axis: Axis.horizontal,
-          builder: (context) => TextField(
-            scrollController: PrimaryScrollController.of(context),
-            controller: text,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(labelText: 'Name'),
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => Navigator.pop(ctx, text.text),
+          builder: (context) => DialogFieldPadding(
+            child: TextField(
+              scrollController: PrimaryScrollController.of(context),
+              controller: text,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(labelText: 'Name'),
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => Navigator.pop(ctx, text.text),
+            ),
           ),
         ),
         actions: [
@@ -406,6 +479,536 @@ class _RecipeEditorState extends State<RecipeEditor>
     Future<void>.delayed(const Duration(seconds: 1), text.dispose);
     if (value != null && mounted) _change(() => section.name = value.trim());
   }
+
+  Future<void> _addSection() async {
+    final text = TextEditingController();
+    final hasIngredients = d.sections.any((s) => s.rows.any((r) => !r.blank));
+    final choice = await showDialog<(String, bool)>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Section name'),
+        actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+        buttonPadding: EdgeInsets.zero,
+        content: PixelScrollScope(
+          axis: Axis.horizontal,
+          builder: (context) => DialogFieldPadding(
+            child: TextField(
+              scrollController: PrimaryScrollController.of(context),
+              controller: text,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(labelText: 'Name'),
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => Navigator.pop(ctx, (text.text.trim(), false)),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              minimumSize: const Size(0, 48),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              minimumSize: const Size(0, 48),
+            ),
+            onPressed: () => Navigator.pop(ctx, (text.text.trim(), false)),
+            child: const Text('Add at end'),
+          ),
+          if (hasIngredients)
+            TextButton(
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                minimumSize: const Size(0, 48),
+              ),
+              onPressed: () => Navigator.pop(ctx, (text.text.trim(), true)),
+              child: const Text('Choose spot'),
+            ),
+        ],
+      ),
+    );
+    Future<void>.delayed(const Duration(seconds: 1), text.dispose);
+    if (!mounted || choice == null) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (choice.$2) {
+      setState(() => _placingSection = choice.$1);
+    } else {
+      _insertSection(choice.$1);
+    }
+  }
+
+  void _insertSection(String name, {EditableSection? source, int? rowIndex}) {
+    final section = EditableSection(name: name);
+    setState(() => _placingSection = null);
+    _change(() {
+      if (source == null) {
+        section.rows.add(EditableIngredient());
+        d.sections.add(section);
+      } else {
+        section.rows.addAll(source.rows.skip(rowIndex!));
+        source.rows.removeRange(rowIndex, source.rows.length);
+        if (section.rows.isEmpty) section.rows.add(EditableIngredient());
+        d.sections.insert(d.sections.indexOf(source) + 1, section);
+      }
+    });
+    unawaited(
+      _revealEditorKey(_sectionKeys.putIfAbsent(section.id, GlobalKey.new)),
+    );
+  }
+
+  Future<void> _revealEditorKey(
+    GlobalKey key, {
+    bool fromStart = false,
+    Duration? duration,
+  }) async {
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !_scroll.hasClients) return;
+    if (fromStart && _editorKeyRect(key) == null) {
+      _scroll.jumpTo(0);
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    // Sliver children can be unbuilt. Advance by viewports until the new header
+    // is laid out, then align it precisely rather than guessing row heights.
+    while (mounted && _editorKeyRect(key) == null && _scroll.hasClients) {
+      final position = _scroll.position;
+      final next = (position.pixels + position.viewportDimension * .8).clamp(
+        0.0,
+        position.maxScrollExtent,
+      );
+      if (next == position.pixels) break;
+      _scroll.jumpTo(next);
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (!mounted) return;
+    final target = key.currentContext;
+    if (target != null && target.mounted && _editorKeyRect(key) != null) {
+      await Scrollable.ensureVisible(
+        target,
+        alignment: 0,
+        duration: duration ?? _sectionTransition,
+      );
+      // A zero-duration reveal schedules layout; measure return positions only
+      // after the new scroll offset has actually been laid out.
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
+  Widget _placementMarker(
+    EditableSection section,
+    int index, {
+    bool line = true,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    final tightLabel = MediaQuery.textScalerOf(context).scale(14) > 20;
+    final button = TextButton(
+      key: ValueKey('section-spot-${section.id}-$index'),
+      style: TextButton.styleFrom(
+        foregroundColor: colors.tertiary,
+        minimumSize: const Size(0, 48),
+        padding: EdgeInsets.zero,
+      ),
+      onPressed: () {
+        final atEnd = index == section.rows.length;
+        _insertSection(
+          _placingSection!,
+          source: atEnd ? null : section,
+          rowIndex: atEnd ? null : index,
+        );
+      },
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.tertiary,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: tightLabel ? 0 : 2,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Symbols.add, size: 18, color: colors.onTertiary),
+              const SizedBox(width: 6),
+              Text(
+                'Start here',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: colors.onTertiary,
+                  fontWeight: FontWeight.w700,
+                  // Preserve enlarged glyphs while removing surplus leading
+                  // inside the existing inter-row gap; the target stays 48dp.
+                  height: tightLabel ? 1 : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!line) return button;
+    return SizedBox(
+      height: 48,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          IgnorePointer(
+            child: Divider(color: colors.tertiary, thickness: 1.5, height: 0),
+          ),
+          button,
+        ],
+      ),
+    );
+  }
+
+  Widget _placementOverlay() {
+    final width = MediaQuery.sizeOf(context).width;
+    final contentWidth = width > 792 ? 760.0 : width - 32;
+    final lastGroup = d.sections.where((s) => s.rows.isNotEmpty).lastOrNull;
+    if (lastGroup == null) return const SizedBox.shrink();
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          for (final section in d.sections)
+            for (var i = 0; i < section.rows.length; i++)
+              if (i + 1 < section.rows.length || section == lastGroup)
+                CompositedTransformFollower(
+                  link: _ingredientLinks.putIfAbsent(
+                    section.rows[i].id,
+                    LayerLink.new,
+                  ),
+                  showWhenUnlinked: false,
+                  targetAnchor: Alignment.bottomCenter,
+                  followerAnchor: Alignment.topCenter,
+                  // Center the visible pill between the control glyphs and
+                  // the next fields, while retaining its 48dp touch target.
+                  offset: const Offset(0, -32),
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: SizedBox(
+                      width: contentWidth - 16,
+                      child: _placementMarker(section, i + 1),
+                    ),
+                  ),
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _placementBar() => Material(
+    color: Theme.of(context).colorScheme.secondaryContainer,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                'Tap where ${_placingSection!.isEmpty ? 'the section' : _placingSection} starts',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSecondaryContainer,
+                ),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() => _placingSection = null),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Rect? _sectionRect(EditableSection section) =>
+      _editorKeyRect(_sectionKeys[section.id]);
+
+  Rect? _editorKeyRect(GlobalKey? key) {
+    final viewport = _editorViewportKey.currentContext?.findRenderObject();
+    final header = key?.currentContext?.findRenderObject();
+    if (viewport is! RenderBox || header is! RenderBox || !header.hasSize) {
+      return null;
+    }
+    final rect =
+        header.localToGlobal(Offset.zero, ancestor: viewport) & header.size;
+    // Retained sliver children can have a size but no paint transform. Flutter
+    // returns NaN coordinates for them; never feed those into an animation.
+    return rect.isFinite && !rect.isEmpty ? rect : null;
+  }
+
+  void _startSectionDrag(EditableSection section, Offset pointer) {
+    if (_sectionDrag || _placingSection != null) return;
+    final viewport =
+        _editorViewportKey.currentContext!.findRenderObject() as RenderBox;
+    final held = _sectionRect(section);
+    if (held == null) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    HapticFeedback.lightImpact();
+    final index = d.sections.indexOf(section);
+    final rects = <String, Rect>{};
+    final visibleOrigins = <String>{};
+    for (final (i, group) in d.sections.indexed) {
+      final header = _sectionKeys[group.id]?.currentContext?.findRenderObject();
+      final size = header is RenderBox && header.hasSize
+          ? header.size
+          : held.size;
+      final painted = _sectionRect(group);
+      if (painted != null && painted.overlaps(Offset.zero & viewport.size)) {
+        visibleOrigins.add(group.id);
+      }
+      rects[group.id] =
+          painted ??
+          Rect.fromLTWH(
+            held.left,
+            i < index ? -size.height : viewport.size.height,
+            size.width,
+            size.height,
+          );
+    }
+    final session = _SectionDragSession(
+      section: section,
+      order: d.sections.toList(),
+      originalRects: rects,
+      visibleOrigins: visibleOrigins,
+      originalScroll: _scroll.offset,
+      originalFocusSpace: _sectionFocusSpace,
+      pointer: viewport.globalToLocal(pointer),
+      viewport: viewport.size,
+    );
+    setState(() => _sectionDragSession = session);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          identical(_sectionDragSession, session) &&
+          !session.finishing) {
+        _collapseSectionDrag(session);
+      }
+    });
+  }
+
+  void _collapseSectionDrag(_SectionDragSession session) {
+    if (session.collapsed) return;
+    final duration = _sectionTransition;
+    setState(() => session.collapsed = true);
+    session.collapseComplete = () async {
+      // Start the clock on the frame that actually starts the transition.
+      await WidgetsBinding.instance.endOfFrame;
+      await Future<void>.delayed(duration);
+    }();
+  }
+
+  void _updateSectionDrag(Offset pointer) {
+    final session = _sectionDragSession;
+    if (session == null || session.finishing) return;
+    final viewport =
+        _editorViewportKey.currentContext!.findRenderObject() as RenderBox;
+    session.updatePointer(viewport.globalToLocal(pointer));
+  }
+
+  Future<void> _finishSectionDrag({bool cancel = false}) async {
+    final session = _sectionDragSession;
+    if (session == null || session.finishing) return;
+    final duration = _sectionTransition;
+    session.finishing = true;
+    if (cancel) {
+      // The form never scrolled or shrank during the drag.
+      session.returnRects = {
+        for (final group in d.sections)
+          group.id: session.visibleOrigins.contains(group.id)
+              ? session.originalRects[group.id]!
+              : session.slotRect(group),
+      };
+      session.visibleReturns = session.visibleOrigins;
+    } else {
+      // A quick release must not reposition a still-visible, half-collapsed
+      // form. Finish collapse, position it while hidden, then expand.
+      _collapseSectionDrag(session);
+      await session.collapseComplete;
+      if (!mounted || !identical(_sectionDragSession, session)) return;
+      // Reserve only the trailing space needed to place even the last header
+      // directly below the app bar. No collapsed-height scroll clamping occurs.
+      setState(() => _sectionFocusSpace = session.viewport.height);
+      c.reorder(
+        d.sections,
+        d.sections.indexOf(session.section),
+        session.order.indexOf(session.section),
+      );
+      await _revealEditorKey(
+        _sectionKeys[session.section.id]!,
+        fromStart: true,
+        duration: Duration.zero,
+      );
+      if (!mounted) return;
+      final normalMax = _scroll.position.maxScrollExtent - _sectionFocusSpace;
+      _sectionFocusSpace = (_scroll.offset - normalMax).clamp(
+        0.0,
+        session.viewport.height,
+      );
+      session.returnRects = {};
+      for (final group in d.sections) {
+        final rect = _sectionRect(group);
+        if (rect != null && rect.overlaps(Offset.zero & session.viewport)) {
+          session.visibleReturns.add(group.id);
+          session.returnRects![group.id] = rect;
+        } else {
+          session.returnRects![group.id] = session.slotRect(group);
+        }
+      }
+    }
+    if (!mounted) return;
+    setState(() => session.returning = true);
+    await WidgetsBinding.instance.endOfFrame;
+    await Future<void>.delayed(duration);
+    if (!mounted || !identical(_sectionDragSession, session)) return;
+    setState(() {
+      _sectionDragSession = null;
+      if (cancel) _sectionFocusSpace = session.originalFocusSpace;
+    });
+    if (cancel && _scroll.hasClients) _scroll.jumpTo(session.originalScroll);
+    session.dispose();
+  }
+
+  Widget _sectionDragOverlay(_SectionDragSession session) => RepaintBoundary(
+    child: IgnorePointer(
+      child: ListenableBuilder(
+        listenable: session,
+        builder: (_, _) => Stack(
+          clipBehavior: Clip.hardEdge,
+          children: [
+            for (final group in session.order)
+              if (group != session.section) _dragHeaderPosition(session, group),
+            _dragHeaderPosition(session, session.section),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _dragHeaderPosition(
+    _SectionDragSession session,
+    EditableSection section,
+  ) {
+    final held = section == session.section;
+    final rect = session.returning
+        ? session.returnRects![section.id]!
+        : held
+        ? session.heldRect
+        : session.collapsed || !session.visibleOrigins.contains(section.id)
+        ? session.slotRect(section)
+        : session.originalRects[section.id]!;
+    return AnimatedPositioned(
+      key: ValueKey('drag-section-${section.id}'),
+      duration: held && !session.returning ? Duration.zero : _sectionTransition,
+      curve: Curves.easeInOut,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      child: AnimatedOpacity(
+        duration: _sectionTransition,
+        // Let ingredient content clear before revealing offscreen headers;
+        // remove those headers before ingredient content returns.
+        curve: session.returning
+            ? const Interval(0, .4, curve: Curves.easeInOut)
+            : const Interval(.4, 1, curve: Curves.easeInOut),
+        opacity:
+            held ||
+                (session.returning
+                    ? session.visibleReturns.contains(section.id)
+                    : session.collapsed ||
+                          session.visibleOrigins.contains(section.id))
+            ? 1
+            : 0,
+        child: Material(
+          elevation: held && !session.returning ? 6 : 0,
+          borderRadius: BorderRadius.circular(12),
+          color: Theme.of(context).colorScheme.surfaceContainer,
+          animationDuration: _sectionTransition,
+          child: LayoutBuilder(
+            builder: (_, constraints) => FittedBox(
+              fit: BoxFit.contain,
+              child: SizedBox(
+                // Follow the animated height so compact previews shrink smoothly.
+                width:
+                    session.originalRects[section.id]!.width *
+                    session.originalRects[section.id]!.height /
+                    constraints.maxHeight,
+                height: session.originalRects[section.id]!.height,
+                child: session.headerWidgets.putIfAbsent(
+                  section.id,
+                  () => _sectionHeader(section, 0, overlay: true),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionHandle(EditableSection section, int index) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onLongPressStart: (details) =>
+        _startSectionDrag(section, details.globalPosition),
+    onLongPressMoveUpdate: (details) =>
+        _updateSectionDrag(details.globalPosition),
+    onLongPressEnd: (_) => unawaited(_finishSectionDrag()),
+    onLongPressCancel: () => unawaited(_finishSectionDrag(cancel: true)),
+    child: Semantics(
+      label: 'Reorder section ${index + 1}',
+      child: const SizedBox(
+        width: 48,
+        height: 48,
+        child: Icon(Symbols.drag_handle),
+      ),
+    ),
+  );
+
+  Widget _sectionHeader(
+    EditableSection section,
+    int index, {
+    bool overlay = false,
+  }) => Material(
+    color: section.name.isEmpty && !overlay
+        ? Colors.transparent
+        : Theme.of(context).colorScheme.surfaceContainer,
+    borderRadius: BorderRadius.circular(12),
+    child: Row(
+      children: [
+        const SizedBox(width: 12),
+        if (section.name.isNotEmpty || overlay)
+          Expanded(
+            child: Text(
+              section.name.isEmpty ? 'Unsectioned ingredients' : section.name,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          )
+        else
+          const Spacer(),
+        if (d.sections.length > 1)
+          if (overlay)
+            const SizedBox(
+              width: 48,
+              height: 48,
+              child: Icon(Symbols.drag_handle),
+            )
+          else
+            _sectionHandle(section, index),
+        if (overlay)
+          const SizedBox(width: 48, height: 48, child: Icon(Symbols.more_vert))
+        else
+          _sectionMenu(section, index),
+      ],
+    ),
+  );
 
   PopupMenuItem<String> _menuItem(
     String value,
@@ -487,88 +1090,70 @@ class _RecipeEditorState extends State<RecipeEditor>
     EditableIngredient row,
     int index, {
     int? dragIndex,
-  }) => Padding(
+  }) => Stack(
     key: ValueKey(row.id),
-    padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
-    child: Column(
-      children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final phone = MediaQuery.sizeOf(context).width < 600;
-            final sizedUnit = row.unit.trimLeft().startsWith('(');
-            final amountWidth = _hintWidth(
-              '1 1/2',
-              minimum: _hintWidth('Amount', minimum: 80),
-            ).clamp(0.0, constraints.maxWidth);
-            // Fixed allowances avoid resizing while typing. Phones retain
-            // their compact package width; wider layouts can show containers.
-            // Ordinary wide-layout units keep their existing compact width.
-            final unitWidth =
-                (phone
-                        ? _hintWidth('(14 oz) cans') + 3
-                        : sizedUnit
-                        ? _hintWidth('(14 oz) containers') + 3
-                        : _hintWidth('clove', minimum: 64))
-                    .clamp(0.0, constraints.maxWidth);
-            final nameWidth = _hintWidth(
-              'Ingredient',
-              minimum: unitWidth > 96 ? unitWidth + 1 : 96,
-            );
-            final wrapFields =
-                amountWidth + unitWidth + nameWidth + 12 > constraints.maxWidth;
-            final fieldWidgets = <Widget>[
-              SizedBox(
-                width: amountWidth,
-                child: _compactField(
-                  '${row.id}-amount',
-                  'Amount',
-                  () => row.amount,
-                  (s) => row.amount = s,
-                ),
-              ),
-              const SizedBox(width: 6),
-              SizedBox(
-                width: unitWidth,
-                child: _compactField(
-                  '${row.id}-unit',
-                  'Unit',
-                  () => row.unit,
-                  (s) => row.unit = s,
-                  suggestionProvider: () => [
-                    ..._usedUnits,
-                    ...standardUnits.where(
-                      (unit) =>
-                          !_usedUnits.any((used) => used.toLowerCase() == unit),
+    children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+        child: Column(
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final phone = MediaQuery.sizeOf(context).width < 600;
+                final sizedUnit = row.unit.trimLeft().startsWith('(');
+                final amountWidth = _hintWidth(
+                  '1 1/2',
+                  minimum: _hintWidth('Amount', minimum: 80),
+                ).clamp(0.0, constraints.maxWidth);
+                // Fixed allowances avoid resizing while typing. Phones retain
+                // their compact package width; wider layouts can show containers.
+                // Ordinary wide-layout units keep their existing compact width.
+                final unitWidth =
+                    (phone
+                            ? _hintWidth('(14 oz) cans') + 3
+                            : sizedUnit
+                            ? _hintWidth('(14 oz) containers') + 3
+                            : _hintWidth('clove', minimum: 64))
+                        .clamp(0.0, constraints.maxWidth);
+                final nameWidth = _hintWidth(
+                  'Ingredient',
+                  minimum: unitWidth > 96 ? unitWidth + 1 : 96,
+                );
+                final wrapFields =
+                    amountWidth + unitWidth + nameWidth + 12 >
+                    constraints.maxWidth;
+                final fieldWidgets = <Widget>[
+                  SizedBox(
+                    width: amountWidth,
+                    child: _compactField(
+                      '${row.id}-amount',
+                      'Amount',
+                      () => row.amount,
+                      (s) => row.amount = s,
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 6),
-              if (!wrapFields)
-                Expanded(
-                  child: _compactField(
-                    '${row.id}-name',
-                    'Ingredient',
-                    () => row.name,
-                    (s) => row.name = s,
-                    multiline: true,
-                    suggestions: _ingredientNames,
                   ),
-                ),
-            ];
-            final fields = wrapFields
-                ? Wrap(runSpacing: 6, children: fieldWidgets)
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: fieldWidgets,
-                  );
-            return wrapFields
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      fields,
-                      const SizedBox(height: 6),
-                      _compactField(
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    width: unitWidth,
+                    child: _compactField(
+                      '${row.id}-unit',
+                      'Unit',
+                      () => row.unit,
+                      (s) => row.unit = s,
+                      suggestionProvider: () => [
+                        ..._usedUnits,
+                        ...standardUnits.where(
+                          (unit) => !_usedUnits.any(
+                            (used) => used.toLowerCase() == unit,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  if (!wrapFields)
+                    Expanded(
+                      child: _compactField(
                         '${row.id}-name',
                         'Ingredient',
                         () => row.name,
@@ -576,131 +1161,183 @@ class _RecipeEditorState extends State<RecipeEditor>
                         multiline: true,
                         suggestions: _ingredientNames,
                       ),
-                    ],
-                  )
-                : fields;
-          },
-        ),
-        if (row.showNote || row.prepNote.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: _compactField(
-              '${row.id}-note',
-              'Prep note',
-              () => row.prepNote,
-              (s) => row.prepNote = s,
-              multiline: true,
-              muted: true,
-            ),
-          ),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final showNote = !row.showNote && row.prepNote.isEmpty;
-            final noteWidth = (_hintWidth('+ Note') - 8).clamp(
-              48.0,
-              double.infinity,
-            );
-            final optionalWidth = (_hintWidth('Optional') - 24 + 32)
-                .ceilToDouble();
-            final rightWidth = optionalWidth + 12 + 48;
-            final controlsWidth = constraints.maxWidth.clamp(
-              rightWidth + 48,
-              double.infinity,
-            );
-            final noteFits =
-                noteWidth + 48 + rightWidth <= constraints.maxWidth;
-            // Preserve the centered grip when it fits; move it left before
-            // Optional rather than wrapping the action group onto another row.
-            final gripLeft = ((controlsWidth - 48) / 2).clamp(
-              noteFits ? noteWidth : 0.0,
-              controlsWidth - rightWidth - 48,
-            );
-            final note = TextButton(
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: const Size(48, 48),
-              ),
-              onPressed: () => _change(() => row.showNote = true),
-              child: const Text('+ Note'),
-            );
-            final controlsRow = SizedBox(
-              width: controlsWidth,
-              child: Row(
-                key: ValueKey('${row.id}-controls'),
-                children: [
-                  SizedBox(
-                    width: gripLeft,
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: showNote && noteFits ? note : null,
                     ),
-                  ),
-                  _drag(dragIndex ?? index, 'Reorder ingredient ${index + 1}'),
-                  const Spacer(),
-                  SizedBox(
-                    width: optionalWidth,
-                    height: 48,
-                    child: InkWell(
-                      onTap: () => _change(() => row.optional = !row.optional),
+                ];
+                final fields = wrapFields
+                    ? Wrap(runSpacing: 6, children: fieldWidgets)
+                    : Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: fieldWidgets,
+                      );
+                return wrapFields
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          fields,
+                          const SizedBox(height: 6),
+                          _compactField(
+                            '${row.id}-name',
+                            'Ingredient',
+                            () => row.name,
+                            (s) => row.name = s,
+                            multiline: true,
+                            suggestions: _ingredientNames,
+                          ),
+                        ],
+                      )
+                    : fields;
+              },
+            ),
+            if (row.showNote || row.prepNote.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: _compactField(
+                  '${row.id}-note',
+                  'Prep note',
+                  () => row.prepNote,
+                  (s) => row.prepNote = s,
+                  multiline: true,
+                  muted: true,
+                ),
+              ),
+            IgnorePointer(
+              ignoring: _placingSection != null,
+              child: Opacity(
+                opacity: _placingSection == null ? 1 : .28,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final showNote = !row.showNote && row.prepNote.isEmpty;
+                    final noteWidth = (_hintWidth('+ Note') - 8).clamp(
+                      48.0,
+                      double.infinity,
+                    );
+                    final optionalWidth = (_hintWidth('Optional') - 24 + 32)
+                        .ceilToDouble();
+                    final rightWidth = optionalWidth + 12 + 48;
+                    final controlsWidth = constraints.maxWidth.clamp(
+                      rightWidth + 48,
+                      double.infinity,
+                    );
+                    final noteFits =
+                        noteWidth + 48 + rightWidth <= constraints.maxWidth;
+                    // Preserve the centered grip when it fits; move it left before
+                    // Optional rather than wrapping the action group onto another row.
+                    final gripLeft = ((controlsWidth - 48) / 2).clamp(
+                      noteFits ? noteWidth : 0.0,
+                      controlsWidth - rightWidth - 48,
+                    );
+                    final note = TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(48, 48),
+                      ),
+                      onPressed: () => _change(() => row.showNote = true),
+                      child: const Text('+ Note'),
+                    );
+                    final controlsRow = SizedBox(
+                      width: controlsWidth,
                       child: Row(
+                        key: ValueKey('${row.id}-controls'),
                         children: [
                           SizedBox(
-                            width: 32,
-                            child: Checkbox(
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                              value: row.optional,
-                              semanticLabel: 'Optional ingredient ${index + 1}',
-                              onChanged: (value) =>
-                                  _change(() => row.optional = value ?? false),
+                            width: gripLeft,
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: showNote && noteFits ? note : null,
                             ),
                           ),
-                          Text(
-                            'Optional',
-                            style: Theme.of(context).textTheme.bodyMedium,
+                          _drag(
+                            dragIndex ?? index,
+                            'Reorder ingredient ${index + 1}',
+                          ),
+                          const Spacer(),
+                          SizedBox(
+                            width: optionalWidth,
+                            height: 48,
+                            child: InkWell(
+                              onTap: () =>
+                                  _change(() => row.optional = !row.optional),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 32,
+                                    child: Checkbox(
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      value: row.optional,
+                                      semanticLabel:
+                                          'Optional ingredient ${index + 1}',
+                                      onChanged: (value) => _change(
+                                        () => row.optional = value ?? false,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    'Optional',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          IconButton(
+                            tooltip: 'Delete ingredient ${index + 1}',
+                            onPressed: () =>
+                                _delete(section.rows, row, 'Ingredient'),
+                            icon: Icon(
+                              Symbols.delete,
+                              color: Theme.of(context).colorScheme.error,
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    tooltip: 'Delete ingredient ${index + 1}',
-                    onPressed: () => _delete(section.rows, row, 'Ingredient'),
-                    icon: Icon(
-                      Symbols.delete,
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ],
+                    );
+                    final controls = controlsWidth > constraints.maxWidth
+                        ? PixelSingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: controlsRow,
+                          )
+                        : controlsRow;
+                    // Only the independent add-note action may need its own line at
+                    // very large text sizes. Grip, Optional and Delete never separate.
+                    return showNote && !noteFits
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: note,
+                              ),
+                              controls,
+                            ],
+                          )
+                        : controls;
+                  },
+                ),
               ),
-            );
-            final controls = controlsWidth > constraints.maxWidth
-                ? PixelSingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: controlsRow,
-                  )
-                : controlsRow;
-            // Only the independent add-note action may need its own line at
-            // very large text sizes. Grip, Optional and Delete never separate.
-            return showNote && !noteFits
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Align(alignment: Alignment.centerLeft, child: note),
-                      controls,
-                    ],
-                  )
-                : controls;
-          },
+            ),
+            Opacity(
+              opacity:
+                  _placingSection != null &&
+                      (index + 1 < section.rows.length ||
+                          section ==
+                              d.sections.lastWhere((s) => s.rows.isNotEmpty))
+                  ? 0
+                  : 1,
+              child: const Divider(),
+            ),
+          ],
         ),
-        const Divider(),
-      ],
-    ),
+      ),
+    ],
   );
 
   Widget _sectionMenu(EditableSection section, int index) =>
       PopupMenuButton<String>(
+        enabled: _placingSection == null,
         tooltip: 'Section ${index + 1} options',
         icon: const Icon(Symbols.more_vert),
         onSelected: (value) {
@@ -712,7 +1349,9 @@ class _RecipeEditorState extends State<RecipeEditor>
             case 'down':
               c.move(d.sections, section, 1);
             case 'delete':
-              _delete(d.sections, section, 'Section');
+              _deleteSection(section);
+            case 'remove':
+              _removeSection(section);
           }
         },
         itemBuilder: (_) => [
@@ -723,6 +1362,7 @@ class _RecipeEditorState extends State<RecipeEditor>
             'Move down',
             enabled: index + 1 < d.sections.length,
           ),
+          _menuItem('remove', 'Remove section', enabled: index > 0),
           _menuItem('delete', 'Delete section', destructive: true),
         ],
       );
@@ -741,30 +1381,27 @@ class _RecipeEditorState extends State<RecipeEditor>
       if (section.name.isNotEmpty || d.sections.length > 1) {
         entries.add((
           section,
-          (flatIndex) => Material(
+          (_) => SizedBox(
             key: ValueKey(section.id),
-            color: section.name.isEmpty
-                ? Colors.transparent
-                : Theme.of(context).colorScheme.surfaceContainer,
-            borderRadius: BorderRadius.circular(12),
-            child: Row(
+            child: Stack(
               children: [
-                const SizedBox(width: 12),
-                if (section.name.isNotEmpty)
-                  Expanded(
-                    child: Text(
-                      section.name,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  )
-                else
-                  const Spacer(),
-                if (d.sections.length > 1)
-                  _drag(flatIndex, 'Reorder section ${index + 1}'),
-                _sectionMenu(section, index),
+                Opacity(
+                  opacity:
+                      _placingSection != null &&
+                          index == 0 &&
+                          section.name.isEmpty
+                      ? 0
+                      : 1,
+                  child: IgnorePointer(
+                    ignoring: _placingSection != null,
+                    child: _sectionHeader(section, index),
+                  ),
+                ),
+                if (_placingSection != null &&
+                    index == 0 &&
+                    section.name.isEmpty &&
+                    section.rows.isNotEmpty)
+                  Positioned.fill(child: _placementMarker(section, 0)),
               ],
             ),
           ),
@@ -781,30 +1418,41 @@ class _RecipeEditorState extends State<RecipeEditor>
           row,
         ));
       }
-      entries.add((
-        section,
-        (_) => Padding(
-          key: ValueKey('${section.id}-actions'),
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Wrap(
-            spacing: 8,
-            children: [
-              TextButton.icon(
-                onPressed: () =>
-                    _change(() => section.rows.add(EditableIngredient())),
-                icon: const Icon(Symbols.add),
-                label: const Text('Ingredient'),
+      {
+        entries.add((
+          section,
+          (_) => KeyedSubtree(
+            key: ValueKey('${section.id}-actions'),
+            child: IgnorePointer(
+              ignoring: _placingSection != null,
+              child: Opacity(
+                opacity: _placingSection == null ? 1 : .28,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => _change(
+                          () => section.rows.add(EditableIngredient()),
+                        ),
+                        icon: const Icon(Symbols.add),
+                        label: const Text('Ingredient'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _paste('ingredients', section),
+                        icon: const Icon(Symbols.content_paste),
+                        label: const Text('Paste ingredients'),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              TextButton.icon(
-                onPressed: () => _paste('ingredients', section),
-                icon: const Icon(Symbols.content_paste),
-                label: const Text('Paste ingredients'),
-              ),
-            ],
+            ),
           ),
-        ),
-        null,
-      ));
+          null,
+        ));
+      }
     }
     return entries;
   }
@@ -953,513 +1601,672 @@ class _RecipeEditorState extends State<RecipeEditor>
             child: _EditorSuggestionsScope(
               suggestions: _suggestions,
               child: Scaffold(
-                appBar: AppBar(
-                  leading: IconButton(
-                    tooltip: 'Back',
-                    onPressed: c.saving ? null : _back,
-                    icon: const Icon(Symbols.arrow_back),
-                  ),
-                  title: Text(
-                    d.imported
-                        ? 'Review import'
-                        : d.base == null
-                        ? 'Write a recipe'
-                        : 'Edit recipe',
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: c.saving ? null : _save,
-                      child: Text(d.stale ? 'Save copy' : 'Save'),
-                    ),
-                  ],
-                ),
+                appBar: _placingSection != null
+                    ? AppBar(
+                        automaticallyImplyLeading: false,
+                        titleSpacing: 0,
+                        backgroundColor: Theme.of(context)
+                            .colorScheme
+                            .secondaryContainer,
+                        title: _placementBar(),
+                      )
+                    : AppBar(
+                        leading: IconButton(
+                          tooltip: 'Back',
+                          onPressed: c.saving ? null : _back,
+                          icon: const Icon(Symbols.arrow_back),
+                        ),
+                        title: Text(
+                          d.imported
+                              ? 'Review import'
+                              : d.base == null
+                              ? 'Write a recipe'
+                              : 'Edit recipe',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed:
+                                c.saving ||
+                                    _sectionDrag ||
+                                    _placingSection != null
+                                ? null
+                                : _save,
+                            child: Text(d.stale ? 'Save copy' : 'Save'),
+                          ),
+                        ],
+                      ),
                 body: SafeArea(
                   top: false,
                   child: Column(
                     children: [
                       Expanded(
-                        child: AbsorbPointer(
-                          absorbing: c.saving,
-                          child: Builder(
-                            builder: (context) {
-                              final width = MediaQuery.sizeOf(context).width;
-                              final inset = width > 792
-                                  ? (width - 760) / 2
-                                  : 16.0;
-                              final entries = _ingredientEntries();
-                              return _EditorScrollView(
-                                keyboardDismissBehavior:
-                                    ScrollViewKeyboardDismissBehavior.manual,
-                                slivers: [
-                                  SliverPadding(
-                                    padding: EdgeInsets.fromLTRB(
-                                      inset,
-                                      12,
-                                      inset,
+                        child: Stack(
+                          key: _editorViewportKey,
+                          fit: StackFit.expand,
+                          children: [
+                            AnimatedOpacity(
+                              opacity:
+                                  _sectionDragSession?.collapsed == true &&
+                                      _sectionDragSession?.returning != true
+                                  ? 0
+                                  : 1,
+                              duration: _sectionTransition,
+                              curve: _sectionDragSession?.returning == true
+                                  ? const Interval(
+                                      .6,
+                                      1,
+                                      curve: Curves.easeInOut,
+                                    )
+                                  : const Interval(
                                       0,
+                                      .4,
+                                      curve: Curves.easeInOut,
                                     ),
-                                    sliver: BuiltSliverList(
-                                      children: [
-                                        if (c.saving)
-                                          const LinearProgressIndicator(),
-                                        if (d.imported)
-                                          const Padding(
-                                            padding: EdgeInsets.only(
-                                              bottom: 12,
-                                            ),
-                                            child: Text(
-                                              'Imported, review and save',
-                                            ),
+                              child: AbsorbPointer(
+                                absorbing: c.saving || _sectionDrag,
+                                child: Builder(
+                                  builder: (context) {
+                                    final width = MediaQuery.sizeOf(context)
+                                        .width;
+                                    final inset = width > 792
+                                        ? (width - 760) / 2
+                                        : 16.0;
+                                    final entries = _ingredientEntries();
+                                    return _EditorScrollView(
+                                      controller: _scroll,
+                                      onPointerCancel: (_) => unawaited(
+                                        _finishSectionDrag(cancel: true),
+                                      ),
+                                      keyboardDismissBehavior:
+                                          ScrollViewKeyboardDismissBehavior
+                                              .manual,
+                                      slivers: [
+                                        SliverPadding(
+                                          padding: EdgeInsets.fromLTRB(
+                                            inset,
+                                            12,
+                                            inset,
+                                            0,
                                           ),
-                                        if (d.aiRewrittenSteps)
-                                          const Padding(
-                                            padding: EdgeInsets.only(
-                                              bottom: 12,
-                                            ),
-                                            child: Text(
-                                              "Google's AI wouldn't copy this recipe word for word, so it rewrote the steps in its own words. Check them against the original before saving.",
-                                            ),
-                                          ),
-                                        for (final warning in d.importWarnings)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 8,
-                                            ),
-                                            child: Text(
-                                              warning,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall,
-                                            ),
-                                          ),
-                                        if (d.stale)
-                                          const Padding(
-                                            padding: EdgeInsets.only(
-                                              bottom: 12,
-                                            ),
-                                            child: Text(
-                                              'Original changed. Save this draft as a copy.',
-                                            ),
-                                          ),
-                                        if (d.error != null)
-                                          Semantics(
-                                            liveRegion: true,
-                                            child: Padding(
-                                              padding: const EdgeInsets.only(
-                                                bottom: 12,
+                                          sliver: BuiltSliverList(
+                                            children: [
+                                              if (c.saving)
+                                                const LinearProgressIndicator(),
+                                              if (d.imported)
+                                                const Padding(
+                                                  padding: EdgeInsets.only(
+                                                    bottom: 12,
+                                                  ),
+                                                  child: Text(
+                                                    'Imported, review and save',
+                                                  ),
+                                                ),
+                                              if (d.aiRewrittenSteps)
+                                                const Padding(
+                                                  padding: EdgeInsets.only(
+                                                    bottom: 12,
+                                                  ),
+                                                  child: Text(
+                                                    "Google's AI wouldn't copy this recipe word for word, so it rewrote the steps in its own words. Check them against the original before saving.",
+                                                  ),
+                                                ),
+                                              for (final warning
+                                                  in d.importWarnings)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        bottom: 8,
+                                                      ),
+                                                  child: Text(
+                                                    warning,
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .bodySmall,
+                                                  ),
+                                                ),
+                                              if (d.stale)
+                                                const Padding(
+                                                  padding: EdgeInsets.only(
+                                                    bottom: 12,
+                                                  ),
+                                                  child: Text(
+                                                    'Original changed. Save this draft as a copy.',
+                                                  ),
+                                                ),
+                                              if (d.error != null)
+                                                Semantics(
+                                                  liveRegion: true,
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                          bottom: 12,
+                                                        ),
+                                                    child: Text(
+                                                      d.error!,
+                                                      style: TextStyle(
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .error,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              if (c.persistenceError != null)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        bottom: 12,
+                                                      ),
+                                                  child: Text(
+                                                    c.persistenceError!,
+                                                    style: TextStyle(
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .error,
+                                                    ),
+                                                  ),
+                                                ),
+                                              if (d.unappliedPaste)
+                                                Card(
+                                                  margin:
+                                                      const EdgeInsets.fromLTRB(
+                                                        4,
+                                                        4,
+                                                        4,
+                                                        16,
+                                                      ),
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.all(
+                                                          12,
+                                                        ),
+                                                    child: Wrap(
+                                                      crossAxisAlignment:
+                                                          WrapCrossAlignment
+                                                              .center,
+                                                      spacing: 8,
+                                                      children: [
+                                                        const Text(
+                                                          'Unapplied paste',
+                                                        ),
+                                                        TextButton(
+                                                          onPressed: () => _paste(
+                                                            d.pasteKind!,
+                                                            d.sections
+                                                                .where(
+                                                                  (s) =>
+                                                                      s.id ==
+                                                                      d.pasteSectionId,
+                                                                )
+                                                                .firstOrNull,
+                                                          ),
+                                                          child: const Text(
+                                                            'Review',
+                                                          ),
+                                                        ),
+                                                        TextButton(
+                                                          style: TextButton.styleFrom(
+                                                            foregroundColor:
+                                                                Theme.of(
+                                                                      context,
+                                                                    )
+                                                                    .colorScheme
+                                                                    .error,
+                                                          ),
+                                                          onPressed:
+                                                              c.clearPaste,
+                                                          child: const Text(
+                                                            'Discard',
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              _field(
+                                                'title',
+                                                'Title',
+                                                () => d.title,
+                                                (s) => d.title = s,
                                               ),
-                                              child: Text(
-                                                d.error!,
-                                                style: TextStyle(
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .error,
+                                              _field(
+                                                'description',
+                                                'Description',
+                                                () => d.description,
+                                                (s) => d.description = s,
+                                                multiline: true,
+                                              ),
+                                              _field(
+                                                'servings',
+                                                'Makes',
+                                                () => d.servings,
+                                                (s) => d.servings = s,
+                                                hint: '4 servings or 12 tortillas',
+                                              ),
+                                              LayoutBuilder(
+                                                builder: (context, constraints) {
+                                                  // Outlined labels render at 75% of body size.
+                                                  // Reserve the actual 16dp side insets and
+                                                  // 4dp border gap on each side of the label.
+                                                  var minimum = 48.0;
+                                                  for (final title in [
+                                                    'Prep time',
+                                                    'Cook time',
+                                                    'Total time',
+                                                  ]) {
+                                                    final label = TextPainter(
+                                                      text: TextSpan(
+                                                        text: title,
+                                                        style: Theme.of(context)
+                                                            .textTheme
+                                                            .bodyLarge,
+                                                      ),
+                                                      textDirection:
+                                                          Directionality.of(
+                                                            context,
+                                                          ),
+                                                      textScaler:
+                                                          MediaQuery.textScalerOf(
+                                                            context,
+                                                          ),
+                                                    )..layout();
+                                                    final width =
+                                                        label.width * .75 + 40;
+                                                    if (width > minimum) {
+                                                      minimum = width;
+                                                    }
+                                                    label.dispose();
+                                                  }
+                                                  final columns =
+                                                      ((constraints.maxWidth +
+                                                                  12) /
+                                                              (minimum + 12))
+                                                          .floor()
+                                                          .clamp(1, 3);
+                                                  final width =
+                                                      (constraints.maxWidth -
+                                                          12 * (columns - 1)) /
+                                                      columns;
+                                                  return Wrap(
+                                                    key: const ValueKey(
+                                                      'recipe-times',
+                                                    ),
+                                                    spacing: 12,
+                                                    children: [
+                                                      SizedBox(
+                                                        width: width,
+                                                        child: _field(
+                                                          'prep',
+                                                          'Prep time',
+                                                          () => d.prepTime,
+                                                          (s) => d.prepTime = s,
+                                                          multiline: false,
+                                                          timeField: true,
+                                                        ),
+                                                      ),
+                                                      SizedBox(
+                                                        width: width,
+                                                        child: _field(
+                                                          'cook',
+                                                          'Cook time',
+                                                          () => d.cookTime,
+                                                          (s) => d.cookTime = s,
+                                                          multiline: false,
+                                                          timeField: true,
+                                                        ),
+                                                      ),
+                                                      SizedBox(
+                                                        width: width,
+                                                        child: _field(
+                                                          'total',
+                                                          'Total time',
+                                                          () => d.totalTime,
+                                                          (s) =>
+                                                              d.totalTime = s,
+                                                          multiline: false,
+                                                          timeField: true,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  );
+                                                },
+                                              ),
+                                              _heading(
+                                                'Tags',
+                                                actions: [
+                                                  if (d.aiGuessedFields
+                                                      .contains('tags'))
+                                                    Text(
+                                                      'AI guess',
+                                                      style: Theme.of(context)
+                                                          .textTheme
+                                                          .labelSmall,
+                                                    ),
+                                                ],
+                                              ),
+                                              Wrap(
+                                                spacing: 8,
+                                                runSpacing: 4,
+                                                children: [
+                                                  for (final tag
+                                                      in normalizeTags(d.tags))
+                                                    InputChip(
+                                                      label: Text(tag),
+                                                      onDeleted: () => _change(
+                                                        () => d.tags.removeWhere(
+                                                          (t) =>
+                                                              normalizeNameWhitespace(
+                                                                t,
+                                                              ) ==
+                                                              tag,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                              _EditorField(
+                                                key: const ValueKey(
+                                                  'tag-input',
+                                                ),
+                                                suggestionStrip: true,
+                                                label: 'Add tag',
+                                                readValue: () => d.tagInput,
+                                                suggestions: _tags
+                                                    .where(
+                                                      (s) => !d.tags.any(
+                                                        (t) =>
+                                                            t.toLowerCase() ==
+                                                            s.toLowerCase(),
+                                                      ),
+                                                    )
+                                                    .toList(),
+                                                onChanged: (s) =>
+                                                    _edit(() => d.tagInput = s),
+                                                onSubmitted: (s) => c.addTag(
+                                                  s,
+                                                  widget.tagSuggestions,
+                                                ),
+                                                onSelected: (s) => c.addTag(
+                                                  s,
+                                                  widget.tagSuggestions,
+                                                ),
+                                                suffix: IconButton(
+                                                  tooltip: 'Add tag',
+                                                  icon: const Icon(Symbols.add),
+                                                  onPressed: () => c.addTag(
+                                                    d.tagInput,
+                                                    widget.tagSuggestions,
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                          ),
-                                        if (c.persistenceError != null)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 12,
-                                            ),
-                                            child: Text(
-                                              c.persistenceError!,
-                                              style: TextStyle(
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .error,
-                                              ),
-                                            ),
-                                          ),
-                                        if (d.unappliedPaste)
-                                          Card(
-                                            margin: const EdgeInsets.fromLTRB(
-                                              4,
-                                              4,
-                                              4,
-                                              16,
-                                            ),
-                                            child: Padding(
-                                              padding: const EdgeInsets.all(12),
-                                              child: Wrap(
-                                                crossAxisAlignment:
-                                                    WrapCrossAlignment.center,
-                                                spacing: 8,
-                                                children: [
-                                                  const Text('Unapplied paste'),
-                                                  TextButton(
-                                                    onPressed: () => _paste(
-                                                      d.pasteKind!,
-                                                      d.sections
-                                                          .where(
-                                                            (s) =>
-                                                                s.id ==
-                                                                d.pasteSectionId,
-                                                          )
-                                                          .firstOrNull,
-                                                    ),
-                                                    child: const Text('Review'),
-                                                  ),
-                                                  TextButton(
-                                                    style: TextButton.styleFrom(
-                                                      foregroundColor: Theme.of(
-                                                        context,
-                                                      ).colorScheme.error,
-                                                    ),
-                                                    onPressed: c.clearPaste,
-                                                    child: const Text(
-                                                      'Discard',
-                                                    ),
+                                              _heading(
+                                                'Ingredients',
+                                                key: _ingredientsHeadingKey,
+                                                actions: [
+                                                  Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      if (_placingSection !=
+                                                              null &&
+                                                          d.sections.length ==
+                                                              1 &&
+                                                          d
+                                                              .sections
+                                                              .first
+                                                              .name
+                                                              .isEmpty)
+                                                        _placementMarker(
+                                                          d.sections.first,
+                                                          0,
+                                                          line: false,
+                                                        )
+                                                      else
+                                                        TextButton.icon(
+                                                          onPressed:
+                                                              _placingSection ==
+                                                                  null
+                                                              ? _addSection
+                                                              : null,
+                                                          icon: const Icon(
+                                                            Symbols.add,
+                                                          ),
+                                                          label: const Text(
+                                                            'Section',
+                                                          ),
+                                                        ),
+                                                      if (d.sections.length ==
+                                                              1 &&
+                                                          d
+                                                              .sections
+                                                              .single
+                                                              .name
+                                                              .isEmpty)
+                                                        _sectionMenu(
+                                                          d.sections.single,
+                                                          0,
+                                                        ),
+                                                    ],
                                                   ),
                                                 ],
                                               ),
-                                            ),
-                                          ),
-                                        _field(
-                                          'title',
-                                          'Title',
-                                          () => d.title,
-                                          (s) => d.title = s,
-                                        ),
-                                        _field(
-                                          'description',
-                                          'Description',
-                                          () => d.description,
-                                          (s) => d.description = s,
-                                          multiline: true,
-                                        ),
-                                        _field(
-                                          'servings',
-                                          'Makes',
-                                          () => d.servings,
-                                          (s) => d.servings = s,
-                                          hint: '4 servings or 12 tortillas',
-                                        ),
-                                        LayoutBuilder(
-                                          builder: (context, constraints) {
-                                            // Outlined labels render at 75% of body size.
-                                            // Reserve the actual 16dp side insets and
-                                            // 4dp border gap on each side of the label.
-                                            var minimum = 48.0;
-                                            for (final title in [
-                                              'Prep time',
-                                              'Cook time',
-                                              'Total time',
-                                            ]) {
-                                              final label = TextPainter(
-                                                text: TextSpan(
-                                                  text: title,
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .bodyLarge,
-                                                ),
-                                                textDirection:
-                                                    Directionality.of(context),
-                                                textScaler:
-                                                    MediaQuery.textScalerOf(
-                                                      context,
-                                                    ),
-                                              )..layout();
-                                              final width =
-                                                  label.width * .75 + 40;
-                                              if (width > minimum) {
-                                                minimum = width;
-                                              }
-                                              label.dispose();
-                                            }
-                                            final columns =
-                                                ((constraints.maxWidth + 12) /
-                                                        (minimum + 12))
-                                                    .floor()
-                                                    .clamp(1, 3);
-                                            final width =
-                                                (constraints.maxWidth -
-                                                    12 * (columns - 1)) /
-                                                columns;
-                                            return Wrap(
-                                              key: const ValueKey(
-                                                'recipe-times',
-                                              ),
-                                              spacing: 12,
-                                              children: [
-                                                SizedBox(
-                                                  width: width,
-                                                  child: _field(
-                                                    'prep',
-                                                    'Prep time',
-                                                    () => d.prepTime,
-                                                    (s) => d.prepTime = s,
-                                                    multiline: false,
-                                                    timeField: true,
-                                                  ),
-                                                ),
-                                                SizedBox(
-                                                  width: width,
-                                                  child: _field(
-                                                    'cook',
-                                                    'Cook time',
-                                                    () => d.cookTime,
-                                                    (s) => d.cookTime = s,
-                                                    multiline: false,
-                                                    timeField: true,
-                                                  ),
-                                                ),
-                                                SizedBox(
-                                                  width: width,
-                                                  child: _field(
-                                                    'total',
-                                                    'Total time',
-                                                    () => d.totalTime,
-                                                    (s) => d.totalTime = s,
-                                                    multiline: false,
-                                                    timeField: true,
-                                                  ),
-                                                ),
-                                              ],
-                                            );
-                                          },
-                                        ),
-                                        _heading(
-                                          'Tags',
-                                          actions: [
-                                            if (d.aiGuessedFields.contains(
-                                              'tags',
-                                            ))
-                                              Text(
-                                                'AI guess',
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .labelSmall,
-                                              ),
-                                          ],
-                                        ),
-                                        Wrap(
-                                          spacing: 8,
-                                          runSpacing: 4,
-                                          children: [
-                                            for (final tag in normalizeTags(
-                                              d.tags,
-                                            ))
-                                              InputChip(
-                                                label: Text(tag),
-                                                onDeleted: () => _change(
-                                                  () => d.tags.removeWhere(
-                                                    (t) =>
-                                                        normalizeNameWhitespace(
-                                                          t,
-                                                        ) ==
-                                                        tag,
-                                                  ),
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                        _EditorField(
-                                          key: const ValueKey('tag-input'),
-                                          suggestionStrip: true,
-                                          label: 'Add tag',
-                                          readValue: () => d.tagInput,
-                                          suggestions: _tags
-                                              .where(
-                                                (s) => !d.tags.any(
-                                                  (t) =>
-                                                      t.toLowerCase() ==
-                                                      s.toLowerCase(),
-                                                ),
-                                              )
-                                              .toList(),
-                                          onChanged: (s) =>
-                                              _edit(() => d.tagInput = s),
-                                          onSubmitted: (s) => c.addTag(
-                                            s,
-                                            widget.tagSuggestions,
-                                          ),
-                                          onSelected: (s) => c.addTag(
-                                            s,
-                                            widget.tagSuggestions,
-                                          ),
-                                          suffix: IconButton(
-                                            tooltip: 'Add tag',
-                                            icon: const Icon(Symbols.add),
-                                            onPressed: () => c.addTag(
-                                              d.tagInput,
-                                              widget.tagSuggestions,
-                                            ),
+                                            ],
                                           ),
                                         ),
-                                        _heading(
-                                          'Ingredients',
-                                          actions: [
-                                            Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                TextButton.icon(
-                                                  onPressed: () {
-                                                    final section =
-                                                        EditableSection(
-                                                          rows: [
-                                                            EditableIngredient(),
-                                                          ],
-                                                        );
-                                                    _change(
-                                                      () => d.sections.add(
-                                                        section,
+                                        SliverPadding(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: inset,
+                                          ),
+                                          sliver: SliverReorderableList(
+                                            key: _ingredientListKey,
+                                            onReorderStart: (_) =>
+                                                HapticFeedback.lightImpact(),
+                                            proxyDecorator: (
+                                              child,
+                                              index,
+                                              animation,
+                                            ) => Material(child: child),
+                                            itemCount: entries.length,
+                                            itemBuilder: (_, i) {
+                                              final child = entries[i].$2(i);
+                                              final section = entries[i].$1;
+                                              final header =
+                                                  child.key ==
+                                                  ValueKey(section.id);
+                                              return KeepBuilt(
+                                                key: ValueKey((
+                                                  'built-ingredient',
+                                                  child.key,
+                                                )),
+                                                child: Opacity(
+                                                  opacity:
+                                                      header && _sectionDrag
+                                                      ? 0
+                                                      : 1,
+                                                  child: KeyedSubtree(
+                                                    key: header
+                                                        ? _sectionKeys
+                                                              .putIfAbsent(
+                                                                section.id,
+                                                                GlobalKey.new,
+                                                              )
+                                                        : null,
+                                                    child: entries[i].$3 != null
+                                                        ? CompositedTransformTarget(
+                                                            link:
+                                                                _ingredientLinks
+                                                                    .putIfAbsent(
+                                                                      entries[i]
+                                                                          .$3!
+                                                                          .id,
+                                                                      LayerLink
+                                                                          .new,
+                                                                    ),
+                                                            child: child,
+                                                          )
+                                                        : child,
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                            onReorderItem: (a, b) =>
+                                                _reorderIngredientEntries(
+                                                  entries,
+                                                  a,
+                                                  b,
+                                                ),
+                                          ),
+                                        ),
+                                        SliverOpacity(
+                                          opacity:
+                                              _sectionDrag &&
+                                                  _sectionDragSession
+                                                          ?.returning !=
+                                                      true
+                                              ? 0
+                                              : 1,
+                                          sliver: SliverMainAxisGroup(
+                                            slivers: [
+                                              SliverPadding(
+                                                padding: EdgeInsets.symmetric(
+                                                  horizontal: inset,
+                                                ),
+                                                sliver: SliverToBoxAdapter(
+                                                  child: Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .stretch,
+                                                    children: [
+                                                      _heading(
+                                                        'Steps',
+                                                        actions: [
+                                                          TextButton.icon(
+                                                            onPressed: () =>
+                                                                _paste('steps'),
+                                                            icon: const Icon(
+                                                              Symbols
+                                                                  .content_paste,
+                                                            ),
+                                                            label: const Text(
+                                                              'Paste steps',
+                                                            ),
+                                                          ),
+                                                        ],
                                                       ),
-                                                    );
-                                                    _rename(section);
-                                                  },
-                                                  icon: const Icon(Symbols.add),
-                                                  label: const Text('Section'),
-                                                ),
-                                                if (d.sections.length == 1 &&
-                                                    d
-                                                        .sections
-                                                        .single
-                                                        .name
-                                                        .isEmpty)
-                                                  _sectionMenu(
-                                                    d.sections.single,
-                                                    0,
+                                                    ],
                                                   ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  SliverPadding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: inset,
-                                    ),
-                                    sliver: SliverReorderableList(
-                                      onReorderStart: (_) =>
-                                          HapticFeedback.lightImpact(),
-                                      proxyDecorator: (
-                                        child,
-                                        index,
-                                        animation,
-                                      ) => Material(child: child),
-                                      itemCount: entries.length,
-                                      itemBuilder: (_, i) {
-                                        final child = entries[i].$2(i);
-                                        return KeepBuilt(
-                                          key: ValueKey((
-                                            'built-ingredient',
-                                            child.key,
-                                          )),
-                                          child: child,
-                                        );
-                                      },
-                                      onReorderItem: (a, b) =>
-                                          _reorderIngredientEntries(
-                                            entries,
-                                            a,
-                                            b,
-                                          ),
-                                    ),
-                                  ),
-                                  SliverPadding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: inset,
-                                    ),
-                                    sliver: SliverToBoxAdapter(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          _heading(
-                                            'Steps',
-                                            actions: [
-                                              TextButton.icon(
-                                                onPressed: () =>
-                                                    _paste('steps'),
-                                                icon: const Icon(
-                                                  Symbols.content_paste,
                                                 ),
-                                                label: const Text(
-                                                  'Paste steps',
+                                              ),
+                                              SliverPadding(
+                                                padding: EdgeInsets.symmetric(
+                                                  horizontal: inset,
+                                                ),
+                                                sliver: SliverReorderableList(
+                                                  onReorderStart: (_) =>
+                                                      HapticFeedback.lightImpact(),
+                                                  proxyDecorator: (
+                                                    child,
+                                                    index,
+                                                    animation,
+                                                  ) => Material(child: child),
+                                                  itemCount: d.steps.length,
+                                                  itemBuilder: (_, i) =>
+                                                      KeepBuilt(
+                                                        key: ValueKey((
+                                                          'built-step',
+                                                          d.steps[i].id,
+                                                        )),
+                                                        child: _step(
+                                                          d.steps[i],
+                                                          i,
+                                                        ),
+                                                      ),
+                                                  onReorderItem: (a, b) =>
+                                                      c.reorder(d.steps, a, b),
+                                                ),
+                                              ),
+                                              SliverPadding(
+                                                padding: EdgeInsets.fromLTRB(
+                                                  inset,
+                                                  0,
+                                                  inset,
+                                                  32,
+                                                ),
+                                                sliver: BuiltSliverList(
+                                                  children: [
+                                                    Align(
+                                                      alignment:
+                                                          Alignment.centerLeft,
+                                                      child: TextButton.icon(
+                                                        onPressed: () =>
+                                                            _change(
+                                                              () => d.steps.add(
+                                                                EditableStep(
+                                                                  '',
+                                                                ),
+                                                              ),
+                                                            ),
+                                                        icon: const Icon(
+                                                          Symbols.add,
+                                                        ),
+                                                        label: const Text(
+                                                          'Step',
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    _heading('Notes'),
+                                                    _field(
+                                                      'notes',
+                                                      'Notes',
+                                                      () => d.notes,
+                                                      (s) => d.notes = s,
+                                                      multiline: true,
+                                                    ),
+                                                    _field(
+                                                      'source',
+                                                      'Source link',
+                                                      () => d.source,
+                                                      (s) => d.source = s,
+                                                    ),
+                                                  ],
                                                 ),
                                               ),
                                             ],
                                           ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  SliverPadding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: inset,
-                                    ),
-                                    sliver: SliverReorderableList(
-                                      onReorderStart: (_) =>
-                                          HapticFeedback.lightImpact(),
-                                      proxyDecorator: (
-                                        child,
-                                        index,
-                                        animation,
-                                      ) => Material(child: child),
-                                      itemCount: d.steps.length,
-                                      itemBuilder: (_, i) => KeepBuilt(
-                                        key: ValueKey((
-                                          'built-step',
-                                          d.steps[i].id,
-                                        )),
-                                        child: _step(d.steps[i], i),
-                                      ),
-                                      onReorderItem: (a, b) =>
-                                          c.reorder(d.steps, a, b),
-                                    ),
-                                  ),
-                                  SliverPadding(
-                                    padding: EdgeInsets.fromLTRB(
-                                      inset,
-                                      0,
-                                      inset,
-                                      32,
-                                    ),
-                                    sliver: BuiltSliverList(
-                                      children: [
-                                        Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: TextButton.icon(
-                                            onPressed: () => _change(
-                                              () =>
-                                                  d.steps.add(EditableStep('')),
+                                        ),
+                                        if (_sectionFocusSpace > 0)
+                                          SliverToBoxAdapter(
+                                            child: SizedBox(
+                                              height: _sectionFocusSpace,
                                             ),
-                                            icon: const Icon(Symbols.add),
-                                            label: const Text('Step'),
                                           ),
-                                        ),
-                                        _heading('Notes'),
-                                        _field(
-                                          'notes',
-                                          'Notes',
-                                          () => d.notes,
-                                          (s) => d.notes = s,
-                                          multiline: true,
-                                        ),
-                                        _field(
-                                          'source',
-                                          'Source link',
-                                          () => d.source,
-                                          (s) => d.source = s,
-                                        ),
                                       ],
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                            if (_placingSection != null)
+                              Positioned.fill(child: _placementOverlay()),
+                            if (_sectionDragSession case final session?)
+                              Positioned.fill(
+                                child: _sectionDragOverlay(session),
+                              ),
+                          ],
                         ),
                       ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: _keyboardVisible,
-                        builder: (_, visible, _) => _EditorSuggestionStrip(
-                          suggestions: _suggestions,
-                          keyboardVisible: visible,
+                      MeasureHeight(
+                        onChanged: (height) {
+                          if (height > 0) {
+                            _suggestions.active?.revealAboveSuggestions();
+                          }
+                        },
+                        child: ValueListenableBuilder<bool>(
+                          valueListenable: _keyboardVisible,
+                          builder: (_, visible, _) => _EditorSuggestionStrip(
+                            suggestions: _suggestions,
+                            keyboardVisible: visible,
+                          ),
                         ),
                       ),
                     ],
@@ -1474,11 +2281,122 @@ class _RecipeEditorState extends State<RecipeEditor>
   );
 }
 
+class _SectionDragSession extends ChangeNotifier {
+  _SectionDragSession({
+    required this.section,
+    required this.order,
+    required this.originalRects,
+    required this.visibleOrigins,
+    required this.originalScroll,
+    required this.originalFocusSpace,
+    required this.pointer,
+    required this.viewport,
+  }) {
+    final held = originalRects[section.id]!;
+    pointerOffset = pointer - held.topLeft;
+    rawHeight =
+        order.fold(0.0, (h, s) => h + originalRects[s.id]!.height + 16) - 16;
+    overviewScale = ((viewport.height - 48) / rawHeight).clamp(.01, 1.0);
+    var prefix = 0.0;
+    for (final group in order.take(order.indexOf(section))) {
+      prefix += originalRects[group.id]!.height + 16;
+    }
+    top = (held.top - prefix * overviewScale).clamp(
+      24.0,
+      (viewport.height - 24 - listHeight).clamp(24.0, double.infinity),
+    );
+    _refreshSlots();
+    // Fit the overview beside the held header's vertical band when its former
+    // neighbors would otherwise be off screen or covered by the drag proxy.
+    if (order.any(
+      (s) => s != section && slotRect(s).overlaps(held.inflate(8)),
+    )) {
+      final below = (viewport.height - 24 - held.bottom - 16).clamp(
+        0.0,
+        double.infinity,
+      );
+      final above = (held.top - 16 - 24).clamp(0.0, double.infinity);
+      final useBelow =
+          below >= listHeight || (above < listHeight && below >= above);
+      final available = useBelow ? below : above;
+      overviewScale = (available / rawHeight).clamp(.01, 1.0);
+      top = useBelow ? held.bottom + 16 : held.top - 16 - listHeight;
+      _refreshSlots();
+    }
+  }
+  final EditableSection section;
+  final List<EditableSection> order;
+  final Map<String, Rect> originalRects;
+  final Set<String> visibleOrigins;
+  Set<String> visibleReturns = {};
+  final double originalScroll, originalFocusSpace;
+  final Size viewport;
+  late final Offset pointerOffset;
+  late final double rawHeight;
+  Offset pointer;
+  late double top, overviewScale;
+  final _slots = <String, Rect>{};
+  final headerWidgets = <String, Widget>{};
+  bool collapsed = false, finishing = false, returning = false;
+  Future<void>? collapseComplete;
+  Map<String, Rect>? returnRects;
+  Rect get heldRect {
+    final original = originalRects[section.id]!;
+    return Rect.fromLTWH(
+      original.left,
+      (pointer.dy - pointerOffset.dy).clamp(
+        0.0,
+        (viewport.height - original.height).clamp(0.0, double.infinity),
+      ),
+      original.width,
+      original.height,
+    );
+  }
+
+  double get listHeight => rawHeight * overviewScale;
+  Rect slotRect(EditableSection section) => _slots[section.id]!;
+  void _refreshSlots() {
+    var y = top;
+    for (final group in order) {
+      final rect = originalRects[group.id]!;
+      _slots[group.id] = Rect.fromLTWH(
+        rect.left,
+        y,
+        rect.width,
+        rect.height * overviewScale,
+      );
+      y += (rect.height + 16) * overviewScale;
+    }
+  }
+
+  void updatePointer(Offset value) {
+    if (finishing || pointer.dy == value.dy) return;
+    pointer = Offset(pointer.dx, value.dy);
+    final from = order.indexOf(section);
+    var to = from;
+    final center = heldRect.center.dy;
+    for (var i = 0; i < order.length; i++) {
+      final middle = slotRect(order[i]).center.dy;
+      if (i < from && center < middle && i < to) to = i;
+      if (i > from && center > middle) to = i;
+    }
+    if (to != from) {
+      order.insert(to, order.removeAt(from));
+      _refreshSlots();
+    }
+    notifyListeners();
+  }
+}
+
 class _EditorScrollView extends StatelessWidget {
   const _EditorScrollView({
     required this.slivers,
     required this.keyboardDismissBehavior,
+    required this.controller,
+    required this.onPointerCancel,
   });
+  final ScrollController controller;
+  final PointerCancelEventListener onPointerCancel;
   final List<Widget> slivers;
   final ScrollViewKeyboardDismissBehavior keyboardDismissBehavior;
 
@@ -1498,12 +2416,16 @@ class _EditorScrollView extends StatelessWidget {
       }
       return false;
     },
-    child: IdleBuildAhead(
-      allRows: true,
-      builder: (context, cache) => PixelCustomScrollView(
-        scrollCacheExtent: ScrollCacheExtent.pixels(cache),
-        slivers: slivers,
-        keyboardDismissBehavior: keyboardDismissBehavior,
+    child: Listener(
+      onPointerCancel: onPointerCancel,
+      child: IdleBuildAhead(
+        allRows: true,
+        builder: (context, cache) => PixelCustomScrollView(
+          controller: controller,
+          scrollCacheExtent: ScrollCacheExtent.pixels(cache),
+          slivers: slivers,
+          keyboardDismissBehavior: keyboardDismissBehavior,
+        ),
       ),
     ),
   );
@@ -1669,30 +2591,90 @@ class _EditorSuggestionStrip extends StatelessWidget {
         child: Material(
           key: const ValueKey('editor-suggestion-strip'),
           color: Theme.of(context).colorScheme.surfaceContainer,
-          child: Container(
-            width: double.infinity,
-            constraints: const BoxConstraints(minHeight: 56),
-            child: PixelSingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              child: Row(
-                children: [
-                  for (final option in options)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ActionChip(
-                        label: Text(option),
-                        onPressed: () => field.select(option),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+          child: _SuggestionOptions(
+            key: ObjectKey(field),
+            options: options,
+            onSelected: field.select,
           ),
         ),
       );
     },
   );
+}
+
+/// Paint only the visible strip. Prepare nearby chips after its first frame;
+/// retain a bounded set so reversing a drag does not recreate every chip.
+class _SuggestionOptions extends StatefulWidget {
+  const _SuggestionOptions({
+    super.key,
+    required this.options,
+    required this.onSelected,
+  });
+  final List<String> options;
+  final ValueChanged<String> onSelected;
+  @override
+  State<_SuggestionOptions> createState() => _SuggestionOptionsState();
+}
+
+class _SuggestionOptionsState extends State<_SuggestionOptions> {
+  final _retained = BuiltRowBudget(64);
+
+  @override
+  Widget build(BuildContext context) {
+    final label = TextPainter(
+      text: TextSpan(
+        text: 'M',
+        style:
+            ChipTheme.of(context).labelStyle ??
+            Theme.of(context).textTheme.labelLarge,
+      ),
+      textScaler: MediaQuery.textScalerOf(context),
+      textDirection: Directionality.of(context),
+      maxLines: 1,
+    )..layout();
+    // Standard-density Material chips: 8dp vertical content padding on each
+    // side, at least a 48dp target, plus the strip's two 4dp outer insets.
+    final height = (label.height + 16).clamp(48.0, double.infinity) + 8;
+    label.dispose();
+    final slivers = <Widget>[
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        sliver: SliverList.builder(
+          itemCount: widget.options.length,
+          itemBuilder: (context, index) {
+            final option = widget.options[index];
+            return KeepBuilt(
+              key: ValueKey(option),
+              budget: _retained,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: 1,
+                  child: ActionChip(
+                    label: Text(option, maxLines: 1, softWrap: false),
+                    onPressed: () => widget.onSelected(option),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    ];
+    return SizedBox(
+      height: height,
+      child: IdleBuildAhead(
+        axis: Axis.horizontal,
+        initialCache: 0,
+        builder: (_, cache) => PixelCustomScrollView(
+          scrollDirection: Axis.horizontal,
+          scrollCacheExtent: ScrollCacheExtent.pixels(cache),
+          slivers: slivers,
+        ),
+      ),
+    );
+  }
 }
 
 class _EditorField extends StatefulWidget {
@@ -1948,6 +2930,17 @@ class _EditorFieldState extends State<_EditorField> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _suggestions?.refresh(this);
     });
+  }
+
+  void revealAboveSuggestions() {
+    if (!mounted || !_focus.hasFocus || !widget.suggestionStrip) return;
+    final box = _nativeField.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return;
+    // The strip can appear after the final IME metrics notification. Reveal
+    // against the newly laid-out viewport without replacing the native field.
+    box.showOnScreen(
+      rect: Rect.fromLTWH(0, -8, box.size.width, box.size.height + 16),
+    );
   }
 
   void select(String option) {
@@ -2275,32 +3268,34 @@ class _PasteDialogState extends State<_PasteDialog> {
             children: [
               PixelScrollScope(
                 axis: Axis.horizontal,
-                builder: (context) => TextField(
-                  scrollController: PrimaryScrollController.of(context),
-                  controller: _text,
-                  autofocus: false,
-                  readOnly: _busy,
-                  minLines: 4,
-                  maxLines: 8,
-                  decoration: InputDecoration(
-                    labelText: _isSteps ? 'Steps' : 'Ingredients',
+                builder: (context) => DialogFieldPadding(
+                  child: TextField(
+                    scrollController: PrimaryScrollController.of(context),
+                    controller: _text,
+                    autofocus: false,
+                    readOnly: _busy,
+                    minLines: 4,
+                    maxLines: 8,
+                    decoration: InputDecoration(
+                      labelText: _isSteps ? 'Steps' : 'Ingredients',
+                    ),
+                    textCapitalization: _isSteps
+                        ? TextCapitalization.sentences
+                        : TextCapitalization.none,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    onChanged: (value) {
+                      c.draft.pasteText = value;
+                      c.changed();
+                      setState(() {
+                        _version++;
+                        _busy = false;
+                        _ingredients = null;
+                        _steps = null;
+                        _error = null;
+                      });
+                    },
                   ),
-                  textCapitalization: _isSteps
-                      ? TextCapitalization.sentences
-                      : TextCapitalization.none,
-                  keyboardType: TextInputType.multiline,
-                  textInputAction: TextInputAction.newline,
-                  onChanged: (value) {
-                    c.draft.pasteText = value;
-                    c.changed();
-                    setState(() {
-                      _version++;
-                      _busy = false;
-                      _ingredients = null;
-                      _steps = null;
-                      _error = null;
-                    });
-                  },
                 ),
               ),
               if (_error != null)

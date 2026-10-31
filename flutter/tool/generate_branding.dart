@@ -1,6 +1,8 @@
 // Host-only asset renderer. Run from flutter/ with:
 // flutter test tool/generate_branding.dart
 // Reuses the header's exact outlined skillet glyph; never opens app storage.
+// Then run preview_android_icons.cjs --write-assets to restore the Android
+// launcher PNGs and derive the light splash. Windows uses this renderer unchanged.
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -53,7 +55,8 @@ Future<Uint8List> render(int pixels, {bool splash = false}) async {
     canvas,
     String.fromCharCode(Symbols.skillet.codePoint),
     splash ? 100 : 128,
-    splash ? const Offset(144, 115) : const Offset(96, 96),
+    // The handle extends right of the bowl: optically center the splash bowl.
+    splash ? const Offset(152.25, 115) : const Offset(96, 96),
     icon: true,
     color: cookdexColors.primary,
   );

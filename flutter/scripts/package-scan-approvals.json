@@ -1707,5 +1707,106 @@
     "fingerprints": [
       "042750b2c4633c772816742fbd528f34b0462cddb4a57958a1d9d8758d430f39"
     ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Ingredient-section UI preview: reviewed exact Flutter scale gesture and persistent hash-map constructor symbols; socket error host prefixes adjacent to unrelated rendering/app class symbols. Confirmed against pinned SDK and app sources. No personal identifier or host address. Exact member/string/context only.",
+    "fingerprints": [
+      "c7558be0d78d3dc174fc1fd2e89c06323be4ff5cec5f76d5e280b25c8792b4ad",
+      "c449fe95750aac7ec1c6c51398c20c5ab86364d16b21d49b6e5120d5e2ea9c26",
+      "dbb44c97e4d23546d5632e1bf9be78057096939232b55079786511c4bad87f6d",
+      "a891e144836158074a4b7b50024969f10619cc9756d64158367a033418931c39",
+      "41a3dc3587a1cbecbf67411a6e4fc63c2e12e23329971d3561900952a85d60a5",
+      "7c80fcc18acb4b123c6bba43d1a39a42a0f65212a63bc4f9c3562b8db591b2d9"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Repeated section reorder preview: reviewed compiled Dart host-label suffix adjacent to the existing Before discarding snapshot label. Confirmed separate string boundaries in libapp.so and generic HTTP connection error/source label text. No actual host or personal identifier. Exact member/string/context only.",
+    "fingerprints": [
+      "cec3b11402eccbe970d8d03309e9fb8073af66d62e4b96003fab0bf2b85d3ffc"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Ingredient sections 1.9.0 Windows delivery: reviewed exact compiled Dart persistent hash-map and scale gesture constructor symbols against the pinned Flutter SDK sources. Compiler private-name suffixes resemble email addresses; no personal identifier. Exact member/string/context only.",
+    "fingerprints": [
+      "1e583c99d2823b40c2145536d59ccc9fc5230cadf64df4e5422a099af7ea9c5c",
+      "7ef6a73f3acff7bba04dad089ae239a76512208d1b55b39562bc0765613091bf",
+      "ea0b7f53c4a2e722f1686161b040efd9b77c1871d641f1339ecfbb8cb20213c6",
+      "606684a2225a46d5e39072b8ddb2a3ad914b102ea572da2922a9d286ca70f98c"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Suggestion-strip UI preview: reviewed an exact four-byte slash-shaped fragment inside non-text .rodata Dart snapshot bytes, enclosed by _kDartSnapshotData. Adjacent non-text bytes and the absence of a matching app/SDK source string confirm this is not a filesystem path or owner identifier. Exact member/string/context only.",
+    "fingerprints": [
+      "80411a1173ebe09277a512fc3eb68964fb117266ee1d6e785f313b45dbca9837"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed 1.8.5 dev candidates: Flutter persistent-hash-map and pan-zoom private constructor symbols, a host label separated by a non-text byte from an engine API symbol, glyph-outline table bytes, and compressed PNG image bytes. Verified SDK declarations and binary table/chunk boundaries; no personal identifiers or paths. Exact member/string/context only.",
+    "fingerprints": [
+      "769f762338db5564a7616d846be23c349d26e1e5ea8be233cebff3aef19a59c0",
+      "0913a4336e2a65590ba199f829119d19e6631aa159b83157423a71597246e1d9",
+      "d4a128f65219ebe729a37cf835386089b9ba75593655ef76ac9b47c0e086a0fd",
+      "061af589fc9c7949c1dafc588dc898ad4d43fad974888110285c80efafd82832",
+      "07ff0939451fe556d50d1621c0287fb89e3a4d7541e4a8aa537568c7ace6dc4c",
+      "0017f164f423e149f241f46ce24e7f1bcbaeea5adc1a16124d774544796af6d8",
+      "d0abe987f5b7af9c0f2806bb9cf515d7c78a905be96acd1deb1040d1ae4e0862",
+      "ce42444fc233e685476e26c308b1a1cec7dd735f4af0cfc7424c0431a1703743",
+      "02cdc5eea53589136d405ad28417ae28653800332f425e0691aac0136090cee0",
+      "a047a3c01e051bd6fae33dbd156cbc2593afbf22b4d2444647611b5a044f504a",
+      "c22693a726fef545552ad6b9f45f279204c223fe23f52104543426805c7f3448",
+      "f60a7fbe6cbf5bbee51bc4a5dff9a38b65abdf9ae739cbd7944a97934a2e05bd"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed 1.9.0 update checker: exact public GitHub API and release-page URL paths declared in update_checker.dart. These are fixed public endpoints, not local filesystem paths or owner identifiers. Exact member/string/context only.",
+    "fingerprints": [
+      "80d94de5b81fa6c79f2fec131724bc9eb47122674518f3c0a66b9cfca7ac5484",
+      "6ac7c7842558408d7768716e7498cced933fbb2b79831501d7627b2452f10ccd",
+      "941de90d6cd696b5bf8f237a905617301f6e64d92e6809d29d206f7534851d5b",
+      "eb8b05c527451e8c9576703aed008c2f4c31a49ed6ce0f53a6cc7cfd6d2f4c2e"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed 1.9.0 compiled Dart Uri.https private constructor symbols against the pinned Dart SDK uri.dart declaration. Compiler private-name suffixes resemble email addresses; no personal email. Exact member/string/context only.",
+    "fingerprints": [
+      "491e50bf194abccfdfebdf6bf07d0be6934d9b7744cfc486d3edeb072b7e9665",
+      "2149833a4656966b3797086544ba27cc9f3b789bbcd624d58d3f42ee600bf9df"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed 1.9.0 compiled socket error labels adjacent to Flutter private symbols for CupertinoContextMenu midpoint and frame callbacks. Pinned SDK socket_patch.dart and Flutter declarations confirm static labels/symbols, not a captured host or device identifier. Exact member/string/context only.",
+    "fingerprints": [
+      "8e1d8f13dd478326965be7f51274a31c9d63e8f9e32b060346fb7812581a93b9",
+      "02fdc46007ea25e99c12f45c1e28ba1d967a7577a31221a5c063a1fe107aabf5"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed 1.9.0 Android exact four-byte slash-shaped fragment at byte 77206 in ELF .rodata. It is surrounded by non-text Dart snapshot bytes and is not a filesystem path. Exact member/string/context only.",
+    "fingerprints": [
+      "6ed5b4da4d1e3f29211482faebe64d8a1b85bdd72891b5398b24f7bd4b37afb4"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed 1.9.0 production Android icon res/Li.png: the IPv6-shaped bytes at offset 1318 lie inside the CRC-validated PNG IDAT compressed image data. Resource inventory identifies the xxhdpi production round icon; decoded image was inspected. No address or personal text. Exact member/string/context only.",
+    "fingerprints": [
+      "1ab6856745a6e63bfd5a15285c8a2ab520b00d085f9ee9eebb31b98f22c22cb8"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed 1.9.0 production Android icon res/Y5.png: the path-shaped bytes at offset 313 lie inside the CRC-validated PNG PLTE color table. Resource inventory identifies the xhdpi production icon; decoded image was inspected. These are palette RGB bytes, not a filesystem path. Exact member/string/context only.",
+    "fingerprints": [
+      "3044182195696bcf509dde05ee499aaf710374df7e1448f4f90d91c027a628ee"
+    ]
   }
 ]

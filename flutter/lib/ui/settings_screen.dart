@@ -24,6 +24,7 @@ class SettingsScreen extends StatelessWidget {
     this.onSnapshots,
     this.snapshotsFailing = false,
     this.onCleanUpRecipes,
+    this.onLibrary,
     this.onSmartImportSettings,
     this.onHowCookdexWorks,
     this.onGitHub,
@@ -39,6 +40,7 @@ class SettingsScreen extends StatelessWidget {
     required this.onWallpaperColors,
     required this.version,
     this.installedVersion,
+    this.updateSettings,
   });
 
   final bool hasPrevious;
@@ -54,6 +56,7 @@ class SettingsScreen extends StatelessWidget {
   final VoidCallback? onSnapshots;
   final bool snapshotsFailing;
   final VoidCallback? onCleanUpRecipes;
+  final VoidCallback? onLibrary;
   final VoidCallback? onSmartImportSettings;
   final VoidCallback? onHowCookdexWorks;
   final VoidCallback? onGitHub;
@@ -69,6 +72,7 @@ class SettingsScreen extends StatelessWidget {
   final ValueChanged<bool> onWallpaperColors;
   final String version;
   final Future<String>? installedVersion;
+  final Widget? updateSettings;
 
   static final _textSizes = <double, String>{
     1.0: 'Default',
@@ -242,6 +246,14 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           ]),
+          _group(context, 'Recipes', [
+            _action(
+              'Library',
+              Symbols.menu_book,
+              onLibrary,
+              summary: 'Tidy up ingredient names and tags',
+            ),
+          ]),
           _group(context, 'Backup & restore', [
             _action(
               'Download recipe ZIP',
@@ -341,13 +353,14 @@ class SettingsScreen extends StatelessWidget {
                     ),
               minVerticalPadding: 12,
             ),
+            ?updateSettings,
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text(
                 'Recipes stay on your devices. Optional encrypted LAN sync '
                 'connects paired devices. When you use Smart Import with AI, '
                 'selected inputs are sent to Google. Link imports contact '
-                'recipe websites.',
+                'recipe websites. Update checks contact GitHub.',
               ),
             ),
           ]),

@@ -1,3 +1,5 @@
+import 'recipe_metadata_item.dart';
+
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -22,6 +24,7 @@ class RecipeMetadata extends StatelessWidget {
     required this.cookTime,
     this.showAllTimes = false,
     this.singleLine = false,
+    this.optimizeItems = false,
   });
 
   final String servings;
@@ -30,6 +33,7 @@ class RecipeMetadata extends StatelessWidget {
   final String cookTime;
   final bool showAllTimes;
   final bool singleLine;
+  final bool optimizeItems;
 
   bool get isEmpty =>
       servings.isEmpty &&
@@ -48,21 +52,20 @@ class RecipeMetadata extends StatelessWidget {
           child: Tooltip(
             message: '$label: $text',
             excludeFromSemantics: true,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 15, color: theme.colorScheme.onSurfaceVariant),
-                const SizedBox(width: 5),
-                Flexible(
-                  child: Text(
-                    prefix == null ? text : '$prefix $text',
-                    style: theme.textTheme.bodySmall,
-                    maxLines: singleLine ? 1 : null,
-                    overflow: singleLine ? TextOverflow.ellipsis : null,
-                    softWrap: !singleLine,
-                  ),
-                ),
-              ],
+            child: RecipeMetadataItem(
+              enabled: optimizeItems,
+              icon: Icon(
+                icon,
+                size: 15,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              text: Text(
+                prefix == null ? text : '$prefix $text',
+                style: theme.textTheme.bodySmall,
+                maxLines: singleLine ? 1 : null,
+                overflow: singleLine ? TextOverflow.ellipsis : null,
+                softWrap: !singleLine,
+              ),
             ),
           ),
         );

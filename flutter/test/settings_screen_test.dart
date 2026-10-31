@@ -203,7 +203,7 @@ void main() {
         'Recipes stay on your devices. Optional encrypted LAN sync '
         'connects paired devices. When you use Smart Import with AI, '
         'selected inputs are sent to Google. Link imports contact '
-        'recipe websites.',
+        'recipe websites. Update checks contact GitHub.',
       ),
       findsOneWidget,
     );

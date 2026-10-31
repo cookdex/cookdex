@@ -243,6 +243,16 @@ pub enum ConflictChoice {
 pub struct CleanupPreview {
     inner: services::CleanupPreview,
 }
+#[frb(opaque)]
+pub struct LibraryUndo {
+    inner: services::LibraryUndo,
+}
+#[frb(non_opaque)]
+pub struct LibraryResult {
+    pub snapshot: CollectionSnapshot,
+    pub undo: LibraryUndo,
+    pub count: u32,
+}
 impl CleanupPreview {
     pub fn changed(&self) -> u32 {
         self.inner.changed
@@ -487,6 +497,58 @@ impl CoreSession {
     }
     pub fn editor_units(&self) -> Result<Vec<String>, ServiceError> {
         Ok(self.service()?.editor_units()?)
+    }
+    pub fn add_library_tag(
+        &self,
+        generation: i64,
+        ids: Vec<String>,
+        tag: String,
+        operation: &Operation,
+    ) -> Result<LibraryResult, ServiceError> {
+        let ids = ids.into_iter().map(recipe::RecipeId).collect::<Vec<_>>();
+        let (snapshot, undo) =
+            self.service()?
+                .add_library_tag(generation, &ids, &tag, &operation.inner)?;
+        let count = undo.count();
+        Ok(LibraryResult {
+            snapshot: snapshot.into(),
+            undo: LibraryUndo { inner: undo },
+            count,
+        })
+    }
+
+    pub fn change_library_names(
+        &self,
+        generation: i64,
+        tags: bool,
+        sources: Vec<String>,
+        target: Option<String>,
+        operation: &Operation,
+    ) -> Result<LibraryResult, ServiceError> {
+        let (snapshot, undo) = self.service()?.change_library_names(
+            generation,
+            tags,
+            &sources,
+            target.as_deref(),
+            &operation.inner,
+        )?;
+        let count = undo.count();
+        Ok(LibraryResult {
+            snapshot: snapshot.into(),
+            undo: LibraryUndo { inner: undo },
+            count,
+        })
+    }
+    pub fn undo_library_names(
+        &self,
+        generation: i64,
+        undo: &LibraryUndo,
+        operation: &Operation,
+    ) -> Result<CollectionSnapshot, ServiceError> {
+        Ok(self
+            .service()?
+            .undo_library_names(generation, &undo.inner, &operation.inner)?
+            .into())
     }
     pub fn detail(&self, id: String) -> Result<Option<Recipe>, ServiceError> {
         Ok(self

@@ -505,3 +505,68 @@ fn incoming_commit_notifies_subscribers_and_leaves_third_device_pending() {
     assert!(peers.iter().any(|p| p["caughtUp"] == false));
     assert!(peers.iter().any(|p| p["caughtUp"] == true));
 }
+
+#[test]
+fn library_batches_and_undo_sync_unchanged_timestamps_in_both_directions() {
+    let first = Peer::new("Library source");
+    let second = Peer::new("Library receiver");
+    let mut recipes = Vec::new();
+    for i in 0..24 {
+        let mut r = fixture()[0].clone();
+        r.id = RecipeId(format!("library-sync-{i:03}"));
+        r.content.tags = vec!["Quick".into(), "quick".into(), "remove me".into()];
+        r.content.ingredients[0].name = "parm".into();
+        recipes.push(r);
+    }
+    let bytes = backup::write(&recipes).unwrap();
+    first
+        .service
+        .restore(
+            &first.service.preview_restore(&bytes, &op()).unwrap(),
+            &op(),
+        )
+        .unwrap();
+    second.pair(&first);
+    for (source, receiver, tags, old, target) in [
+        (&first, &second, false, "parm", Some("parmesan")),
+        (&second, &first, true, "Quick", Some("quick")),
+        (&first, &second, true, "remove me", None),
+        (&second, &first, true, "", Some("new tag")),
+    ] {
+        let before: Vec<_> = recipes.iter().map(|r| source.recipe(&r.id)).collect();
+        let generation = source.service.snapshot().unwrap().generation;
+        let (after, undo) = if old.is_empty() {
+            source.service.add_library_tag(
+                generation,
+                &recipes.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+                target.unwrap(),
+                &op(),
+            )
+        } else {
+            source
+                .service
+                .change_library_names(generation, tags, &[old.into()], target, &op())
+        }
+        .unwrap();
+        source.service.sync_now().unwrap();
+        for r in &before {
+            let changed = source.recipe(&r.id);
+            assert_eq!(receiver.recipe(&r.id), changed);
+            assert_eq!(changed.updated_at, r.updated_at);
+            assert_eq!(changed.created_at, r.created_at);
+            assert_eq!(changed.favorite, r.favorite);
+        }
+        source
+            .service
+            .undo_library_names(after.generation, &undo, &op())
+            .unwrap();
+        source.service.sync_now().unwrap();
+        for r in &before {
+            let mut restored = r.clone();
+            restored.revision += 2;
+            assert_eq!(source.recipe(&r.id), restored);
+            assert_eq!(receiver.recipe(&r.id), restored);
+        }
+        assert!(receiver.service.snapshot().unwrap().conflicts.is_empty());
+    }
+}

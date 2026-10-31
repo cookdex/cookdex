@@ -353,6 +353,54 @@ Notes: Synthetic only.
     );
     snapshot = removed.snapshot;
     check(snapshot.shopping.length == 3, 'remove variant');
+    // Exercise the opaque batch Undo handle through the real native bridge.
+    final libraryBefore = (await session.detail(id: id))!;
+    final oldName = libraryBefore.fields.ingredients.first.name;
+    final renamed = await session.changeLibraryNames(
+      generation: snapshot.generation,
+      tags: false,
+      sources: [oldName],
+      target: 'native library spelling',
+      operation: Operation(),
+    );
+    final libraryChanged = (await session.detail(id: id))!;
+    check(
+      libraryChanged.fields.ingredients.first.name ==
+              'native library spelling' &&
+          libraryChanged.updatedAt == libraryBefore.updatedAt &&
+          libraryChanged.revision == libraryBefore.revision + 1,
+      'typed Library rename preserves edit time',
+    );
+    snapshot = await session.undoLibraryNames(
+      generation: renamed.snapshot.generation,
+      undo: renamed.undo,
+      operation: Operation(),
+    );
+    check(
+      (await session.detail(id: id))!.fields.ingredients.first.name == oldName,
+      'opaque Library rename Undo',
+    );
+    final tagged = await session.addLibraryTag(
+      generation: snapshot.generation,
+      ids: [id],
+      tag: 'native library tag',
+      operation: Operation(),
+    );
+    check(
+      (await session.detail(id: id))!.fields.tags
+          .contains('native library tag'),
+      'typed Library tag addition',
+    );
+    snapshot = await session.undoLibraryNames(
+      generation: tagged.snapshot.generation,
+      undo: tagged.undo,
+      operation: Operation(),
+    );
+    check(
+      !(await session.detail(id: id))!.fields.tags
+          .contains('native library tag'),
+      'opaque Library tag Undo',
+    );
     streamToken.cancel();
     // Keep the Dart port open until Rust acknowledges subscription cancellation.
     while (await events.moveNext().timeout(const Duration(seconds: 5))) {}

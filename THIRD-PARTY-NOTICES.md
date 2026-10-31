@@ -4,7 +4,7 @@ cookdex's own source is MIT-licensed. The following bundled source assets retain
 
 ## Material Symbols artwork
 
-The production launcher icons and splash image are derived from the Material Symbols outlined skillet glyph, rasterized with cookdex colors, shape and wordmark by `flutter/tool/generate_branding.dart`.
+The launcher icons and splash image are derived from the Material Symbols outlined skillet glyph. The Android adaptive foreground and production monochrome resources preserve the original quadratic font outline with a uniform transform. `flutter/tool/preview_android_icons.cjs` renders their host previews and all legacy Android fallbacks. The Windows icon and splash image use cookdex colors, shape and wordmark from `flutter/tool/generate_branding.dart`; the Android splash pan is optically centered above its wordmark.
 
 Copyright 2023 Google (material symbols icon fonts) and Tim Maffett (part package code).
 

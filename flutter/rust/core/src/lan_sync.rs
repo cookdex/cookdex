@@ -231,6 +231,7 @@ impl Runtime {
 #[derive(Clone)]
 pub struct Service {
     db: Arc<Mutex<Connection>>,
+    status_read: Arc<Mutex<Option<StatusRead>>>,
     runtime: Arc<Mutex<Runtime>>,
     active: Arc<AtomicBool>,
     inbound: Arc<AtomicUsize>,
@@ -244,6 +245,102 @@ pub struct Service {
     host_active: Arc<AtomicBool>,
     outgoing: Arc<Mutex<()>>,
     on_change: Arc<Mutex<Option<Arc<dyn Fn(i64, Vec<String>) + Send + Sync>>>>,
+}
+
+struct StatusRead {
+    token: (i64, i64, u64),
+    identity: String,
+    excluded: Vec<String>,
+}
+
+fn status_token(db: &Connection) -> Result<(i64, i64, u64), String> {
+    let (generation, external_version) = storage::version(db)?;
+    Ok((generation, external_version, db.total_changes()))
+}
+
+#[cfg(test)]
+mod status_read_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires COOKDEX_LARGE_FIXTURES frozen synthetic ZIPs"]
+    fn status_results_match_uncached_at_500_and_2500_with_edits() {
+        let fixtures = std::path::PathBuf::from(std::env::var("COOKDEX_LARGE_FIXTURES").unwrap());
+        for count in [500, 2500] {
+            let recipes = crate::backup::read(
+                &std::fs::read(fixtures.join(format!("library-{count}.zip"))).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(recipes.len(), count);
+            let mut db = storage::open(std::path::Path::new(":memory:")).unwrap();
+            let book = storage::Book {
+                recipes: recipes
+                    .iter()
+                    .map(|r| serde_json::from_slice(&r.to_json().unwrap()).unwrap())
+                    .collect(),
+                ..Default::default()
+            };
+            storage::save(&mut db, 0, &book, "fixture").unwrap();
+            let service = Service::new(Arc::new(Mutex::new(db))).unwrap();
+            let identity = history_identity(&lock(&service.db).unwrap()).unwrap();
+            lock(&service.runtime).unwrap().config.peers.push(Peer {
+                id: "status-test-peer".into(),
+                name: "Fixture peer".into(),
+                address: format!("127.0.0.1:{PORT}"),
+                pair: "status-test-pair".into(),
+                key: B64.encode([23; 32]),
+                last_sync: None,
+                acknowledged: Some(identity),
+            });
+            // A miss executes exactly the prior identity and unreadable checks.
+            let original = service.status().unwrap();
+            assert_eq!(original["peers"][0]["caughtUp"], true);
+            *lock(&service.status_read).unwrap() = None;
+            {
+                let mut db = lock(&service.db).unwrap();
+                let validated = storage::load(&mut db).unwrap();
+                service
+                    .prime_status_read(&db, storage::version(&db).unwrap(), &validated.set_aside)
+                    .unwrap();
+            }
+            assert_eq!(service.status().unwrap(), original);
+            assert_eq!(
+                original["conflicts"],
+                sync_store::conflicts(&lock(&service.db).unwrap()).unwrap()
+            );
+            // An edit wins the existing DB mutex while a status reader waits.
+            // Its result must use the new generation and pending peer receipt.
+            let mut db = lock(&service.db).unwrap();
+            let reader = service.clone();
+            let pending = std::thread::spawn(move || reader.status().unwrap());
+            let mut stored = storage::load(&mut db).unwrap();
+            stored.book.recipes[0]["notes"] = json!("Edited during status read");
+            storage::save(&mut db, stored.generation, &stored.book, "edit").unwrap();
+            drop(db);
+            let changed = pending.join().unwrap();
+            assert_eq!(changed["peers"][0]["caughtUp"], false);
+            assert_ne!(changed["generation"], original["generation"]);
+            *lock(&service.status_read).unwrap() = None;
+            assert_eq!(service.status().unwrap(), changed);
+            // Even a same-connection write without a generation bump cannot
+            // hide the existing unreadable-recipe error behind cached results.
+            lock(&service.db)
+                .unwrap()
+                .execute(
+                    "UPDATE recipes SET body='{}' WHERE id=(SELECT id FROM recipes LIMIT 1)",
+                    [],
+                )
+                .unwrap();
+            let unreadable = service.status().unwrap();
+            assert_eq!(unreadable["error"], sync_store::SET_ASIDE_ERROR);
+            *lock(&service.status_read).unwrap() = None;
+            assert_eq!(service.status().unwrap(), unreadable);
+            assert_eq!(
+                unreadable["conflicts"],
+                sync_store::conflicts(&lock(&service.db).unwrap()).unwrap()
+            );
+        }
+    }
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -508,6 +605,7 @@ impl Service {
             (id, config)
         };
         Ok(Self {
+            status_read: Arc::new(Mutex::new(None)),
             db,
             runtime: Arc::new(Mutex::new(Runtime {
                 config,
@@ -636,8 +734,26 @@ impl Service {
         let generation: i64 = conn
             .query_row("SELECT generation FROM state WHERE id=1", [], |r| r.get(0))
             .map_err(err)?;
-        let current = history_identity(&conn)?;
-        let error = if storage::set_aside_ids(&conn)?.is_empty() {
+        let token = status_token(&conn)?;
+        let mut cached = lock(&self.status_read)?;
+        let (current, excluded) =
+            if let Some(value) = cached.as_ref().filter(|value| value.token == token) {
+                (value.identity.clone(), value.excluded.clone())
+            } else {
+                *cached = None;
+                let identity = history_identity(&conn)?;
+                let excluded = storage::set_aside_ids(&conn)?;
+                if status_token(&conn)? == token {
+                    *cached = Some(StatusRead {
+                        token,
+                        identity: identity.clone(),
+                        excluded: excluded.clone(),
+                    });
+                }
+                (identity, excluded)
+            };
+        drop(cached);
+        let error = if excluded.is_empty() {
             rt.error.clone()
         } else {
             Some(sync_store::SET_ASIDE_ERROR.to_string())
@@ -652,8 +768,35 @@ impl Service {
             .chain(rt.config.staged.iter().map(|p| public_peer(&p.peer, true)))
             .collect();
         Ok(
-            json!({"rePairRequired":rt.config.re_pair_required,"enabled":rt.config.enabled,"active":self.active.load(Ordering::SeqCst),"name":rt.config.name,"deviceId":self.id,"addresses":addresses(),"port":self.port,"error":error,"invitationId":rt.pending.as_ref().filter(|p|p.expires>Instant::now()).map(|p|&p.invite.pair),"generation":generation,"reports":rt.reports.iter().filter(|(id,_)|rt.config.peers.iter().any(|p|p.id==**id)).map(|(id,r)|{let mut r=r.clone();if r["status"]=="waiting" {r["retryAfterSeconds"]=json!(rt.retry_after(id,false,Instant::now()).unwrap_or(0));}r}).collect::<Vec<_>>(),"conflicts":sync_store::conflicts(&conn)?,"peers":peers}),
+            json!({"rePairRequired":rt.config.re_pair_required,"enabled":rt.config.enabled,"active":self.active.load(Ordering::SeqCst),"name":rt.config.name,"deviceId":self.id,"addresses":addresses(),"port":self.port,"error":error,"invitationId":rt.pending.as_ref().filter(|p|p.expires>Instant::now()).map(|p|&p.invite.pair),"generation":generation,"reports":rt.reports.iter().filter(|(id,_)|rt.config.peers.iter().any(|p|p.id==**id)).map(|(id,r)|{let mut r=r.clone();if r["status"]=="waiting" {r["retryAfterSeconds"]=json!(rt.retry_after(id,false,Instant::now()).unwrap_or(0));}r}).collect::<Vec<_>>(),"conflicts":sync_store::conflicts_excluding(&conn, &excluded)?,"peers":peers}),
         )
+    }
+    /// Reuse only validation already completed under this same database lock.
+    /// Both other connections and same-connection writes invalidate the token.
+    pub(crate) fn prime_status_read(
+        &self,
+        db: &Connection,
+        validated: (i64, i64),
+        excluded: &[String],
+    ) -> Result<(), String> {
+        let token = status_token(db)?;
+        if (token.0, token.1) != validated {
+            return Ok(());
+        }
+        let mut cached = lock(&self.status_read)?;
+        if cached.as_ref().is_some_and(|value| value.token == token) {
+            return Ok(());
+        }
+        *cached = None;
+        let identity = history_identity(db)?;
+        if status_token(db)? == token {
+            *cached = Some(StatusRead {
+                token,
+                identity,
+                excluded: excluded.to_vec(),
+            });
+        }
+        Ok(())
     }
     pub fn next_retry(&self) -> Option<Instant> {
         self.runtime

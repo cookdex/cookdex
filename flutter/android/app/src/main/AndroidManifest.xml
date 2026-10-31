@@ -15,7 +15,8 @@
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:name="${applicationName}"
-        android:icon="${appIcon}">
+        android:icon="${appIcon}"
+        android:roundIcon="${appRoundIcon}">
         <!-- The scanner's unused gallery dependency opts into a Play download.
              cookdex uses its own system document picker for photo imports. -->
         <service android:name="com.google.android.gms.metadata.ModuleDependencies"

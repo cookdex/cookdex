@@ -98,6 +98,7 @@ class _SnapshotsScreenState extends State<SnapshotsScreen> {
   String _reason(String reason) => switch (reason) {
     'before_restore' || 'Before restore' => 'Before restore',
     'before_delete' => 'Before deletion',
+    'before_library' => 'Before Library changes',
     'before_discard' || 'Before discarding' => 'Before discarding',
     'before_first_sync' || 'Before first sync' => 'Before first sync',
     _ => 'Automatic',

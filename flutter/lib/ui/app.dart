@@ -35,11 +35,16 @@ import '../export_service.dart';
 import '../sync_controller.dart';
 import '../settings_platform.dart';
 import 'settings_screen.dart';
+import 'library_screen.dart';
+import 'tag_addition.dart';
+import 'library_recipe_page.dart';
 import 'snapshots_screen.dart' as snapshots;
 import 'how_cookdex_works_screen.dart';
 import '../sync_presentation.dart';
 import 'sync_screen.dart';
 import 'smart_settings_screen.dart';
+import '../update_checker.dart';
+import 'update_controls.dart';
 
 class CookdexApp extends StatefulWidget {
   const CookdexApp({
@@ -50,6 +55,7 @@ class CookdexApp extends StatefulWidget {
     this.importDrafts,
     this.importService,
     this.exportService,
+    this.updates,
   });
   final RecipeStore store;
   final AppPlatform platform;
@@ -57,6 +63,7 @@ class CookdexApp extends StatefulWidget {
   final DraftStorage? importDrafts;
   final ImportService? importService;
   final ExportService? exportService;
+  final UpdateController? updates;
 
   @override
   State<CookdexApp> createState() => _CookdexAppState();
@@ -65,9 +72,16 @@ class CookdexApp extends StatefulWidget {
 class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   final _navigator = GlobalKey<NavigatorState>();
   final _recipesNavigator = GlobalKey<NavigatorState>();
+  final _recipesScreen = GlobalKey<RecipesScreenState>();
   late final ExportService _exports = widget.exportService ?? ExportService();
   final _settingsPlatform = SettingsPlatform();
   late final _installedVersion = _settingsPlatform.appVersion();
+  late final _updates =
+      widget.updates ??
+      UpdateController(
+        preferences: widget.store.preferences,
+        installedVersion: () => _installedVersion,
+      );
   late final SyncController? _sync = syncForStore(
     widget.store,
     widget.platform.isAndroid,
@@ -152,6 +166,9 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updates.afterFirstFrame();
+    });
     if (widget.platform.isAndroid) _incoming.start();
     unawaited(_maintainSnapshots());
     _snapshotTimer = Timer.periodic(const Duration(minutes: 1), (_) {
@@ -320,6 +337,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _resumed = state == AppLifecycleState.resumed;
+    _updates.setActive(_resumed);
     if (_resumed) {
       _drainShares();
       unawaited(_refreshWallpaper());
@@ -353,14 +371,17 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   }
 
   void _selectTab(int index) {
+    final resetGesture = _gestureTab != null || _tabBackProgress != null;
     _gestureTab = null;
     _tabBackProgress = null;
     FocusManager.instance.primaryFocus?.unfocus();
     if (index == 0 && _tab == 0) {
       if (_selected != null) {
         _closeRecipe();
-      } else if (_recipesScroll.hasClients) {
-        _recipesScroll.jumpTo(0);
+      } else {
+        _recipesScreen.currentState?.scrollToTop();
+        if (resetGesture) setState(() {});
+        return;
       }
     }
     setState(() => _tab = index);
@@ -701,6 +722,22 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _tagSelection(BuildContext context) async {
+    if (_selectionBusy || _selection?.isNotEmpty != true) return;
+    final ids = Set<String>.of(_selection!);
+    setState(() => _selectionBusy = true);
+    try {
+      final result = await addTagToRecipes(
+        context,
+        widget.store,
+        recipeIds: ids,
+      );
+      if (mounted && result != null) setState(() => _selection = null);
+    } finally {
+      if (mounted) setState(() => _selectionBusy = false);
+    }
+  }
+
   Future<void> _selectionAction(
     BuildContext context, {
     bool shopping = false,
@@ -766,21 +803,37 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _recipeActions(BuildContext context, RecipeSummary recipe) =>
-      showRecipeActions(
-        context: context,
-        store: widget.store,
-        recipe: recipe,
-        onDeleted: _selected == recipe.id ? _closeRecipe : null,
-        onEdit: () => _openEditor(context, recipeId: recipe.id),
-        onAction: (action) => _recipeAction(context, recipe.id, action),
-      );
+  Future<void> _recipeActions(
+    BuildContext context,
+    RecipeSummary recipe, {
+    int? shoppingScale,
+    VoidCallback? onSelect,
+  }) => showRecipeActions(
+    context: context,
+    store: widget.store,
+    recipe: recipe,
+    onDeleted: _selected == recipe.id ? _closeRecipe : null,
+    onEdit: () => _openEditor(context, recipeId: recipe.id),
+    onAction: (action) async {
+      if (action == 'select' && onSelect != null) {
+        onSelect();
+      } else {
+        await _recipeAction(
+          context,
+          recipe.id,
+          action,
+          shoppingScale: shoppingScale,
+        );
+      }
+    },
+  );
 
   Future<void> _recipeAction(
     BuildContext context,
     String id,
-    String action,
-  ) async {
+    String action, {
+    int? shoppingScale,
+  }) async {
     if (action == 'select') {
       _closeRecipe();
       setState(() {
@@ -797,7 +850,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
           context,
           widget.store,
           recipe,
-          scale: _selected == id ? _cook.scale : 2,
+          scale: shoppingScale ?? (_selected == id ? _cook.scale : 2),
         );
         return;
       }
@@ -1072,6 +1125,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _updates.dispose();
     _incoming.dispose();
     _snapshotTimer?.cancel();
     _sync?.dispose();
@@ -1260,6 +1314,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
                                 child: SafeArea(
                                   bottom: false,
                                   child: RecipesScreen(
+                                    key: _recipesScreen,
                                     selectedIds: _selection,
                                     onToggleSelection: _selectionBusy
                                         ? null
@@ -1290,6 +1345,9 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
                                             context,
                                             shopping: true,
                                           ),
+                                    onTagSelection: _selectionBusy
+                                        ? null
+                                        : () => _tagSelection(context),
                                     onDeleteSelection: _selectionBusy
                                         ? null
                                         : () => _deleteSelection(context),
@@ -1383,6 +1441,74 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
                             ),
                           ),
                           SettingsScreen(
+                            onLibrary: () =>
+                                Navigator.of(
+                                  context,
+                                  rootNavigator: true,
+                                ).push<void>(
+                                  cookdexRoute<void>(
+                                    context,
+                                    builder: (_) => LibraryScreen(
+                                      store: widget.store,
+                                      onOpenRecipe: (libraryContext, id) =>
+                                          Navigator.of(
+                                            libraryContext,
+                                          ).push<void>(
+                                            cookdexRoute<void>(
+                                              libraryContext,
+                                              builder: (recipeContext) =>
+                                                  LibraryRecipePage(
+                                                    store: widget.store,
+                                                    recipeId: id,
+                                                    platform: widget.platform,
+                                                    onActions: (scale) {
+                                                      final recipe = widget
+                                                          .store
+                                                          .summaries
+                                                          .where(
+                                                            (r) => r.id == id,
+                                                          )
+                                                          .firstOrNull;
+                                                      if (recipe != null) {
+                                                        _recipeActions(
+                                                          recipeContext,
+                                                          recipe,
+                                                          shoppingScale: scale,
+                                                          onSelect: () {
+                                                            Navigator.of(
+                                                              recipeContext,
+                                                              rootNavigator:
+                                                                  true,
+                                                            ).popUntil(
+                                                              (route) =>
+                                                                  route.isFirst,
+                                                            );
+                                                            _recipeAction(
+                                                              context,
+                                                              id,
+                                                              'select',
+                                                            );
+                                                          },
+                                                        );
+                                                      }
+                                                    },
+                                                    onEdit: () => _openEditor(
+                                                      recipeContext,
+                                                      recipeId: id,
+                                                    ),
+                                                    onAddToShopping: (scale) =>
+                                                        _recipeAction(
+                                                          recipeContext,
+                                                          id,
+                                                          'shopping',
+                                                          shoppingScale: scale,
+                                                        ),
+                                                  ),
+                                            ),
+                                          ),
+                                    ),
+                                  ),
+                                ),
                             onGitHub: () => _openGitHub(context),
                             onShareCookdex: () => _shareCookdex(context),
                             hasPrevious: widget.store.hasPrevious,
@@ -1448,6 +1574,10 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
                                 widget.store.preferences.setWallpaperColors,
                             version: 'Version unavailable',
                             installedVersion: _installedVersion,
+                            updateSettings: UpdateSettingsPanel(
+                              controller: _updates,
+                              openPage: widget.platform.openSource,
+                            ),
                             onHowCookdexWorks: () => _openHelp(context),
                           ),
                         ],
@@ -1460,6 +1590,15 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
                   builder: (context, _) => Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (_tab == 0 &&
+                          _selected == null &&
+                          _selection == null &&
+                          !_obscured &&
+                          !_keyboardVisible)
+                        UpdateNotice(
+                          controller: _updates,
+                          openPage: widget.platform.openSource,
+                        ),
                       if (WindowSizeClass.of(context) !=
                               WindowSizeClass.expanded &&
                           _tab == 0 &&

@@ -34,6 +34,8 @@ const helpSections = <HelpSection>[
     '2. Set up Smart Import if you want help reading recipes. It\'s optional; everything else works without it. See Setting up Smart Import.',
     '3. Pair your other devices if you want the same recipe book on each one. See Syncing your devices.',
     'To find recipes, use search, tags and the Favorites filter. The view button switches between Cards and Compact.',
+    'Search with several words to see recipes matching the most words first.',
+    'Use Top or tap the cookdex heading to return to the top of your recipe list.',
   ]),
   HelpSection('adding', 'Adding and editing recipes', [
     'Choose Write a recipe to add your own, or open a recipe\'s menu to edit it.',
@@ -41,9 +43,18 @@ const helpSections = <HelpSection>[
     '• Amounts can be whole numbers, fractions, decimals or ranges like 6–7. Tap to taste above the keyboard when no exact amount is needed.',
     '• Makes can be servings or a yield, like 4 servings or 12 tortillas.',
     '• For cans and jars, put the size in the unit, like 1 (16 oz) jar salsa. The size then shows everywhere, including your shopping list, and stays the same when you scale.',
-    '• Group ingredients under section headings like Sauce or Topping. Hold an ingredient\'s drag handle and move it past a heading to put it in that section.',
+    '• Group ingredients under headings like Sauce or Topping. Tap + Section, name it, then choose Add at end or Choose spot. Choose spot lets you tap where the new section starts.',
+    '• Hold a section\'s drag handle to reorder whole groups; they collapse while you move them. Hold an ingredient\'s handle to move it into or out of a section.',
+    '• In a section\'s menu, Remove section keeps its ingredients and merges them into the group above. Delete section deletes the heading and its ingredients after you confirm.',
     '• Start a step with a short label and a colon, like "Make the sauce:", and the label shows in bold when you read or cook.',
     '• As you type, cookdex suggests ingredient names and tags you\'ve used before. When you save, it may offer to match a new spelling to one you already use. Uncheck anything you want to keep as you typed it.',
+  ]),
+  HelpSection('library', 'Ingredients and tags', [
+    'Open Settings > Library to find ingredients and tags and see which recipes use them. Rename a name or merge it into another spelling; recipe amounts and other details stay as written. Remove tag removes the tag, not the recipes.',
+    'Possible duplicates includes similar spellings to review. Choose which spelling to keep before merging, or choose Keep separate. Kept separate > Show again brings a group back on this device.',
+    'On the Tags tab, New tag asks for a name and recipes to add it to. Open an existing tag and choose Add to recipes to use it on more recipes. You can also select recipes on the Recipes screen and choose Add tag.',
+    'Search and Favorites narrow the recipe picker. Select all selects every matching recipe that still needs the tag, including those off screen. Recipes that already have it stay checked and locked.',
+    'Renaming, merging and adding or removing tags offer Undo for the whole change. cookdex saves a snapshot first, available in Settings > Backup & restore > Snapshots.',
   ]),
   HelpSection('import', 'Smart Import', [
     'Smart Import turns recipe text, a website link, or up to 8 photos of a recipe into a recipe you can edit. Photos and AI help need a Gemini key; see Setting up Smart Import.',
@@ -120,6 +131,7 @@ const helpSections = <HelpSection>[
     'If cookdex ever says some recipes can\'t be read, choose Review options on the Recipes screen, and try restoring a recent backup before discarding anything.',
   ]),
   HelpSection('appearance', 'Appearance and settings', [
+    'In Settings > About, check for updates or turn on daily checks; open the release page to download a new version.',
     '• Theme: in Settings > Appearance, choose System, Light or Dark.',
     '• Wallpaper colors: on Android 12 or later, cookdex can match its colors to your wallpaper.',
     '• Screen awake: Cook mode keeps the screen on automatically, and Settings can do the same for the shopping list.',

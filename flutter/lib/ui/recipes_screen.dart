@@ -1,11 +1,20 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'pixel_scroll.dart';
 import 'idle_build_ahead.dart';
+import 'progressive_cards.dart';
+import 'prepared_card_title.dart';
+import 'recipe_top_button.dart';
+import 'recipe_action_motion.dart';
+import 'top_return_sliver.dart';
 import 'retained_screen.dart';
 import '../sync_controller.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../local_preferences.dart';
@@ -14,7 +23,7 @@ import '../tag_labels.dart';
 import '../src/rust/api.dart';
 import 'components.dart';
 import 'feedback.dart';
-import 'navigation_feedback.dart';
+import 'recipe_filters.dart';
 import 'recipe_grid.dart';
 import 'recipe_metadata.dart';
 import '../sync_presentation.dart';
@@ -44,6 +53,7 @@ class RecipesScreen extends StatefulWidget {
     this.onShareSelection,
     this.onShoppingSelection,
     this.onDeleteSelection,
+    this.onTagSelection,
   });
 
   /// Null means normal browsing; an empty set keeps selection mode active.
@@ -53,7 +63,8 @@ class RecipesScreen extends StatefulWidget {
       onSelectAll,
       onShareSelection,
       onShoppingSelection,
-      onDeleteSelection;
+      onDeleteSelection,
+      onTagSelection;
   final SyncPresentation? syncStatus;
   final SyncController? syncController;
   final VoidCallback? onSyncStatus, onHelp, onRestore;
@@ -68,21 +79,45 @@ class RecipesScreen extends StatefulWidget {
   final Future<void> Function()? onSync;
 
   @override
-  State<RecipesScreen> createState() => _RecipesScreenState();
+  State<RecipesScreen> createState() => RecipesScreenState();
 }
 
-class _RecipesScreenState extends State<RecipesScreen> {
+class RecipesScreenState extends State<RecipesScreen> {
+  Widget _heading(Widget title) => Semantics(
+    button: true,
+    label: 'cookdex, Back to top',
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: scrollToTop,
+      child: ExcludeSemantics(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Align(alignment: Alignment.centerLeft, child: title),
+        ),
+      ),
+    ),
+  );
   late final TextEditingController _query;
   late final ScrollController _scroll;
   final _showAdd = ValueNotifier(true);
+  final _showTop = ValueNotifier(false);
+  final _topSliver = GlobalKey();
+  ScrollPosition? _topPosition;
+  double _topOffset = 0;
+  int _topJump = 0;
+  bool _returningTop = false, _actionsMoving = false;
+  double _addLow = 0, _addHigh = 0;
+  Timer? _addIdle;
   final Map<String, _RecipeRow> _rows = {};
   final _builtCards = BuiltRowBudget(32);
+  final _cardPreparation = CardPreparation();
   Widget? _list;
   List<RecipeSummary>? _listRecipes;
   int? _listColumns;
   double? _listHeight;
   RecipeView? _listView;
   Set<String>? _listSelection;
+  int? _listPartialStart;
 
   Widget _recipeList(
     List<RecipeSummary> recipes,
@@ -93,6 +128,7 @@ class _RecipesScreenState extends State<RecipesScreen> {
         identical(recipes, _listRecipes) &&
         columns == _listColumns &&
         cardHeight == _listHeight &&
+        _listPartialStart == widget.store.partialMatchStart &&
         widget.preferences.view == _listView &&
         setEquals(widget.selectedIds, _listSelection)) {
       return _list!;
@@ -100,40 +136,87 @@ class _RecipesScreenState extends State<RecipesScreen> {
     _listRecipes = recipes;
     _listColumns = columns;
     _listHeight = cardHeight;
+    _listPartialStart = widget.store.partialMatchStart;
     _listView = widget.preferences.view;
     _listSelection = widget.selectedIds == null
         ? null
         : Set.of(widget.selectedIds!);
     final view = widget.preferences.view;
-    final grid = columns > 1 && view == RecipeView.cards;
+    // Unsupported accessibility typography uses natural full-card sizing in
+    // the same columns, without the standard grid's fixed text/footer slots.
+    final grid =
+        columns > 1 &&
+        view == RecipeView.cards &&
+        CardGeometryCache.supports(context);
+    // A partial group starts on its own grid row. The header sits outside the
+    // card/shell geometry, with its full natural height from the first layout.
+    final groups = <({int start, int end})>[];
+    for (var start = 0; start < recipes.length;) {
+      var end = math.min(start + columns, recipes.length);
+      if (_listPartialStart case final split?
+          when start < split && end > split) {
+        end = split;
+      }
+      groups.add((start: start, end: end));
+      start = end;
+    }
     final rowIndices = <String, int>{
-      for (var i = 0; i < recipes.length; i += columns)
-        'group-${recipes[i].id}': i ~/ columns,
+      for (var i = 0; i < groups.length; i++)
+        'group-${recipes[groups[i].start].id}': i,
     };
     return _list = SliverPadding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 112),
-      sliver: SliverList.builder(
-        itemCount: (recipes.length / columns).ceil(),
+      sliver: TopReturnSliverList.builder(
+        key: _topSliver,
+        itemCount: groups.length,
         findChildIndexCallback: (key) =>
             key is ValueKey<String> ? rowIndices[key.value] : null,
-        itemBuilder: (context, row) => KeepBuilt(
-          key: ValueKey('group-${recipes[row * columns].id}'),
-          enabled: view == RecipeView.cards,
-          budget: _builtCards,
-          weight: columns,
-          child: Padding(
+        itemBuilder: (context, row) {
+          Widget child = Padding(
             padding: EdgeInsets.only(bottom: view == RecipeView.cards ? 10 : 0),
             child: RecipeGridRow(
               columns: columns,
               fixedHeight: cardHeight,
               children: [
-                for (var col = 0; col < columns; col++)
-                  if (row * columns + col < recipes.length)
-                    _row(recipes[row * columns + col], grid: grid),
+                for (
+                  var index = groups[row].start;
+                  index < groups[row].end;
+                  index++
+                )
+                  _row(recipes[index], grid: grid),
               ],
             ),
-          ),
-        ),
+          );
+          if (groups[row].start == _listPartialStart) {
+            child = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 20, bottom: 8),
+                  child: Semantics(
+                    header: true,
+                    child: Text(
+                      'Partial matches',
+                      key: const Key('partial-matches'),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+                child,
+              ],
+            );
+          }
+          return KeepBuilt(
+            key: ValueKey('group-${recipes[groups[row].start].id}'),
+            enabled: view == RecipeView.cards,
+            budget: _builtCards,
+            weight: columns,
+            child: child,
+          );
+        },
       ),
     );
   }
@@ -156,10 +239,17 @@ class _RecipesScreenState extends State<RecipesScreen> {
       grid: grid,
       selecting: widget.selectedIds != null,
       selected: widget.selectedIds?.contains(recipe.id) ?? false,
-      onOpen: (id) => widget.selectedIds != null
-          ? widget.onToggleSelection?.call(id)
-          : widget.onOpenRecipe(id),
-      onActions: (value) => widget.onActions(value),
+      onOpen: (id) {
+        if (widget.selectedIds != null) {
+          widget.onToggleSelection?.call(id);
+        } else {
+          _cardPreparation.pauseForNavigation();
+          widget.onOpenRecipe(id);
+        }
+      },
+      onActions: (value) {
+        widget.onActions(value);
+      },
       onFavorite: () => _favorite(recipe),
     );
   }
@@ -174,10 +264,136 @@ class _RecipesScreenState extends State<RecipesScreen> {
           initialScrollOffset: widget.preferences.scrollOffset,
         );
     _scroll.addListener(_saveScroll);
+    _scroll.addListener(_updateTop);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updateTop();
+    });
     widget.preferences.addListener(_syncQuery);
   }
 
   void _saveScroll() => widget.preferences.setScrollOffset(_scroll.offset);
+
+  void _updateTop() {
+    if (!_scroll.hasClients) return;
+    final position = _scroll.position;
+    if (!identical(_topPosition, position)) {
+      _topPosition?.isScrollingNotifier.removeListener(_updateTop);
+      _topPosition = position;
+      position.isScrollingNotifier.addListener(_updateTop);
+      _topOffset = position.pixels;
+    }
+    final offset = position.pixels;
+    final moving = position.isScrollingNotifier.value;
+    if (moving && !_actionsMoving) _addLow = _addHigh = _topOffset;
+    _topOffset = offset;
+    _actionsMoving = moving;
+    if (moving) {
+      _addIdle?.cancel();
+      _addIdle = null;
+      _addLow = math.min(_addLow, offset);
+      _addHigh = math.max(_addHigh, offset);
+      // A card-sized downward excursion hides Add. A small, intentional upward
+      // movement restores it; jitter cannot flip it repeatedly.
+      if (_showAdd.value && offset - _addLow >= 200) {
+        _showAdd.value = false;
+        _addHigh = offset;
+      } else if (!_showAdd.value && _addHigh - offset >= 24) {
+        _showAdd.value = true;
+        _addLow = offset;
+      }
+    } else {
+      _addIdle ??= Timer(const Duration(milliseconds: 500), () {
+        _addIdle = null;
+        if (!mounted || !_scroll.hasClients) return;
+        _addLow = _addHigh = _scroll.offset;
+        _showAdd.value = true;
+        _syncTopVisibility();
+      });
+    }
+    if (offset <= 24) _showAdd.value = true;
+    _syncTopVisibility();
+  }
+
+  void _syncTopVisibility() {
+    _showTop.value =
+        !_returningTop &&
+        _showAdd.value &&
+        _scroll.hasClients &&
+        _scroll.offset > _scroll.position.viewportDimension * 2;
+  }
+
+  Future<void> scrollToTop() async {
+    if (!_scroll.hasClients || _scroll.offset <= 0 || _returningTop) return;
+    final jump = ++_topJump;
+    _returningTop = true;
+    _showTop.value = false;
+    _cardPreparation.jumping = true;
+    try {
+      if (MediaQuery.disableAnimationsOf(context)) {
+        _restartTopSliver();
+        _scroll.jumpTo(0);
+      } else {
+        final start = _scroll.offset;
+        final viewport = _scroll.position.viewportDimension;
+        final departure = math.min(start * .45, viewport * .9);
+        final landing = math.min(start - departure, viewport * .7);
+        _cardPreparation.prepareTopReturn(viewport + landing);
+        await _scroll.animateTo(
+          start - departure,
+          duration: const Duration(milliseconds: 220),
+          curve: Easing.emphasizedAccelerate,
+        );
+        if (!mounted ||
+            jump != _topJump ||
+            !_scroll.hasClients ||
+            (_scroll.offset - (start - departure)).abs() > 1) {
+          return;
+        }
+        // Only the unseen middle is skipped, at the fastest point of the trip.
+        if (_scroll.offset > landing) {
+          if (_scroll.offset - landing > viewport) _restartTopSliver();
+          _scroll.jumpTo(landing);
+        }
+        await _scroll.animateTo(
+          0,
+          duration: const Duration(milliseconds: 500),
+          curve: Easing.emphasizedDecelerate,
+        );
+      }
+    } finally {
+      if (mounted && jump == _topJump) {
+        _returningTop = false;
+        _cardPreparation.finishTopReturn();
+        _updateTop();
+      }
+    }
+  }
+
+  void _restartTopSliver() {
+    final render = _topSliver.currentContext?.findRenderObject();
+    if (render is RenderTopReturnSliverList) render.restartAtTop();
+  }
+
+  void _interruptTop() {
+    if (!_returningTop) return;
+    _topJump++;
+    _returningTop = false;
+    _cardPreparation.finishTopReturn();
+  }
+
+  KeyEventResult _listKey(FocusNode node, KeyEvent event) {
+    if (Theme.of(context).platform == TargetPlatform.windows &&
+        event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.home &&
+        FocusManager.instance.primaryFocus?.context
+                ?.findAncestorWidgetOfExactType<EditableText>() ==
+            null) {
+      scrollToTop();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   void _syncQuery() {
     if (_query.text != widget.preferences.query) {
       _query.value = TextEditingValue(
@@ -196,49 +412,21 @@ class _RecipesScreenState extends State<RecipesScreen> {
 
   @override
   void dispose() {
+    _addIdle?.cancel();
+    _topJump++;
     widget.preferences.removeListener(_syncQuery);
     _scroll.removeListener(_saveScroll);
+    _scroll.removeListener(_updateTop);
+    _topPosition?.isScrollingNotifier.removeListener(_updateTop);
     if (widget.controller == null) _scroll.dispose();
     _query.dispose();
     _showAdd.dispose();
+    _showTop.dispose();
+    _cardPreparation.dispose();
     super.dispose();
   }
 
-  Future<void> _fields() => showCookdexSheet<void>(
-    context,
-    child: StatefulBuilder(
-      builder: (context, update) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              'Search in',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-          ),
-          for (final field in SearchField.values)
-            CheckboxListTile(
-              title: Text(_fieldLabel(field)),
-              value: widget.preferences.searchFields.contains(field),
-              onChanged: (checked) {
-                final fields = {...widget.preferences.searchFields};
-                checked! ? fields.add(field) : fields.remove(field);
-                widget.preferences.setSearchFields(fields);
-                update(() {});
-              },
-            ),
-          TextButton(
-            onPressed: () {
-              widget.preferences.resetSearch();
-              update(() {});
-            },
-            child: const Text('Reset'),
-          ),
-        ],
-      ),
-    ),
-  );
+  Future<void> _fields() => showRecipeSearchFields(context, widget.preferences);
 
   Widget _choiceMenu<T>({
     required String tooltip,
@@ -293,6 +481,11 @@ class _RecipesScreenState extends State<RecipesScreen> {
           icon: const Icon(Symbols.select_all),
         ),
         IconButton(
+          tooltip: 'Add tag',
+          onPressed: widget.selectedIds!.isEmpty ? null : widget.onTagSelection,
+          icon: const Icon(Symbols.label),
+        ),
+        IconButton(
           tooltip: 'Share selected recipes',
           onPressed: widget.selectedIds!.isEmpty
               ? null
@@ -315,7 +508,7 @@ class _RecipesScreenState extends State<RecipesScreen> {
         ),
       ];
       final split =
-          constraints.maxWidth < 360 ||
+          constraints.maxWidth < 440 ||
           MediaQuery.textScalerOf(context).scale(14) > 20;
       return split
           ? Column(
@@ -420,10 +613,10 @@ class _RecipesScreenState extends State<RecipesScreen> {
       decoration: InputDecoration(
         hintText: 'Search recipes',
         prefixIcon: const Icon(Symbols.search),
-        suffixIcon: IconButton(
-          tooltip: 'Search fields',
-          onPressed: _fields,
-          icon: const Icon(Symbols.tune),
+        suffixIcon: SearchFieldActions(
+          controller: _query,
+          onClear: () => widget.preferences.setQuery(''),
+          onOptions: _fields,
         ),
       ),
     ),
@@ -610,179 +803,212 @@ class _RecipesScreenState extends State<RecipesScreen> {
             .toSet();
         _rows.removeWhere((id, _) => !currentIds.contains(id));
         final columns = recipeGridColumns(constraints.maxWidth - 32);
-        final grid = columns > 1 && widget.preferences.view == RecipeView.cards;
+        final grid =
+            columns > 1 &&
+            widget.preferences.view == RecipeView.cards &&
+            CardGeometryCache.supports(context);
         final cardHeight = grid ? recipeGridCardHeight(context) : null;
+        if (widget.preferences.view == RecipeView.cards) {
+          _cardPreparation.configure(
+            context,
+            recipes,
+            recipeGridColumnWidth(constraints.maxWidth - 32, columns),
+            grid: grid,
+            fixedHeight: cardHeight,
+            columns: columns,
+          );
+        }
         final scale = MediaQuery.textScalerOf(context).scale(1);
         final searchHeight = 72.0 + (scale - 1).clamp(0, 3) * 24;
         final wide = MediaQuery.sizeOf(context).width >= 600;
         return Stack(
           children: [
-            NotificationListener<UserScrollNotification>(
-              onNotification: (notification) {
-                if (notification.direction != ScrollDirection.idle) {
-                  final show =
-                      notification.direction == ScrollDirection.forward;
-                  _showAdd.value = show;
-                }
-                return false;
-              },
-              child: RefreshIndicator(
-                onRefresh: widget.onSync ?? () async {},
-                child: _RecipeScrollView(
-                  enabled: widget.preferences.view == RecipeView.cards,
-                  controller: _scroll,
-                  slivers: [
-                    SliverPersistentHeader(
-                      pinned:
-                          widget.selectedIds != null ||
-                          widget.syncStatus != null ||
-                          widget.syncController != null,
-                      delegate: _PinnedSearch(
-                        height:
-                            56 +
-                            (scale - 1).clamp(0, 3) * 24 +
-                            (widget.selectedIds != null &&
-                                    (constraints.maxWidth - 32 < 360 ||
-                                        MediaQuery.textScalerOf(context)
-                                                .scale(14) >
-                                            20)
-                                ? 48
-                                : 0),
-                        child: ColoredBox(
-                          color: Theme.of(context).scaffoldBackgroundColor,
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                            child: widget.selectedIds != null
-                                ? _selectionBar()
-                                : Row(
-                                    children: [
-                                      if (wide || scale < 1.6) ...[
-                                        const Icon(Symbols.skillet, size: 28),
-                                        const SizedBox(width: 10),
-                                      ],
-                                      Expanded(
-                                        child: Text(
-                                          'cookdex',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .headlineSmall
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w800,
-                                              ),
-                                        ),
-                                      ),
-                                      if (widget.syncStatus != null ||
-                                          widget.syncController != null)
-                                        VisibleListenableBuilder(
-                                          listenable: widget.syncController,
-                                          builder: (_) => SyncIndicator(
-                                            status:
-                                                widget.syncController == null
-                                                ? widget.syncStatus!
-                                                : syncPresentation(
-                                                    widget.syncController!,
-                                                    widget
-                                                        .store
-                                                        .conflicts
-                                                        .length,
-                                                  ),
-                                            onTap: widget.onSyncStatus ?? () {},
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (widget.store.summaries.isNotEmpty)
+            Focus(
+              debugLabel: 'Recipes list',
+              onKeyEvent: _listKey,
+              child: NotificationListener<ScrollStartNotification>(
+                onNotification: (notification) {
+                  if (notification.depth == 0 &&
+                      notification.dragDetails != null) {
+                    _interruptTop();
+                  }
+                  return false;
+                },
+                child: RefreshIndicator(
+                  onRefresh: widget.onSync ?? () async {},
+                  child: _RecipeScrollView(
+                    preparation: _cardPreparation,
+                    enabled: widget.preferences.view == RecipeView.cards,
+                    controller: _scroll,
+                    slivers: [
                       SliverPersistentHeader(
-                        pinned: true,
+                        pinned:
+                            widget.selectedIds != null ||
+                            widget.syncStatus != null ||
+                            widget.syncController != null,
                         delegate: _PinnedSearch(
-                          height: searchHeight,
+                          height:
+                              56 +
+                              (scale - 1).clamp(0, 3) * 24 +
+                              (widget.selectedIds != null &&
+                                      (constraints.maxWidth - 32 < 440 ||
+                                          MediaQuery.textScalerOf(context)
+                                                  .scale(14) >
+                                              20)
+                                  ? 48
+                                  : 0),
                           child: ColoredBox(
                             color: Theme.of(context).scaffoldBackgroundColor,
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 8,
-                              ),
-                              child: wide ? _wideToolbar() : _search(),
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                              child: widget.selectedIds != null
+                                  ? _selectionBar()
+                                  : Row(
+                                      children: [
+                                        if (wide || scale < 1.6) ...[
+                                          const Icon(Symbols.skillet, size: 28),
+                                          const SizedBox(width: 10),
+                                        ],
+                                        Expanded(
+                                          child: _heading(
+                                            Text(
+                                              'cookdex',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .headlineSmall
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                            ),
+                                          ),
+                                        ),
+                                        if (widget.syncStatus != null ||
+                                            widget.syncController != null)
+                                          VisibleListenableBuilder(
+                                            listenable: widget.syncController,
+                                            builder: (_) => SyncIndicator(
+                                              status:
+                                                  widget.syncController == null
+                                                  ? widget.syncStatus!
+                                                  : syncPresentation(
+                                                      widget.syncController!,
+                                                      widget
+                                                          .store
+                                                          .conflicts
+                                                          .length,
+                                                    ),
+                                              onTap:
+                                                  widget.onSyncStatus ?? () {},
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                             ),
                           ),
                         ),
                       ),
-                    if (widget.store.summaries.isNotEmpty && !wide)
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                          child: PixelSingleChildScrollView(
-                            key: const Key('recipe-controls-scroll'),
-                            scrollDirection: Axis.horizontal,
-                            child: _controls(),
+                      if (widget.store.summaries.isNotEmpty)
+                        SliverPersistentHeader(
+                          pinned: true,
+                          delegate: _PinnedSearch(
+                            height: searchHeight,
+                            child: ColoredBox(
+                              color: Theme.of(context).scaffoldBackgroundColor,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                                child: wide ? _wideToolbar() : _search(),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    if (widget.store.setAsideCount > 0)
-                      SliverToBoxAdapter(child: _setAsideNotice()),
-                    if (widget.store.error != null)
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
-                            children: [
-                              const Expanded(
-                                child: Text('Recipes could not be refreshed'),
-                              ),
-                              TextButton(
-                                onPressed: widget.store.refresh,
-                                child: const Text('Retry'),
-                              ),
-                            ],
+                      if (widget.store.summaries.isNotEmpty && !wide)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                            child: PixelSingleChildScrollView(
+                              key: const Key('recipe-controls-scroll'),
+                              scrollDirection: Axis.horizontal,
+                              child: _controls(),
+                            ),
                           ),
                         ),
-                      ),
-                    if (widget.store.loading && widget.store.summaries.isEmpty)
-                      const SliverFillRemaining(
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    else if (recipes.isEmpty && widget.store.error == null)
-                      SliverFillRemaining(
-                        hasScrollBody: false,
-                        child: widget.store.summaries.isEmpty
-                            ? _emptyLibrary(context, constraints.maxWidth)
-                            : Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(24),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        'No matching recipes',
-                                        textAlign: TextAlign.center,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleLarge,
-                                      ),
-                                      const SizedBox(height: 16),
-                                      TextButton(
-                                        onPressed:
-                                            widget.preferences.resetSearch,
-                                        child: const Text('Reset'),
-                                      ),
-                                    ],
+                      if (widget.store.setAsideCount > 0)
+                        SliverToBoxAdapter(child: _setAsideNotice()),
+                      if (widget.store.error != null)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Row(
+                              children: [
+                                const Expanded(
+                                  child: Text('Recipes could not be refreshed'),
+                                ),
+                                TextButton(
+                                  onPressed: widget.store.refresh,
+                                  child: const Text('Retry'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (widget.store.loading &&
+                          widget.store.summaries.isEmpty)
+                        const SliverFillRemaining(
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      else if (recipes.isEmpty && widget.store.error == null)
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: widget.store.summaries.isEmpty
+                              ? _emptyLibrary(context, constraints.maxWidth)
+                              : Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(24),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'No matching recipes',
+                                          textAlign: TextAlign.center,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleLarge,
+                                        ),
+                                        const SizedBox(height: 16),
+                                        TextButton(
+                                          onPressed:
+                                              widget.preferences.resetSearch,
+                                          child: const Text('Reset'),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                      ),
-                    if (recipes.isNotEmpty)
-                      _recipeList(recipes, columns, cardHeight),
-                  ],
+                        ),
+                      if (recipes.isNotEmpty)
+                        _recipeList(recipes, columns, cardHeight),
+                    ],
+                  ),
                 ),
               ),
             ),
+            if (widget.selectedIds == null)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 20,
+                child: Center(
+                  child: RecipeTopButton(
+                    visible: _showTop,
+                    onPressed: scrollToTop,
+                  ),
+                ),
+              ),
             if (widget.store.summaries.isNotEmpty && widget.selectedIds == null)
               Positioned(
                 right: 16,
@@ -790,10 +1016,18 @@ class _RecipesScreenState extends State<RecipesScreen> {
                 child: ValueListenableBuilder(
                   valueListenable: _showAdd,
                   builder: (_, visible, child) =>
-                      ScrollAwareFab(visible: visible, child: child!),
+                      RecipeActionMotion(visible: visible, child: child!),
                   child: FloatingActionButton(
                     key: const Key('add-recipe'),
                     tooltip: 'Add recipe',
+                    hoverColor:
+                        Theme.of(context).platform == TargetPlatform.android
+                        ? Colors.transparent
+                        : null,
+                    hoverElevation:
+                        Theme.of(context).platform == TargetPlatform.android
+                        ? 6
+                        : null,
                     onPressed: widget.onAdd,
                     child: const Icon(Symbols.add),
                   ),
@@ -823,6 +1057,7 @@ class _RecipesScreenState extends State<RecipesScreen> {
 /// Keep the sliver delegates stable while only the viewport cache grows.
 class _RecipeScrollView extends StatelessWidget {
   const _RecipeScrollView({
+    required this.preparation,
     required this.enabled,
     required this.controller,
     required this.slivers,
@@ -830,16 +1065,23 @@ class _RecipeScrollView extends StatelessWidget {
   final bool enabled;
   final ScrollController controller;
   final List<Widget> slivers;
+  final CardPreparation preparation;
 
   @override
-  Widget build(BuildContext context) => IdleBuildAhead(
-    enabled: enabled,
-    builder: (context, cache) => PixelCustomScrollView(
-      key: const PageStorageKey('recipes-scroll'),
-      scrollCacheExtent: ScrollCacheExtent.pixels(cache),
+  Widget build(BuildContext context) => ProgressiveCards(
+    preparation: preparation,
+    controller: controller,
+    child: IdleBuildAhead(
+      enabled: enabled,
       controller: controller,
-      physics: const AlwaysScrollableScrollPhysics(),
-      slivers: slivers,
+      paused: preparation.paused,
+      builder: (context, cache) => PixelCustomScrollView(
+        key: const PageStorageKey('recipes-scroll'),
+        scrollCacheExtent: ScrollCacheExtent.pixels(cache),
+        controller: controller,
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: slivers,
+      ),
     ),
   );
 }
@@ -855,17 +1097,28 @@ class _RecipeRow extends StatelessWidget {
     required this.onFavorite,
     required this.selecting,
     required this.selected,
+    this.forcedStage,
   });
   final RecipeSummary recipe;
   final RecipeView view;
   final bool grid;
   final bool selecting, selected;
+  final int? forcedStage;
   final ValueChanged<String> onOpen;
   final ValueChanged<RecipeSummary> onActions;
   final VoidCallback onFavorite;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => view == RecipeView.compact
+      ? _build(context, 4, null)
+      : ProgressiveCard(
+          recipe: recipe,
+          grid: grid,
+          forcedStage: forcedStage,
+          builder: _build,
+        );
+
+  Widget _build(BuildContext context, int stage, CardGeometry? geometry) {
     final theme = Theme.of(context);
     final compact = view == RecipeView.compact;
     final star = selecting
@@ -891,18 +1144,24 @@ class _RecipeRow extends StatelessWidget {
                   : theme.colorScheme.onSurfaceVariant,
             ),
           );
-    final title = Text(
-      recipe.title,
-      maxLines: compact ? 1 : 3,
-      overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-    );
+    final prepared = geometry?.title;
+    final title = prepared != null
+        ? PreparedCardTitle(recipe.title, prepared: prepared)
+        : Text(
+            recipe.title,
+            maxLines: compact ? 1 : 3,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          );
     final metadata = RecipeMetadata(
       servings: recipe.servings,
       totalTime: recipe.totalTime,
       prepTime: recipe.prepTime,
       cookTime: recipe.cookTime,
       singleLine: grid,
+      optimizeItems: !compact,
     );
     return Material(
       color: view == RecipeView.cards
@@ -963,23 +1222,36 @@ class _RecipeRow extends StatelessWidget {
                           padding: const EdgeInsets.only(right: 44),
                           child: RecipeCardTextBudget(
                             title: recipe.title,
-                            description: recipe.description,
+                            preparedTitle: prepared == null ? null : title,
+                            preparedTitleLines: prepared?.painter
+                                .computeLineMetrics()
+                                .length
+                                .clamp(1, 2),
+                            description: stage >= 1 ? recipe.description : '',
                           ),
                         ),
                         const Spacer(),
                         SizedBox(
                           height: recipeMetadataLineHeight(context),
-                          child: metadata,
+                          child: stage >= 2 ? metadata : null,
                         ),
                         const SizedBox(height: 8),
                         // Empty tags reserve the same footer slot as populated cards.
                         SizedBox(
                           height: recipeGridTagHeight(context),
-                          child: RecipeTagLine(recipe.tags),
+                          child: stage >= 3
+                              ? RecipeTagLine(
+                                  recipe.tags,
+                                  preparedValues: geometry?.tagLabels,
+                                  preparedVisible: geometry?.visibleTags,
+                                  preparedWidth: geometry?.tagWidth,
+                                )
+                              : null,
                         ),
                       ],
                     ),
-                    Positioned(right: -10, top: 0, child: star),
+                    if (stage >= 4 || selecting)
+                      Positioned(right: -10, top: 0, child: star),
                   ],
                 ),
               )
@@ -1001,26 +1273,43 @@ class _RecipeRow extends StatelessWidget {
                               if (recipe.description.isNotEmpty)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 4),
-                                  child: Text(
-                                    recipe.description,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
+                                  child: stage < 1
+                                      ? SizedBox(
+                                          height: geometry!.descriptionHeight,
+                                        )
+                                      : Text(
+                                          recipe.description,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                color: theme
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                        ),
                                 ),
                             ],
                           ),
-                          metadata: metadata.isEmpty
+                          metadata: stage < 2
+                              ? SizedBox(height: geometry!.metadataHeight)
+                              : metadata.isEmpty
                               ? const SizedBox.shrink()
                               : metadata,
-                          tags: recipe.tags.isEmpty
+                          tags: stage < 3
+                              ? SizedBox(height: geometry!.tagsHeight)
+                              : recipe.tags.isEmpty
                               ? const SizedBox.shrink()
-                              : RecipeTagLine(recipe.tags),
+                              : RecipeTagLine(
+                                  recipe.tags,
+                                  preparedValues: geometry?.tagLabels,
+                                  preparedVisible: geometry?.visibleTags,
+                                  preparedWidth: geometry?.tagWidth,
+                                ),
                         ),
                       ),
-                      Positioned(right: 0, top: 0, child: star),
+                      if (stage >= 4 || selecting)
+                        Positioned(right: 0, top: 0, child: star),
                     ],
                   ),
                 ),
@@ -1029,6 +1318,25 @@ class _RecipeRow extends StatelessWidget {
     );
   }
 }
+
+@visibleForTesting
+Widget recipeCardForTest(
+  RecipeSummary recipe, {
+  bool grid = false,
+  bool selecting = false,
+  bool selected = false,
+  int? stage,
+}) => _RecipeRow(
+  recipe: recipe,
+  view: RecipeView.cards,
+  grid: grid,
+  selecting: selecting,
+  selected: selected,
+  forcedStage: stage,
+  onOpen: (_) {},
+  onActions: (_) {},
+  onFavorite: () {},
+);
 
 class _PinnedSearch extends SliverPersistentHeaderDelegate {
   _PinnedSearch({required this.height, required this.child});
@@ -1049,13 +1357,6 @@ class _PinnedSearch extends SliverPersistentHeaderDelegate {
       oldDelegate.height != height || oldDelegate.child != child;
 }
 
-String _fieldLabel(SearchField field) => switch (field) {
-  SearchField.title => 'Title',
-  SearchField.ingredients => 'Ingredients',
-  SearchField.tags => 'Tags',
-  SearchField.notes => 'Notes',
-  SearchField.description => 'Description',
-};
 String _sortLabel(RecipeSort sort) => switch (sort) {
   RecipeSort.edited => 'Recently edited',
   RecipeSort.added => 'Recently added',

@@ -9,6 +9,8 @@ import 'package:cookdex/src/rust/api.dart';
 import 'package:cookdex/ui/recipe_detail.dart';
 import 'package:cookdex/ui/app.dart';
 import 'package:cookdex/ui/recipes_screen.dart';
+import 'package:cookdex/ui/recipe_metadata_item.dart';
+import 'package:cookdex/ui/recipe_grid.dart';
 import 'package:cookdex/ui/theme.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -216,12 +218,24 @@ void main() {
     expect(find.widgetWithText(ActionChip, 'Recently edited'), findsOneWidget);
     expect(find.byTooltip('Switch to Compact view'), findsOneWidget);
     expect(find.byIcon(Symbols.arrow_drop_down), findsOneWidget);
-    expect(find.text('2 large pancakes'), findsOneWidget);
-    expect(find.text('30 min'), findsOneWidget);
-    expect(find.byIcon(Symbols.inventory_2), findsOneWidget);
-    expect(find.byIcon(Symbols.schedule), findsOneWidget);
+    final yieldItem = find.byWidgetPredicate(
+      (w) => w is RecipeMetadataItem && w.text.data == '2 large pancakes',
+    );
+    final timeItem = find.byWidgetPredicate(
+      (w) => w is RecipeMetadataItem && w.text.data == '30 min',
+    );
+    expect(yieldItem, findsOneWidget);
+    expect(timeItem, findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('2 large pancakes')).dy -
+      tester.widget<RecipeMetadataItem>(yieldItem).icon.icon,
+      Symbols.inventory_2,
+    );
+    expect(
+      tester.widget<RecipeMetadataItem>(timeItem).icon.icon,
+      Symbols.schedule,
+    );
+    expect(
+      tester.getTopLeft(yieldItem).dy -
           tester.getBottomLeft(find.text('Green soup one')).dy,
       lessThanOrEqualTo(12),
     );
@@ -292,9 +306,15 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Dinner'), findsOneWidget);
-      expect(find.text('Quick'), findsOneWidget);
-      expect(find.text('DINNER'), findsOneWidget);
+      expect(tester.widget<RecipeTagLine>(find.byType(RecipeTagLine)).tags, [
+        'Dinner',
+        'DINNER',
+        'Quick',
+      ]);
+      expect(
+        find.bySemanticsLabel(RegExp('Tags: Dinner, DINNER, Quick')),
+        findsOneWidget,
+      );
       final description = tester.widget<Text>(
         find.textContaining('A description long enough'),
       );
@@ -304,7 +324,7 @@ void main() {
       expect(description.style!.fontSize!, lessThan(title.style!.fontSize!));
       expect(
         description.style!.color,
-        Theme.of(tester.element(find.text('Dinner')))
+        Theme.of(tester.element(find.byType(RecipeTagLine)))
             .colorScheme
             .onSurfaceVariant,
       );
@@ -838,13 +858,15 @@ void main() {
         ),
       ),
     );
-    await tester.drag(
-      find.byWidgetPredicate((w) => w is CustomScrollView),
-      const Offset(0, -450),
+    final finger = await tester.startGesture(
+      tester.getCenter(find.byWidgetPredicate((w) => w is CustomScrollView)),
     );
-    await tester.pumpAndSettle();
+    await finger.moveBy(const Offset(0, -450));
+    await tester.pump(const Duration(milliseconds: 200));
     expect(find.byKey(const Key('add-recipe')), findsOneWidget);
     expect(find.byKey(const Key('add-recipe')).hitTestable(), findsNothing);
+    await finger.up();
+    await tester.pumpAndSettle();
     final pinnedSearchTop = tester
         .getTopLeft(find.byKey(const Key('recipe-search')))
         .dy;

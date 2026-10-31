@@ -251,11 +251,11 @@ void main() {
     },
   );
   test(
-    'five-field literal every-word search stays entirely in cached summaries',
+    'five-field literal ranked search stays entirely in cached summaries',
     () {
       final snapshots = repository.snapshotCalls;
       prefs.setQuery('LEMON cream quick');
-      expect(store.visibleRecipes.map((r) => r.id), ['a']);
+      expect(store.visibleRecipes.map((r) => r.id), ['a', 'b']);
       prefs.setQuery('overnight');
       expect(store.visibleRecipes, isEmpty);
       prefs.setSearchFields({...prefs.searchFields, SearchField.notes});

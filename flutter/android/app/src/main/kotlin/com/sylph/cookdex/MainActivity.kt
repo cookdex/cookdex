@@ -62,6 +62,12 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        if (packageName == "com.sylph.cookdex.dev.profile") {
+            // The implementation exists only in the isolated profile source set.
+            Class.forName("com.sylph.cookdex.ProfileTouchInput")
+                .getMethod("install", Activity::class.java, FlutterEngine::class.java)
+                .invoke(null, this, flutterEngine)
+        }
         flutterEngine.renderer.addIsDisplayingFlutterUiListener(firstFrame)
         importHost = ImportHost(this)
         exportHost = ExportHost(this)
@@ -78,6 +84,11 @@ class MainActivity : FlutterFragmentActivity() {
                     "startupReady" -> {
                         startupSplash.ready(call.arguments == true)
                         result.success(null)
+                    }
+                    "profileAwaitSplashHidden" -> {
+                        if (packageName == "com.sylph.cookdex.dev.profile") {
+                            startupSplash.whenHidden { result.success(it) }
+                        } else result.notImplemented()
                     }
                     "applicationId" -> result.success(packageName)
                     "deviceName" -> result.success(Build.MODEL)

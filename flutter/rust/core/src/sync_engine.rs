@@ -126,6 +126,14 @@ impl Engine {
     pub fn status(&self) -> Result<Value, String> {
         self.transport.status()
     }
+    pub(crate) fn prime_status_read(
+        &self,
+        db: &rusqlite::Connection,
+        validated: (i64, i64),
+        excluded: &[String],
+    ) -> Result<(), String> {
+        self.transport.prime_status_read(db, validated, excluded)
+    }
     pub fn invitation(&self, address: String) -> Result<String, String> {
         self.transport.invitation(address)
     }

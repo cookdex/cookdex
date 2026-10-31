@@ -1,2 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources><color name="cookdex_launch_background">#151918</color></resources>
+<resources>
+    <color name="cookdex_launch_background">#151918</color>
+    <color name="cookdex_icon_background">#151918</color>
+    <color name="cookdex_icon_background_dev">#344B60</color>
+</resources>

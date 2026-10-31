@@ -41,7 +41,34 @@ class LocalPreferences extends ChangeNotifier {
   bool shoppingKeepAwake = false;
   bool useAiForLink = false;
   bool saveImportPhotos = false;
+  bool checkUpdatesAutomatically = false;
+  String? dismissedUpdateVersion;
+  int? lastUpdateCheckMs;
   RecipeTextSize recipeTextSize = RecipeTextSize.normal;
+  final Map<String, List<List<String>>> _keptSeparate = {};
+  List<List<String>> keptSeparate(String kind) => List.unmodifiable(
+    (_keptSeparate[kind] ?? []).map(
+      (names) => List<String>.unmodifiable(names),
+    ),
+  );
+  void keepSeparate(String kind, Iterable<String> spellings) {
+    final names = spellings.toSet().toList()..sort();
+    if (names.length < 2) return;
+    final groups = _keptSeparate.putIfAbsent(kind, () => []);
+    if (groups.any((g) => listEquals(g, names))) return;
+    groups.add(names);
+    _changed();
+  }
+
+  void showTogether(String kind, Iterable<String> spellings) {
+    final names = spellings.toSet().toList()..sort();
+    _keptSeparate[kind]?.removeWhere((g) => listEquals(g, names));
+    _changed();
+  }
+
+  bool isKeptSeparate(String kind, Iterable<String> spellings) =>
+      (_keptSeparate[kind] ?? []).any((g) => spellings.every(g.contains));
+
   final Map<String, int> _steps = {};
   final Map<String, Set<int>> _checks = {};
 
@@ -58,6 +85,21 @@ class LocalPreferences extends ChangeNotifier {
     try {
       final map = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
       result.query = map['query'] is String ? map['query'] as String : '';
+      final kept = map['keptSeparate'];
+      if (kept is Map) {
+        for (final kind in ['ingredients', 'tags']) {
+          final groups = kept[kind];
+          if (groups is List) {
+            result._keptSeparate[kind] = [
+              for (final group in groups)
+                if (group is List &&
+                    group.length >= 2 &&
+                    group.every((v) => v is String))
+                  (group.cast<String>().toSet().toList()..sort()),
+            ];
+          }
+        }
+      }
       final fields = map['fields'];
       if (fields is List) {
         result.searchFields = SearchField.values
@@ -80,6 +122,15 @@ class LocalPreferences extends ChangeNotifier {
       result.shoppingKeepAwake = map['shoppingKeepAwake'] == true;
       result.useAiForLink = map['useAiForLink'] == true;
       result.saveImportPhotos = map['saveImportPhotos'] == true;
+      result.checkUpdatesAutomatically =
+          map['checkUpdatesAutomatically'] == true;
+      result.dismissedUpdateVersion = map['dismissedUpdateVersion'] is String
+          ? map['dismissedUpdateVersion'] as String
+          : null;
+      final lastCheck = map['lastUpdateCheckMs'];
+      result.lastUpdateCheckMs = lastCheck is int && lastCheck >= 0
+          ? lastCheck
+          : null;
       result.recipeTextSize =
           RecipeTextSize.values
               .where((v) => v.name == map['recipeTextSize'])
@@ -158,6 +209,21 @@ class LocalPreferences extends ChangeNotifier {
     _changed();
   }
 
+  void setCheckUpdatesAutomatically(bool value) {
+    checkUpdatesAutomatically = value;
+    _changed();
+  }
+
+  void recordUpdateCheck(int utcMilliseconds) {
+    lastUpdateCheckMs = utcMilliseconds;
+    _scheduleWrite();
+  }
+
+  void dismissUpdate(String version) {
+    dismissedUpdateVersion = version;
+    _scheduleWrite();
+  }
+
   void setUseAiForLink(bool value) {
     useAiForLink = value;
     _changed();
@@ -207,6 +273,7 @@ class LocalPreferences extends ChangeNotifier {
     if (_path == null) return Future.value();
     final contents = jsonEncode({
       'query': query,
+      'keptSeparate': _keptSeparate,
       'fields': searchFields.map((f) => f.name).toList(),
       'sort': sort.name,
       'view': view.name,
@@ -217,6 +284,9 @@ class LocalPreferences extends ChangeNotifier {
       'shoppingKeepAwake': shoppingKeepAwake,
       'useAiForLink': useAiForLink,
       'saveImportPhotos': saveImportPhotos,
+      'checkUpdatesAutomatically': checkUpdatesAutomatically,
+      'dismissedUpdateVersion': dismissedUpdateVersion,
+      'lastUpdateCheckMs': lastUpdateCheckMs,
       'recipeTextSize': recipeTextSize.name,
       'steps': _steps,
       'checks': _checks.map((key, value) => MapEntry(key, value.toList())),

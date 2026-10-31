@@ -14,6 +14,9 @@ use std::sync::{
     mpsc,
 };
 
+mod library;
+pub use library::LibraryUndo;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
     Validation,
@@ -475,7 +478,13 @@ impl Service {
     pub fn snapshot(&self) -> Result<Snapshot> {
         let mut db = self.session.connection().map_err(db_error)?;
         let mut cache = self.recipe_cache.lock().map_err(|_| Error::Closed)?;
-        Self::ensure_recipe_cache(&mut db, &mut cache)?;
+        if Self::ensure_recipe_cache(&mut db, &mut cache)? {
+            let validated = cache.as_ref().unwrap();
+            self.session
+                .sync
+                .prime_status_read(&db, validated.token, &validated.stored.set_aside)
+                .map_err(db_error)?;
+        }
         Ok(cache.as_ref().unwrap().view.clone())
     }
     /// Registration and snapshot occur while holding the same lock as commits.
@@ -483,7 +492,13 @@ impl Service {
     pub fn subscribe(&self) -> Result<Subscription> {
         let mut db = self.session.connection().map_err(db_error)?;
         let mut cache = self.recipe_cache.lock().map_err(|_| Error::Closed)?;
-        Self::ensure_recipe_cache(&mut db, &mut cache)?;
+        if Self::ensure_recipe_cache(&mut db, &mut cache)? {
+            let validated = cache.as_ref().unwrap();
+            self.session
+                .sync
+                .prime_status_read(&db, validated.token, &validated.stored.set_aside)
+                .map_err(db_error)?;
+        }
         let snapshot = cache.as_ref().unwrap().view.clone();
         let (tx, receiver) = mpsc::sync_channel(64);
         self.subscribers.lock().map_err(|_| Error::Closed)?.push(tx);
@@ -500,10 +515,10 @@ impl Service {
     fn ensure_recipe_cache(
         db: &mut rusqlite::Connection,
         cache: &mut Option<RecipeCache>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let token = storage::version(db).map_err(db_error)?;
         if cache.as_ref().is_some_and(|c| c.token == token) {
-            return Ok(());
+            return Ok(false);
         }
         *cache = None;
         let stored = storage::load(db).map_err(db_error)?;
@@ -516,7 +531,7 @@ impl Service {
             stored,
             view,
         });
-        Ok(())
+        Ok(true)
     }
 
     fn mutate_recipes(
@@ -670,10 +685,14 @@ impl Service {
             },
         )?;
         operation.commit(|| {
-            rolling_snapshots::attempt(&mut db, reason);
+            if reason == "before_library" {
+                rolling_snapshots::before_library(&mut db).map_err(db_error)?;
+            } else {
+                rolling_snapshots::attempt(&mut db, reason);
+            }
             let generation = storage::save(&mut db, generation, &book, &now()).map_err(db_error)?;
             // A restore must retain its pre-operation archive until a later snapshot.
-            if reason != "before_restore" {
+            if !matches!(reason, "before_restore" | "before_library") {
                 rolling_snapshots::attempt(&mut db, "automatic");
             }
             let change = Change {

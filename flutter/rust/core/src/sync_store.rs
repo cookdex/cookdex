@@ -536,6 +536,11 @@ fn insert(db: &Connection, e: &Event) -> Result<(), String> {
 }
 pub fn conflicts(db: &Connection) -> Result<Value, String> {
     let excluded = storage::set_aside_ids(db)?;
+    conflicts_excluding(db, &excluded)
+}
+
+/// The status reader already has the same version-bound validation result.
+pub(crate) fn conflicts_excluding(db: &Connection, excluded: &[String]) -> Result<Value, String> {
     let mut value = storage::local(db, "syncConflicts")?.unwrap_or(json!([]));
     value
         .as_array_mut()

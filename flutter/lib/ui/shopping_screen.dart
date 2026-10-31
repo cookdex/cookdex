@@ -1042,13 +1042,15 @@ class _CategoryNameDialogState extends State<_CategoryNameDialog> {
     child: AlertDialog(
       title: Text(widget.id == null ? 'Add category' : 'Rename category'),
       scrollable: true,
-      content: TextField(
-        controller: _name,
-        readOnly: _busy,
-        decoration: InputDecoration(labelText: 'Name', errorText: _error),
-        textCapitalization: TextCapitalization.sentences,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _save(),
+      content: DialogFieldPadding(
+        child: TextField(
+          controller: _name,
+          readOnly: _busy,
+          decoration: InputDecoration(labelText: 'Name', errorText: _error),
+          textCapitalization: TextCapitalization.sentences,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _save(),
+        ),
       ),
       actions: [
         TextButton(
@@ -1339,17 +1341,19 @@ class _EditShoppingDialogState extends State<_EditShoppingDialog> {
       title: const Text('Edit item'),
       content: PixelScrollScope(
         axis: Axis.horizontal,
-        builder: (context) => TextField(
-          scrollController: PrimaryScrollController.of(context),
-          controller: _text,
-          textCapitalization: TextCapitalization.none,
-          autofocus: true,
-          readOnly: _busy,
-          decoration: InputDecoration(labelText: 'Item', errorText: _error),
-          minLines: 1,
-          maxLines: null,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => _save(),
+        builder: (context) => DialogFieldPadding(
+          child: TextField(
+            scrollController: PrimaryScrollController.of(context),
+            controller: _text,
+            textCapitalization: TextCapitalization.none,
+            autofocus: true,
+            readOnly: _busy,
+            decoration: InputDecoration(labelText: 'Item', errorText: _error),
+            minLines: 1,
+            maxLines: null,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _save(),
+          ),
         ),
       ),
       actions: [

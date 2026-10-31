@@ -18,6 +18,18 @@ function Version([string]$exe, [string[]]$arguments, [string]$pattern) {
     if ($LASTEXITCODE -ne 0 -or $value -notmatch $pattern) { throw 'Version unavailable' }
     return $Matches[1]
 }
+function Check-MinimumVersion([string]$name, [string]$minimum, [scriptblock]$read) {
+    $actual = 'unavailable'
+    try {
+        $actual = (& $read | Out-String).Trim()
+        if ($actual -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$' -or
+            [version]$actual -lt [version]$minimum) { throw 'Stable version below minimum or unavailable' }
+        Write-Output "OK $name ($actual; minimum $minimum)"
+    } catch {
+        $script:failures++
+        Write-Output "MISSING OR TOO OLD: $name. Minimum stable $minimum; found $actual. Check docs/DEVELOPMENT.md."
+    }
+}
 # Git does not participate in app compilation: only its upstream minimum matters.
 try {
     $gitVersion = Version 'git' @('--version') 'git version (\S+)'
@@ -27,7 +39,9 @@ try {
     if ($gitActual -lt [version]$Matches[1]) { throw 'Git is below minimum' }
     Write-Output "OK Git on PATH ($gitVersion; minimum $($pin.git))"
 } catch { $script:failures++; Write-Output "MISSING OR TOO OLD: Git on PATH. Minimum $($pin.git). Check docs/DEVELOPMENT.md." }
-Check 'PowerShell' $pin.powershell { $PSVersionTable.PSVersion.ToString() }
+# PowerShell orchestrates tools; newer stable shells need not match the original
+# workstation exactly. Compiler/SDK checks below retain their exact pins.
+Check-MinimumVersion 'PowerShell' $pin.powershell { $PSVersionTable.PSVersion.ToString() }
 if ($pin.PSObject.Properties.Name -contains 'node') {
     Check 'Node on PATH' $pin.node { Version 'node' @('--version') 'v(\S+)' }
     Check 'npm on PATH' $pin.npm { Version 'npm.cmd' @('--version') '(\d+\.\d+\.\d+)' }

@@ -1,7 +1,7 @@
 name: cookdex
 description: cookdex Flutter development app.
 publish_to: none
-version: 1.8.3+18003
+version: 1.9.0+19000
 environment:
   sdk: ^3.13.5
 dependencies:

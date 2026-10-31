@@ -2,6 +2,7 @@ import 'package:cookdex/local_preferences.dart';
 import 'package:cookdex/recipe_store.dart';
 import 'package:cookdex/src/rust/api.dart';
 import 'package:cookdex/ui/recipe_grid.dart';
+import 'package:cookdex/ui/recipe_metadata_item.dart';
 import 'package:cookdex/ui/recipes_screen.dart';
 import 'package:cookdex/ui/theme.dart';
 import 'package:flutter/material.dart';
@@ -161,9 +162,15 @@ void main() {
     tester,
   ) async {
     await _screen(tester, 800, RecipeView.cards);
-    expect(find.text('Prep about 10 min'), findsWidgets);
-    expect(find.text('Cook 20–25 min'), findsWidgets);
-    expect(find.textContaining('+'), findsWidgets);
+    final labels = tester
+        .widgetList<RecipeMetadataItem>(find.byType(RecipeMetadataItem))
+        .map((item) => item.text.data);
+    expect(labels, contains('Prep about 10 min'));
+    expect(labels, contains('Cook 20–25 min'));
+    expect(
+      find.byTooltip('dinner, quick, vegetarian, soup, garden vegetables'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('single-line tags fit at large text and expose every tag', (
@@ -195,11 +202,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Dinner'), findsOneWidget);
-    expect(find.text('+3'), findsOneWidget);
+    // Tags are painted in one render object; exact fit/overflow pixels are
+    // compared with the original renderer in recipe_tag_paint_test.
     expect(
-      tester.getRect(find.text('+3')).top,
-      tester.getRect(find.text('Dinner')).top,
+      find.bySemanticsLabel(
+        'Tags: Dinner, quick, vegetarian, garden vegetables',
+      ),
+      findsOneWidget,
     );
     expect(
       find.byTooltip('Dinner, quick, vegetarian, garden vegetables'),

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Match cookdexLightColors.surface only for Android 12+ system light mode. -->
+    <color name="cookdex_launch_background">#FAFAF4</color>
+</resources>

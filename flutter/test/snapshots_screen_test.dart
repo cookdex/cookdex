@@ -144,6 +144,9 @@ void main() {
       snapshotSettingsFixture(failing: true, onSnapshots: () => opened = true),
     );
     await tester.scrollUntilVisible(find.text('Snapshots'), 200);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Snapshots'));
+    await tester.pumpAndSettle();
     expect(
       find.text('Automatic snapshots have not been saving'),
       findsOneWidget,

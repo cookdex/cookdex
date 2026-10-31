@@ -324,3 +324,57 @@ Future<void> showRecipeActions({
     showDeferred(context, labels[choice] ?? 'This action');
   }
 }
+
+/// Full-sized search actions outside the text field's focus/keyboard gesture.
+class SearchFieldActions extends StatelessWidget {
+  const SearchFieldActions({
+    super.key,
+    required this.controller,
+    required this.onClear,
+    this.onOptions,
+  });
+  final TextEditingController controller;
+  final VoidCallback onClear;
+  final VoidCallback? onOptions;
+  @override
+  Widget build(BuildContext context) =>
+      ValueListenableBuilder<TextEditingValue>(
+        valueListenable: controller,
+        builder: (context, value, _) => TextFieldTapRegion(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (value.text.isNotEmpty)
+                IconButton(
+                  tooltip: 'Clear search',
+                  onPressed: () {
+                    controller.clear();
+                    onClear();
+                  },
+                  icon: const Icon(Symbols.close),
+                ),
+              if (value.text.isNotEmpty && onOptions != null)
+                const SizedBox(width: 8),
+              if (onOptions != null)
+                IconButton(
+                  tooltip: 'Search fields',
+                  onPressed: onOptions,
+                  icon: const Icon(Symbols.tune),
+                ),
+            ],
+          ),
+        ),
+      );
+}
+
+/// Outlined fields paint their floating label above their layout box. Reserve
+/// that space inside dialog scroll content, including enlarged system text.
+class DialogFieldPadding extends StatelessWidget {
+  const DialogFieldPadding({super.key, required this.child});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(top: MediaQuery.textScalerOf(context).scale(12)),
+    child: child,
+  );
+}

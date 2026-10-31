@@ -59,6 +59,373 @@ fn seed(s: &Service) -> Snapshot {
 }
 
 #[test]
+fn library_checkpoint_exact_batch_snapshot_and_undo() {
+    let root = Root::new();
+    let service = Service::open(&root).unwrap();
+    let mut recipes = Vec::new();
+    for index in 0..12 {
+        let mut r = fixture()[0].clone();
+        r.id = RecipeId(uuid::Uuid::new_v4().to_string());
+        r.content.title = format!("Library fixture {index}");
+        r.content.ingredients[0].name = if index < 8 { "parm" } else { "parmesan" }.into();
+        r.content.tags = vec!["Quick".into(), "quick".into(), "Dinner".into()];
+        recipes.push(r);
+    }
+    let mut setup = cookdex_core::shopping_categories::Setup::default();
+    setup.remember("parm", "spices").unwrap();
+    let bytes = backup::write_with_setup(&recipes, Some(&setup)).unwrap();
+    let initial = service
+        .restore(&service.preview_restore(&bytes, &op()).unwrap(), &op())
+        .unwrap();
+    let (changed, undo) = service
+        .change_library_names(
+            initial.generation,
+            false,
+            &["parm".into()],
+            Some("parmesan"),
+            &op(),
+        )
+        .unwrap();
+    assert_eq!(changed.generation, initial.generation + 1);
+    assert_eq!(undo.count(), 8);
+    let mut db = cookdex_core::storage::open(&root.0.join("flutter-v1/cookdex.sqlite3")).unwrap();
+    let carried = cookdex_core::storage::load(&mut db)
+        .unwrap()
+        .book
+        .shopping_setup;
+    assert_eq!(
+        carried.placements.get("parmesan").map(String::as_str),
+        Some("spices")
+    );
+    assert_eq!(
+        carried.placements.get("parm").map(String::as_str),
+        Some("spices")
+    );
+    assert!(
+        service
+            .rolling_snapshots()
+            .unwrap()
+            .0
+            .iter()
+            .any(|e| e.reason == "before_library")
+    );
+    for (index, original) in recipes.iter().enumerate() {
+        let actual = service.detail(&original.id).unwrap().unwrap();
+        let mut expected = original.clone();
+        if index < 8 {
+            expected.content.ingredients[0].name = "parmesan".into();
+            expected.revision += 1;
+        }
+        assert_eq!(actual, expected);
+    }
+    let restored = service
+        .undo_library_names(changed.generation, &undo, &op())
+        .unwrap();
+    assert_eq!(
+        cookdex_core::storage::load(&mut db)
+            .unwrap()
+            .book
+            .shopping_setup,
+        setup
+    );
+    for (index, original) in recipes.iter().enumerate() {
+        let actual = service.detail(&original.id).unwrap().unwrap();
+        let mut expected = original.clone();
+        if index < 8 {
+            expected.revision += 2;
+        }
+        assert_eq!(actual, expected);
+    }
+    let (merged, tag_undo) = service
+        .change_library_names(
+            restored.generation,
+            true,
+            &["Quick".into()],
+            Some("quick"),
+            &op(),
+        )
+        .unwrap();
+    for original in &recipes {
+        assert_eq!(
+            service.detail(&original.id).unwrap().unwrap().content.tags,
+            vec!["quick", "Dinner"]
+        );
+    }
+    let tag_restored = service
+        .undo_library_names(merged.generation, &tag_undo, &op())
+        .unwrap();
+    let (removed, remove_undo) = service
+        .change_library_names(
+            tag_restored.generation,
+            true,
+            &["Quick".into()],
+            None,
+            &op(),
+        )
+        .unwrap();
+    assert_eq!(remove_undo.count(), 12);
+    assert_eq!(
+        service
+            .detail(&recipes[0].id)
+            .unwrap()
+            .unwrap()
+            .content
+            .tags,
+        vec!["quick", "Dinner"]
+    );
+    service
+        .undo_library_names(removed.generation, &remove_undo, &op())
+        .unwrap();
+    assert_eq!(
+        service
+            .detail(&recipes[0].id)
+            .unwrap()
+            .unwrap()
+            .content
+            .tags,
+        recipes[0].content.tags
+    );
+    assert!(matches!(
+        service.change_library_names(
+            initial.generation,
+            false,
+            &["parm".into()],
+            Some("new"),
+            &op()
+        ),
+        Err(Error::StaleWrite)
+    ));
+}
+
+#[test]
+fn library_checkpoint_overlapping_rows_sections_tags_and_undo() {
+    let root = Root::new();
+    let service = Service::open(&root).unwrap();
+    let mut recipes = Vec::new();
+    for index in 0..12 {
+        let mut r = fixture()[0].clone();
+        r.id = RecipeId(uuid::Uuid::new_v4().to_string());
+        r.content.title = format!("Sectioned egg bake {index}");
+        r.content.tags = vec!["Weeknight".into(), "vegetarian".into(), "weeknight".into()];
+        let template = r.content.ingredients[0].clone();
+        r.content.ingredients = [
+            ("Eggs", "2", "Filling"),
+            ("Egg", "1", "Filling"),
+            ("Eggs", "3", "Topping"),
+        ]
+        .into_iter()
+        .map(|(name, amount, section)| {
+            let mut row = template.clone();
+            row.name = name.into();
+            row.amount = recipe::Amount::parse_exact(amount).unwrap();
+            row.unit.clear();
+            row.prep_note = "beaten".into();
+            row.optional = section == "Topping";
+            row.section = section.into();
+            row
+        })
+        .collect();
+        r.validate().unwrap();
+        recipes.push(r);
+    }
+    let bytes = backup::write(&recipes).unwrap();
+    let mut state = service
+        .restore(&service.preview_restore(&bytes, &op()).unwrap(), &op())
+        .unwrap();
+    for target in ["Egg", "large eggs"] {
+        let before: Vec<_> = recipes
+            .iter()
+            .map(|r| service.detail(&r.id).unwrap().unwrap())
+            .collect();
+        let (changed, undo) = service
+            .change_library_names(
+                state.generation,
+                false,
+                &["Eggs".into()],
+                Some(target),
+                &op(),
+            )
+            .unwrap();
+        assert_eq!(undo.count(), 12); // Each recipe contains two source rows and one destination row.
+        assert_eq!(changed.generation, state.generation + 1);
+        for original in &before {
+            let mut expected = original.clone();
+            expected.revision += 1;
+            for row in &mut expected.content.ingredients {
+                if row.name == "Eggs" {
+                    row.name = target.into();
+                }
+            }
+            // Complete equality protects every row, amount, note, section, position and timestamp.
+            assert_eq!(service.detail(&original.id).unwrap().unwrap(), expected);
+        }
+        state = service
+            .undo_library_names(changed.generation, &undo, &op())
+            .unwrap();
+        for original in &before {
+            let mut expected = original.clone();
+            expected.revision += 2;
+            assert_eq!(service.detail(&original.id).unwrap().unwrap(), expected);
+        }
+    }
+    let before: Vec<_> = recipes
+        .iter()
+        .map(|r| service.detail(&r.id).unwrap().unwrap())
+        .collect();
+    let (changed, undo) = service
+        .change_library_names(
+            state.generation,
+            true,
+            &["Weeknight".into()],
+            Some("weeknight"),
+            &op(),
+        )
+        .unwrap();
+    assert_eq!(undo.count(), 12);
+    for original in &before {
+        let mut expected = original.clone();
+        expected.revision += 1;
+        expected.content.tags = vec!["weeknight".into(), "vegetarian".into()];
+        assert_eq!(service.detail(&original.id).unwrap().unwrap(), expected);
+    }
+    service
+        .undo_library_names(changed.generation, &undo, &op())
+        .unwrap();
+    for original in &before {
+        let mut expected = original.clone();
+        expected.revision += 2;
+        assert_eq!(service.detail(&original.id).unwrap().unwrap(), expected);
+    }
+}
+
+#[test]
+fn library_checkpoint_add_tag_batch_snapshot_sync_and_undo() {
+    use cookdex_core::{storage, sync_store};
+    let root = Root::new();
+    let service = Service::open(&root).unwrap();
+    let recipes: Vec<_> = (0..24)
+        .map(|i| {
+            let mut r = fixture()[0].clone();
+            r.id = RecipeId(uuid::Uuid::new_v4().to_string());
+            r.content.tags = if i < 8 {
+                vec!["weeknight".into(), "quick".into()]
+            } else {
+                vec!["quick".into()]
+            };
+            r
+        })
+        .collect();
+    let bytes = backup::write(&recipes).unwrap();
+    let initial = service
+        .restore(&service.preview_restore(&bytes, &op()).unwrap(), &op())
+        .unwrap();
+    let ids: Vec<_> = recipes.iter().map(|r| r.id.clone()).collect();
+    let db = storage::open(&root.0.join("flutter-v1/cookdex.sqlite3")).unwrap();
+    let events_before = sync_store::export(&db).unwrap().events;
+    let (changed, undo) = service
+        .add_library_tag(initial.generation, &ids, "weeknight", &op())
+        .unwrap();
+    assert_eq!(changed.generation, initial.generation + 1);
+    assert_eq!(undo.count(), 16);
+    assert!(
+        service
+            .rolling_snapshots()
+            .unwrap()
+            .0
+            .iter()
+            .any(|s| s.reason == "before_library")
+    );
+    let events_after = sync_store::export(&db).unwrap().events;
+    assert_eq!(events_after.len(), events_before.len() + 16);
+    assert!(events_before.iter().all(|e| events_after.contains(e)));
+    for (i, r) in recipes.iter().enumerate() {
+        let mut expected = r.clone();
+        if i >= 8 {
+            expected.content.tags.push("weeknight".into());
+            expected.revision += 1;
+        }
+        assert_eq!(service.detail(&r.id).unwrap().unwrap(), expected);
+    }
+    let restored = service
+        .undo_library_names(changed.generation, &undo, &op())
+        .unwrap();
+    assert_eq!(
+        sync_store::export(&db).unwrap().events.len(),
+        events_after.len() + 16
+    );
+    for (i, r) in recipes.iter().enumerate() {
+        let mut expected = r.clone();
+        if i >= 8 {
+            expected.revision += 2;
+        }
+        assert_eq!(service.detail(&r.id).unwrap().unwrap(), expected);
+    }
+    let cancelled = op();
+    cancelled.cancel();
+    assert!(matches!(
+        service.add_library_tag(restored.generation, &ids, "new tag", &cancelled),
+        Err(Error::Cancelled)
+    ));
+    assert_eq!(service.snapshot().unwrap(), restored);
+    let (created, undo) = service
+        .add_library_tag(restored.generation, &ids, "new tag", &op())
+        .unwrap();
+    assert_eq!(undo.count(), 24);
+    assert!(
+        created
+            .summaries
+            .iter()
+            .all(|r| r.tags.contains(&"new tag".to_owned()))
+    );
+    let restored = service
+        .undo_library_names(created.generation, &undo, &op())
+        .unwrap();
+    assert!(
+        restored
+            .summaries
+            .iter()
+            .all(|r| !r.tags.contains(&"new tag".to_owned()))
+    );
+}
+
+#[test]
+fn library_checkpoint_snapshot_failure_and_cancellation_leave_names_intact() {
+    let root = Root::new();
+    let s = Service::open(&root).unwrap();
+    let initial = seed(&s);
+    let name = initial.summaries[0].ingredients[0].clone();
+    let cancelled = op();
+    cancelled.cancel();
+    assert!(matches!(
+        s.change_library_names(
+            initial.generation,
+            false,
+            &[name.clone()],
+            Some("new name"),
+            &cancelled
+        ),
+        Err(Error::Cancelled)
+    ));
+    let snapshot_path = root.0.join("flutter-v1/snapshots");
+    std::fs::remove_dir_all(&snapshot_path).unwrap();
+    std::fs::write(&snapshot_path, b"synthetic unavailable directory").unwrap();
+    assert!(
+        s.change_library_names(initial.generation, false, &[name], Some("new name"), &op())
+            .is_err()
+    );
+    assert!(
+        s.add_library_tag(
+            initial.generation,
+            &[initial.summaries[0].id.clone()],
+            "new tag",
+            &op()
+        )
+        .is_err()
+    );
+    assert_eq!(s.snapshot().unwrap(), initial);
+}
+
+#[test]
 fn editor_save_reopen_exact_amounts_and_stale_original_can_only_save_as_copy() {
     let root = Root::new();
     let service = Service::open(&root).unwrap();
@@ -989,5 +1356,222 @@ fn a1_service_migrates_views_without_rewriting_legacy_history_or_unchanged_resto
     assert_eq!(
         backup::read(&service.backup(&op()).unwrap()).unwrap().len(),
         2
+    );
+}
+
+#[test]
+fn library_final_500_recipe_batches_are_atomic_snapshotted_and_exact() {
+    use cookdex_core::{storage, sync_store};
+    use std::time::Instant;
+    let root = Root::new();
+    let service = Service::open(&root).unwrap();
+    let mut recipes = Vec::new();
+    for i in 0..500 {
+        let mut r = fixture()[0].clone();
+        r.id = RecipeId(format!("library-scale-{i:03}"));
+        r.content.title = format!("Synthetic supper {i:03}");
+        r.content.tags = vec!["Weeknight".into(), "weeknight".into(), "to remove".into()];
+        r.content.ingredients[0].name = "parm".into();
+        let mut second = r.content.ingredients[0].clone();
+        second.section = "Topping".into();
+        second.amount = recipe::Amount::parse_exact("3/4").unwrap();
+        r.content.ingredients.push(second);
+        let mut destination = r.content.ingredients[0].clone();
+        destination.name = "parmesan".into();
+        r.content.ingredients.push(destination);
+        r.validate().unwrap();
+        recipes.push(r);
+    }
+    let bytes = backup::write(&recipes).unwrap();
+    service
+        .restore(&service.preview_restore(&bytes, &op()).unwrap(), &op())
+        .unwrap();
+    let db = storage::open(&root.0.join("flutter-v1/cookdex.sqlite3")).unwrap();
+    for (label, tags, source, target) in [
+        ("ingredient rename", false, "parm", Some("aged parmesan")),
+        ("ingredient merge", false, "parm", Some("parmesan")),
+        ("tag merge", true, "Weeknight", Some("weeknight")),
+        ("tag removal", true, "to remove", None),
+        ("tag addition", true, "", Some("new tag")),
+    ] {
+        let before: Vec<_> = recipes
+            .iter()
+            .map(|r| service.detail(&r.id).unwrap().unwrap())
+            .collect();
+        let initial = service.snapshot().unwrap();
+        let events = sync_store::export(&db).unwrap().events.len();
+        let subscription = service.subscribe().unwrap();
+        let started = Instant::now();
+        let (after, undo) = if source.is_empty() {
+            service.add_library_tag(
+                initial.generation,
+                &recipes.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+                target.unwrap(),
+                &op(),
+            )
+        } else {
+            service.change_library_names(initial.generation, tags, &[source.into()], target, &op())
+        }
+        .unwrap();
+        let edit_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(after.generation, initial.generation + 1);
+        assert_eq!(undo.count(), 500);
+        let change = subscription.receiver.recv().unwrap();
+        assert_eq!(change.changed.len(), 500);
+        assert!(change.deleted.is_empty());
+        assert!(subscription.receiver.try_recv().is_err());
+        assert_eq!(sync_store::export(&db).unwrap().events.len(), events + 500);
+        let snapshot = service.rolling_snapshots().unwrap().0.pop().unwrap();
+        assert_eq!(snapshot.reason, "before_library");
+        assert_eq!(
+            backup::read(&service.rolling_snapshot_bytes(&snapshot.id).unwrap()).unwrap(),
+            before
+        );
+        for r in &before {
+            let mut expected = r.clone();
+            expected.revision += 1;
+            if source.is_empty() {
+                expected.content.tags.push(target.unwrap().into());
+            } else if tags {
+                expected.content.tags = match target {
+                    Some(_) => vec!["weeknight".into(), "to remove".into()],
+                    None => vec!["Weeknight".into(), "weeknight".into()],
+                };
+            } else {
+                for row in &mut expected.content.ingredients {
+                    if row.name == source {
+                        row.name = target.unwrap().into();
+                    }
+                }
+            }
+            assert_eq!(service.detail(&r.id).unwrap().unwrap(), expected);
+        }
+        let before_undo = backup::read(&service.backup(&op()).unwrap()).unwrap();
+        let started = Instant::now();
+        let restored = service
+            .undo_library_names(after.generation, &undo, &op())
+            .unwrap();
+        let undo_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(restored.generation, after.generation + 1);
+        assert_eq!(subscription.receiver.recv().unwrap().changed.len(), 500);
+        assert!(subscription.receiver.try_recv().is_err());
+        let snapshot = service.rolling_snapshots().unwrap().0.pop().unwrap();
+        assert_eq!(
+            backup::read(&service.rolling_snapshot_bytes(&snapshot.id).unwrap()).unwrap(),
+            before_undo
+        );
+        for r in &before {
+            let mut expected = r.clone();
+            expected.revision += 2;
+            assert_eq!(service.detail(&r.id).unwrap().unwrap(), expected);
+        }
+        println!("LIBRARY_500 {label}: snapshot+batch={edit_ms:.3}ms snapshot+undo={undo_ms:.3}ms");
+    }
+}
+
+#[test]
+fn library_final_validation_and_stale_undo_never_partially_commit() {
+    let root = Root::new();
+    let service = Service::open(&root).unwrap();
+    let before = seed(&service);
+    let source = before.summaries[0].ingredients[0].clone();
+    let ids: Vec<_> = before.summaries.iter().map(|r| r.id.clone()).collect();
+    // A missing final member and invalid names are rejected after earlier staged work.
+    let mut missing_ids = ids.clone();
+    missing_ids.push(RecipeId("missing-recipe".into()));
+    assert!(
+        service
+            .add_library_tag(before.generation, &missing_ids, "new tag", &op())
+            .is_err()
+    );
+    assert!(
+        service
+            .change_library_names(
+                before.generation,
+                false,
+                &[source.clone(), "missing name".into()],
+                Some("renamed"),
+                &op()
+            )
+            .is_err()
+    );
+    assert!(
+        service
+            .add_library_tag(before.generation, &ids, &"x".repeat(10000), &op())
+            .is_err()
+    );
+    assert_eq!(service.snapshot().unwrap(), before);
+    let (after, undo) = service
+        .change_library_names(before.generation, false, &[source], Some("renamed"), &op())
+        .unwrap();
+    let base = service.detail(&ids[0]).unwrap().unwrap();
+    let mut content = base.content.clone();
+    content.notes = "A newer edit".into();
+    service
+        .save(after.generation, Some(base), content, &op())
+        .unwrap();
+    let newer = service.snapshot().unwrap();
+    assert!(
+        service
+            .undo_library_names(newer.generation, &undo, &op())
+            .is_err()
+    );
+    assert_eq!(service.snapshot().unwrap(), newer);
+}
+
+#[test]
+fn library_final_destination_aisle_wins_and_undo_checks_local_aisle_edits() {
+    use cookdex_core::{shopping_categories::Setup, storage};
+    let root = Root::new();
+    let service = Service::open(&root).unwrap();
+    let mut r = fixture()[0].clone();
+    r.content.ingredients[0].name = "parm".into();
+    let mut setup = Setup::default();
+    setup.remember("parm", "spices").unwrap();
+    setup.remember("parmesan", "dairy").unwrap();
+    let bytes = backup::write_with_setup(&[r.clone()], Some(&setup)).unwrap();
+    let initial = service
+        .restore(&service.preview_restore(&bytes, &op()).unwrap(), &op())
+        .unwrap();
+    let (after, undo) = service
+        .change_library_names(
+            initial.generation,
+            false,
+            &["parm".into()],
+            Some("parmesan"),
+            &op(),
+        )
+        .unwrap();
+    let mut db = storage::open(&root.0.join("flutter-v1/cookdex.sqlite3")).unwrap();
+    assert_eq!(storage::load(&mut db).unwrap().book.shopping_setup, setup);
+    let restored = service
+        .undo_library_names(after.generation, &undo, &op())
+        .unwrap();
+    let (changed, undo) = service
+        .change_library_names(
+            restored.generation,
+            false,
+            &["parm".into()],
+            Some("aged parmesan"),
+            &op(),
+        )
+        .unwrap();
+    let current = service.detail(&r.id).unwrap().unwrap();
+    let mut changed_setup = storage::load(&mut db).unwrap().book.shopping_setup;
+    changed_setup.remember("aged parmesan", "dairy").unwrap();
+    let bytes = backup::write_with_setup(&[current.clone()], Some(&changed_setup)).unwrap();
+    let newer = service
+        .restore(&service.preview_restore(&bytes, &op()).unwrap(), &op())
+        .unwrap();
+    assert!(newer.generation > changed.generation);
+    assert!(
+        service
+            .undo_library_names(newer.generation, &undo, &op())
+            .is_err()
+    );
+    assert_eq!(service.detail(&r.id).unwrap().unwrap(), current);
+    assert_eq!(
+        storage::load(&mut db).unwrap().book.shopping_setup,
+        changed_setup
     );
 }

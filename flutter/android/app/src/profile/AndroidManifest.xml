@@ -4,4 +4,8 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <instrumentation
+        android:name="com.sylph.cookdex.ProfileInstrumentation"
+        android:targetPackage="com.sylph.cookdex.dev.profile"
+        android:functionalTest="true"/>
 </manifest>
