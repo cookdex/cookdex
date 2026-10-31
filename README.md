@@ -27,6 +27,7 @@ cookdex only goes online when you do one of these:
 - **Sync** with your own paired devices on the same network.
 - **Import from a link.** cookdex downloads the recipe page itself, HTTPS sites only.
 - **Use Smart Import.** The text, photo, or page you're importing is sent to Google Gemini using your own API key.
+- **Check for updates.** Only when you tap Check for updates in Settings > About, or turn on daily checks, cookdex asks GitHub for the latest version. Nothing about you or your recipes is sent.
 
 There's no analytics, crash reporting, or advertising code.
 
@@ -45,6 +46,7 @@ Most phones from the last several years are supported (64-bit ARM).
 3. If Play Protect warns about an unrecognized app or offers to scan it, that's normal for any app that isn't from the Play Store. Let it scan, then install.
 
 **Updating:** install the newer APK over the top. Your recipes stay put.
+**Update notices:** turn on Check automatically in Settings > About, and cookdex will let you know when a new version is out.
 **Automatic updates:** add `https://github.com/cookdex/cookdex` to [Obtainium](https://github.com/ImranR98/Obtainium) and it will notify you about new releases and install them.
 
 ### Windows (64-bit)
