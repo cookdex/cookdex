@@ -47,6 +47,7 @@ Smart Import’s AI help and Smart Create use your own Gemini API key from Googl
     <td align="center"><img src="https://github.com/user-attachments/assets/0b37dfb9-8586-4c37-849d-187e1ce09e9b" width="240" alt="Smart Create ideas with one idea open"><br><sub>Smart Create ideas</sub></td>
   </tr>
 </table>
+
 - **Smart Import** reads websites, YouTube videos and Shorts, up to 8 photos of a recipe, or pasted text. It marks anything the AI estimated or wrote, so you can check it before saving. Without a key, it still reads cookdex files and the recipe details many websites include.
 - **Smart Create** suggests dishes from your ingredients, kitchen photos or a craving. Each idea shows what you have, what you’d need to buy and estimated calories per serving. Pick one, and Gemini writes the full recipe for you to review.
 - **Getting a key:** create one in [Google AI Studio](https://aistudio.google.com/apikey), then add it in Settings > Smart features > Gemini key. Google requires you to be 18 or older to use the Gemini API.
@@ -75,6 +76,7 @@ To get updates automatically, you can track releases with [Obtainium](https://gi
 ### Windows (64-bit)
  
 <img src="https://github.com/user-attachments/assets/f7aaa028-ab75-4bc4-b64c-664733cf81ab" width="720" alt="cookdex on Windows, showing a recipe with its steps, notes and source">
+
 1. Download the Windows ZIP from the [latest release](https://github.com/cookdex/cookdex/releases/latest).
 2. Right-click it, choose Extract All, and extract it to a folder you’ll keep.
 3. In the extracted folder, double-click Create shortcut.cmd to make a cookdex shortcut, or run cookdex.exe directly.
