@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 
 import '../tag_labels.dart';
 import 'components.dart';
+import 'facelift_tokens.dart';
 import 'recipe_metadata.dart';
 
 double recipeGridColumnWidth(double width, int columns) =>
@@ -788,7 +789,7 @@ class _TagParagraphs {
       final rect = Offset(x, (size.height - box.height) / 2) & box;
       if (RRect.fromRectAndRadius(
         rect,
-        const Radius.circular(4),
+        const Radius.circular(FaceliftTokens.tagRadius),
       ).contains(position)) {
         return true;
       }
@@ -811,7 +812,10 @@ class _TagParagraphs {
       final box = boxes[i];
       final origin = offset + Offset(x, (size.height - box.height) / 2);
       canvas.drawRRect(
-        RRect.fromRectAndRadius(origin & box, const Radius.circular(4)),
+        RRect.fromRectAndRadius(
+          origin & box,
+          const Radius.circular(FaceliftTokens.tagRadius),
+        ),
         paint,
       );
       final text = i < visible ? labels[i]! : counter!;

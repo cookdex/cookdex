@@ -343,12 +343,22 @@ class RecipeStore extends ChangeNotifier {
   core.CollectionSnapshot? _snapshot;
   final Map<String, core.Recipe> _details = {};
   final Map<String, List<String>> _amounts = {};
-  final Map<String, Map<SearchField, String>> _search = {};
+  RecipeSearchIndex? _search;
+  bool _waitingForFirstIndex = false;
+  bool get preparingRecipeSearch =>
+      _waitingForFirstIndex &&
+      preferences.query.trim().isNotEmpty &&
+      summaries.isNotEmpty;
+  final _sortTitles = <String, String>{};
   final Map<RecipeSort, List<core.RecipeSummary>> _ordered = {};
   List<core.RecipeSummary>? _visible;
+  int _fullMatchCount = 0;
+  int get fullMatchCount => _fullMatchCount;
+  int? get partialMatchStart =>
+      _fullMatchCount < visibleRecipes.length
+      ? _fullMatchCount
+      : null;
   String? _visibleQuery;
-  int? _partialMatchStart;
-  int? get partialMatchStart => _partialMatchStart;
   RecipeSort? _visibleSort;
   Set<SearchField> _visibleFields = const {};
   bool? _visibleFavorites;
@@ -381,6 +391,18 @@ class RecipeStore extends ChangeNotifier {
   int _deferredGeneration = -1;
   final Map<String, List<({Object token, bool value})>> _favoriteWrites = {};
   List<core.RecipeSummary>? _optimisticSummaries;
+  Map<String, core.RecipeSummary> _summariesById = const {};
+
+  String? shoppingSourceLabel(core.ShoppingItem item) {
+    if (item.contributorIds.isEmpty) return null;
+    final names = [
+      for (final id in item.contributorIds.toSet()) ?_summariesById[id]?.title,
+    ];
+    if (names.isEmpty) return null;
+    final first = names.take(2).join(', ');
+    return names.length <= 2 ? first : '$first +${names.length - 2} more';
+  }
+
   List<core.RecipeSummary> get _savedSummaries =>
       _snapshot?.summaries ?? const [];
   List<core.RecipeSummary> get summaries =>
@@ -472,8 +494,31 @@ class RecipeStore extends ChangeNotifier {
     );
     error = null;
   });
-  int get uncheckedShoppingCount =>
-      _snapshot?.shopping.where((i) => !i.checked).length ?? 0;
+  final _shoppingCount = ValueNotifier<int>(0);
+  final _pendingChecks = <String, ({Object token, bool checked})>{};
+  ValueListenable<int> get shoppingCount => _shoppingCount;
+  int get uncheckedShoppingCount => _shoppingCount.value;
+
+  void _updateShoppingCount() {
+    if (_disposed) return;
+    _shoppingCount.value = shopping
+        .where((item) => !(_pendingChecks[item.id]?.checked ?? item.checked))
+        .length;
+  }
+
+  Future<void> checkShoppingRow(String id, bool checked) async {
+    final token = Object();
+    _pendingChecks[id] = (token: token, checked: checked);
+    _updateShoppingCount();
+    try {
+      await editShopping(core.ShoppingEdit.check(ids: [id], checked: checked));
+    } finally {
+      if (identical(_pendingChecks[id]?.token, token)) {
+        _pendingChecks.remove(id);
+        _updateShoppingCount();
+      }
+    }
+  }
 
   /// Computed on query/filter/collection changes, never while building/scrolling.
   List<core.RecipeSummary> get visibleRecipes => _visible ?? const [];
@@ -485,18 +530,14 @@ class RecipeStore extends ChangeNotifier {
         _visibleFavorites == preferences.favoritesOnly &&
         setEquals(_visibleFields, preferences.searchFields);
     if (sameOptions && _visibleQuery == preferences.query) return;
-    final ordered = _orderedRecipes(preferences.sort);
-    final result = rankRecipes(
-      ordered,
-      _search,
-      query: preferences.query,
-      fields: preferences.searchFields,
-      favoritesOnly: preferences.favoritesOnly,
-    );
-    if (!listEquals(result.recipes, _visible)) {
-      _visible = result.recipes;
+    if (preparingRecipeSearch) {
+      _visible = null;
+      _fullMatchCount = 0;
+      return;
     }
-    _partialMatchStart = result.partialStart;
+    final result = _rank(preferences, picker: false);
+    _fullMatchCount = result.fullCount;
+    if (!listEquals(result.recipes, _visible)) _visible = result.recipes;
     _visibleQuery = preferences.query;
     _visibleSort = preferences.sort;
     _visibleFields = Set.of(preferences.searchFields);
@@ -510,37 +551,61 @@ class RecipeStore extends ChangeNotifier {
           final primary = switch (sort) {
             RecipeSort.edited => b.updatedAt.compareTo(a.updatedAt),
             RecipeSort.added => b.createdAt.compareTo(a.createdAt),
-            RecipeSort.title => _search[a.id]![SearchField.title]!.compareTo(
-              _search[b.id]![SearchField.title]!,
-            ),
+            RecipeSort.title =>
+              _sortTitles
+                  .putIfAbsent(a.id, a.title.toLowerCase)
+                  .compareTo(
+                    _sortTitles.putIfAbsent(b.id, b.title.toLowerCase),
+                  ),
           };
           return primary == 0 ? a.id.compareTo(b.id) : primary;
         });
         return result;
       });
 
-  /// Picker-local filters retain their existing literal all-word search.
-  /// Reads only summary projections; never loads every recipe detail.
-  List<core.RecipeSummary> recipesMatching(LocalPreferences filters) {
-    final ordered = _orderedRecipes(filters.sort);
-    final words = filters.query
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .where((w) => w.isNotEmpty);
-    return ordered
-        .where(
-          (r) =>
-              (!filters.favoritesOnly || r.favorite) &&
-              words.every(
-                (word) => filters.searchFields.any(
-                  (field) => _search[r.id]![field]!.contains(word),
-                ),
-              ),
-        )
-        .toList();
+  RecipeSearchIndex _startSearchIndex() {
+    final index = RecipeSearchIndex(() {
+      if (!_waitingForFirstIndex || _disposed) return;
+      _waitingForFirstIndex = false;
+      if (preferences.query.trim().isNotEmpty) {
+        _refreshVisible();
+        notifyListeners();
+      }
+    });
+    for (final r in _savedSummaries) {
+      index.queue(r);
+    }
+    return index;
   }
 
-  Future<void> initialize() async {
+  /// Called after the first Recipes frame. Searchable text is shared across
+  /// rows and prepared in short event-loop slices while the library is idle.
+  void prepareRecipeSearch() {
+    if (_disposed) return;
+    (_search ??= _startSearchIndex()).warm();
+  }
+
+  List<core.RecipeSummary> recipesMatching(LocalPreferences filters) =>
+      _rank(filters, picker: true).recipes;
+
+  RecipeSearchResult _rank(LocalPreferences filters, {required bool picker}) {
+    final ordered = _orderedRecipes(filters.sort);
+    if (filters.query.trim().isEmpty) {
+      final rows = List<core.RecipeSummary>.unmodifiable(
+        filters.favoritesOnly ? ordered.where((r) => r.favorite) : ordered,
+      );
+      return RecipeSearchResult(rows, rows.length);
+    }
+    if (ordered.isEmpty) return const RecipeSearchResult([], 0);
+    return (_search ??= _startSearchIndex()).rank(
+      ordered,
+      filters,
+      picker: picker,
+    );
+  }
+
+  Future<void> initialize({bool prepareSearchAfterPaint = false}) async {
+    _waitingForFirstIndex = prepareSearchAfterPaint;
     final ready = _listen();
     await (repository is SnapshotSubscriptionRepository ? ready : refresh());
   }
@@ -676,7 +741,7 @@ class RecipeStore extends ChangeNotifier {
         _invalidate(id);
       }
     }
-    final before = {for (final r in _savedSummaries) r.id: r};
+    final before = _summariesById;
     // FRB decodes a fresh object graph for every snapshot. Retain equal row
     // objects so visible rows can skip rebuilding after unrelated mutations.
     final stableSummaries = snapshot.summaries
@@ -686,6 +751,7 @@ class RecipeStore extends ChangeNotifier {
         })
         .toList(growable: false);
     final after = {for (final r in stableSummaries) r.id: r};
+    _summariesById = after;
     if (!listEquals(stableSummaries, _savedSummaries)) {
       _ordered.clear();
       _visible = null;
@@ -695,20 +761,9 @@ class RecipeStore extends ChangeNotifier {
     for (final id in {...before.keys, ...after.keys}) {
       if (!identical(before[id], after[id])) {
         _invalidate(id);
-        _search.remove(id);
-      }
-      final r = after[id];
-      if (r != null) {
-        _search.putIfAbsent(
-          id,
-          () => {
-            SearchField.title: r.title.toLowerCase(),
-            SearchField.ingredients: r.ingredients.join(' ').toLowerCase(),
-            SearchField.tags: r.tags.join(' ').toLowerCase(),
-            SearchField.notes: r.notes.toLowerCase(),
-            SearchField.description: r.description.toLowerCase(),
-          },
-        );
+        _sortTitles.remove(id);
+        if (before[id] case final old?) _search?.remove(old);
+        if (after[id] case final current?) _search?.queue(current);
       }
     }
     _snapshot = core.CollectionSnapshot(
@@ -721,9 +776,11 @@ class RecipeStore extends ChangeNotifier {
       hasPrevious: snapshot.hasPrevious,
     );
     generation = snapshot.generation;
+    _updateShoppingCount();
     _projectFavorites();
     _refreshVisible();
     loading = false;
+    _search?.warm();
     if (notify) notifyListeners();
   }
 
@@ -1011,6 +1068,8 @@ class RecipeStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _search?.dispose();
+    _shoppingCount.dispose();
     if (_subscriptionReady?.isCompleted == false) {
       _subscriptionReady!.complete();
     }

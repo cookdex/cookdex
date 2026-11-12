@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -251,7 +252,7 @@ void main() {
     },
   );
   test(
-    'five-field literal ranked search stays entirely in cached summaries',
+    'five-field ranked search stays entirely in cached summaries',
     () {
       final snapshots = repository.snapshotCalls;
       prefs.setQuery('LEMON cream quick');
@@ -398,14 +399,24 @@ void main() {
     expect(store.summaries.any((r) => r.id == 'restored'), true);
   });
   test(
-    'fresh preferences round-trip all list and cook state; Reset defaults',
+    'fresh preferences restore list and preserve only legacy cook data on disk',
     () async {
       final directory = await Directory.systemTemp.createTemp(
         'cookdex-prefs-test-',
       );
       addTearDown(() => directory.delete(recursive: true));
       final path = '${directory.path}/local.json';
+      await File(path).writeAsString(
+        jsonEncode({
+          'steps': {'a': 5},
+          'checks': {
+            'a': [3],
+          },
+        }),
+      );
       final local = await LocalPreferences.load(path);
+      expect(local.cookStep('a'), 0);
+      expect(local.cookChecks('a'), isEmpty);
       local.setQuery('cake');
       local.setSearchFields({SearchField.notes});
       local.setView(RecipeView.compact);
@@ -413,7 +424,11 @@ void main() {
       local.setFavoritesOnly(true);
       local.setScrollOffset(125);
       local.saveCook('a', 2, {1});
+      local.saveCook('b', 1, {});
+      expect(local.cookStep('a'), 2);
+      expect(local.cookStep('b'), 1);
       await local.flush();
+      expect(jsonDecode(await File(path).readAsString())['steps'], {'a': 5});
       final restored = await LocalPreferences.load(path);
       expect(restored.query, 'cake');
       expect(restored.searchFields, {SearchField.notes});
@@ -421,8 +436,13 @@ void main() {
       expect(restored.sort, RecipeSort.title);
       expect(restored.favoritesOnly, true);
       expect(restored.scrollOffset, 125);
-      expect(restored.cookStep('a'), 2);
-      expect(restored.cookChecks('a'), {1});
+      expect(restored.cookStep('a'), 0);
+      expect(restored.cookStep('b'), 0);
+      expect(restored.cookChecks('a'), isEmpty);
+      expect(local.cookChecks('a'), {1});
+      expect(jsonDecode(await File(path).readAsString())['checks'], {
+        'a': [3],
+      });
       restored.resetSearch();
       expect(restored.query, '');
       expect(restored.searchFields, LocalPreferences.defaultSearchFields);

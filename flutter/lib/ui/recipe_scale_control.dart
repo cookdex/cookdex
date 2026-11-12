@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'facelift_motion.dart';
+
 /// A temporary scale picker that consumes Back while its options are open.
 class RecipeScaleControl extends StatefulWidget {
   const RecipeScaleControl({
@@ -133,7 +135,10 @@ class _RecipeScaleControlState extends State<RecipeScaleControl> {
                       excluding: !_open,
                       child: AnimatedSlide(
                         offset: _open ? Offset.zero : const Offset(1, 0),
-                        duration: const Duration(milliseconds: 180),
+                        duration: FaceliftMotion.accessible(
+                          context,
+                          FaceliftMotion.scaleReveal,
+                        ),
                         curve: Curves.easeOutCubic,
                         child: Material(
                           color: colors.surfaceContainer,

@@ -154,7 +154,7 @@ void main() {
         );
         await tester.pump(const Duration(milliseconds: 30));
       }
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 400));
       await shot('cross-category-drag');
       await drag.up();
       await tester.pumpAndSettle();

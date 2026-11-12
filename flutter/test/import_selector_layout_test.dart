@@ -84,7 +84,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Photos'));
+      final photos = find.text('Photos');
+      await Scrollable.ensureVisible(tester.element(photos), alignment: 0.35);
+      await tester.pumpAndSettle();
+      await tester.tap(photos.hitTestable());
       await tester.pumpAndSettle();
       if (phase != 'before') {
         for (final label in ['Text', 'Link', 'Photos']) {
@@ -100,21 +103,16 @@ void main() {
             reason: '${config.$1}: $label must stay on one line',
           );
         }
-        final selector = tester.widget<SegmentedButton<ImportTab>>(
-          find.byType(SegmentedButton<ImportTab>),
-        );
-        expect(selector.selected, {ImportTab.photos});
+        expect(controller.tab, ImportTab.photos);
         controller.busy = true;
         controller.changed();
         await tester.pump();
-        expect(
-          tester
-              .widget<SegmentedButton<ImportTab>>(
-                find.byType(SegmentedButton<ImportTab>),
-              )
-              .onSelectionChanged,
-          isNull,
-        );
+        for (final label in ['Text', 'Link', 'Photos']) {
+          final button = tester.widget<TextButton>(
+            find.widgetWithText(TextButton, label),
+          );
+          expect(button.onPressed, isNull);
+        }
         controller.busy = false;
         controller.changed();
         await tester.pumpAndSettle();

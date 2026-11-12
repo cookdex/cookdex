@@ -14,6 +14,8 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "export_channel.cpp"
   "smart_channel.cpp"
+  "create_photo_picker.cpp"
+  "create_camera.rc"
   "http_request.cpp"
   "main.cpp"
   "utils.cpp"
@@ -42,7 +44,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
-target_link_libraries(${BINARY_NAME} PRIVATE "windowsapp.lib" "shell32.lib" "ole32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "windowsapp.lib" "shell32.lib" "ole32.lib" "strmiids.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "advapi32.lib" "winhttp.lib" "version.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 

@@ -187,16 +187,13 @@ pub struct RestorePreview {
     recipes: Vec<Recipe>,
     shopping_setup: Option<crate::shopping_categories::Setup>,
 }
-pub struct CleanupPreview {
-    pub generation: i64,
-    pub changed: u32,
-    pub skipped_conflicts: u32,
-    recipes: Vec<Recipe>,
-}
 #[derive(Debug, Clone)]
 pub enum ShoppingEdit {
     AddManual {
         text: String,
+    },
+    AddManualItems {
+        names: Vec<String>,
     },
     Edit {
         id: String,
@@ -339,44 +336,6 @@ impl Service {
         drop(db);
         self.session.sync.local_recipe_changed();
         Ok(reply)
-    }
-    pub fn preview_cleanup(&self) -> Result<CleanupPreview> {
-        let mut db = self.session.connection().map_err(db_error)?;
-        let snapshot = storage::load(&mut db).map_err(db_error)?;
-        let conflicts = Self::conflicts(&db)?;
-        let mut changed = vec![];
-        for mut r in Self::recipes(&snapshot.book)? {
-            if conflicts.iter().any(|c| c.recipe_id == r.id) {
-                continue;
-            }
-            let content = r
-                .content
-                .parse_editor(&vec![None; r.content.ingredients.len()])?;
-            if content != r.content {
-                r.content = content;
-                changed.push(r);
-            }
-        }
-        Ok(CleanupPreview {
-            generation: snapshot.generation,
-            changed: changed.len() as u32,
-            skipped_conflicts: conflicts.len() as u32,
-            recipes: changed,
-        })
-    }
-    pub fn cleanup(&self, preview: &CleanupPreview, operation: &Operation) -> Result<Snapshot> {
-        self.mutate(preview.generation, operation, |book| {
-            // One ordinary successor per changed recipe, in a single transaction.
-            // Generation binds confirmation to the exact preview, including conflicts.
-            for original in &preview.recipes {
-                let mut r = original.clone();
-                r.revision = r.revision.checked_add(1).ok_or(Error::Limit)?;
-                r.updated_at = now();
-                r.validate()?;
-                put_recipe(book, r)?;
-            }
-            Ok(())
-        })
     }
     fn recipes(book: &storage::Book) -> Result<Vec<Recipe>> {
         let mut recipes = book
@@ -602,11 +561,11 @@ impl Service {
             } else {
                 rolling_snapshots::attempt(&mut db, "automatic");
             }
-            let next = storage::save_recipe_changes(
+            let next = storage::save_validated_changes(
                 &mut db,
                 current.token,
                 &current.stored,
-                &book,
+                book.fields(),
                 &changed,
                 &deleted,
                 &saved_at,
@@ -760,29 +719,31 @@ impl Service {
         operation: &Operation,
     ) -> Result<Snapshot> {
         content.validate()?;
-        self.mutate(generation, operation, |book| {
-            let matches = Self::recipes(book)?
-                .into_iter()
-                .filter(|r| {
-                    recipe::model::normalize_name(&r.content.title)
-                        == recipe::model::normalize_name(&content.title)
-                })
-                .collect::<Vec<_>>();
+        self.mutate_recipes(generation, operation, false, |book| {
+            let title = recipe::model::normalize_name(&content.title);
+            let same_title = |value: &serde_json::Value| {
+                value["title"]
+                    .as_str()
+                    .is_some_and(|name| recipe::model::normalize_name(name) == title)
+            };
             let mut imported = Recipe::new(content, &now())?;
             match choice {
-                None if !matches.is_empty() => return Err(Error::Conflict),
+                None if book.recipes.iter().any(same_title) => return Err(Error::Conflict),
                 Some(DuplicateChoice::Replace { id }) => {
-                    let old = matches
+                    let row = book
+                        .recipes
                         .iter()
-                        .find(|r| r.id == id)
+                        .find(|r| r["id"] == id.0 && same_title(r))
                         .ok_or(Error::StaleWrite)?;
-                    imported.id = old.id.clone();
-                    imported.created_at = old.created_at.clone();
+                    let old: Recipe =
+                        serde_json::from_value(row.clone()).map_err(|_| Error::InvalidData)?;
+                    imported.id = old.id;
+                    imported.created_at = old.created_at;
                     imported.revision = old.revision.checked_add(1).ok_or(Error::Limit)?;
                 }
                 _ => (),
             }
-            put_recipe(book, imported)
+            Ok((vec![imported], vec![]))
         })
     }
     pub fn favorite(
@@ -971,29 +932,82 @@ impl Service {
         &self,
         generation: i64,
         operation: &Operation,
-        edit: impl FnOnce(&[shopping::Item], &mut storage::Book) -> Result<Vec<shopping::Item>>,
+        edit: impl FnOnce(
+            &[shopping::Item],
+            &storage::Book,
+            &mut crate::shopping_categories::Setup,
+        ) -> Result<Vec<shopping::Item>>,
     ) -> Result<ShoppingResult> {
-        let mut undo = None;
-        let snapshot = self.mutate(generation, operation, |book| {
-            let before = Self::shopping(book)?;
-            let mut after = edit(&before, book)?;
-            for item in &mut after {
-                if item.category_id.is_empty() {
-                    item.category_id = book.shopping_setup.classify(&item.name);
-                }
+        operation.check()?;
+        let mut db = self.session.connection().map_err(db_error)?;
+        let mut cache = self.recipe_cache.lock().map_err(|_| Error::Closed)?;
+        Self::ensure_recipe_cache(&mut db, &mut cache)?;
+        let current = cache.as_mut().unwrap();
+        if generation != current.token.0 {
+            return Err(Error::StaleWrite);
+        }
+
+        let mut setup = current.stored.book.shopping_setup.clone();
+        let before = &current.view.shopping;
+        let mut after = edit(before, &current.stored.book, &mut setup)?;
+        for item in &mut after {
+            if item.category_id.is_empty() {
+                item.category_id = setup.classify(&item.name);
             }
-            book.shopping_setup.validate()?;
-            shopping::validate(&after)?;
-            undo = Some(shopping::Undo::between(&before, &after));
-            book.shopping = after
-                .into_iter()
-                .map(|i| serde_json::to_value(i).map_err(|_| Error::InvalidData))
-                .collect::<Result<_>>()?;
-            Ok(())
-        })?;
-        Ok(ShoppingResult {
-            snapshot,
-            undo: undo.unwrap(),
+        }
+        setup.validate()?;
+        shopping::validate(&after)?;
+        let undo = shopping::Undo::between(before, &after);
+        let rows: Vec<_> = after
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<std::result::Result<_, _>>()
+            .map_err(|_| Error::InvalidData)?;
+        // An undo can restore a reference to a category that has since been
+        // removed. Keep the usual read projection for those historical rows.
+        for item in &mut after {
+            if !setup.contains(&item.category_id) {
+                item.category_id = crate::shopping_categories::OTHER.into();
+            }
+        }
+        let changed =
+            rows != current.stored.book.shopping || setup != current.stored.book.shopping_setup;
+        operation.commit(|| {
+            rolling_snapshots::attempt(&mut db, "automatic");
+            let next = storage::save_validated_changes(
+                &mut db,
+                current.token,
+                &current.stored,
+                current.stored.book.fields().with_shopping(&rows, &setup),
+                &[],
+                &[],
+                &now(),
+            )
+            .map_err(db_error)?;
+            rolling_snapshots::attempt(&mut db, "automatic");
+            current.view.generation = next;
+            current.view.has_previous |= current.stored.set_aside.is_empty();
+            current.view.shopping = after;
+            current.view.shopping_categories = setup.categories.clone();
+            current.stored.book.shopping = rows;
+            current.stored.book.shopping_setup = setup;
+            current.stored.generation = next;
+            current.token.0 = next;
+            let change = Change {
+                generation: next,
+                changed: vec![],
+                deleted: vec![],
+                shopping_changed: changed,
+                conflicts_changed: false,
+            };
+            self.subscribers
+                .lock()
+                .unwrap()
+                .retain(|tx| tx.try_send(change.clone()).is_ok());
+            Ok(ShoppingResult {
+                snapshot: current.view.clone(),
+                undo,
+            })
         })
     }
     pub fn add_shopping(
@@ -1003,11 +1017,8 @@ impl Service {
         indices: &[u32],
         operation: &Operation,
     ) -> Result<ShoppingResult> {
-        self.shopping_mutate(generation, operation, |items, book| {
-            let recipe = Self::recipes(book)?
-                .into_iter()
-                .find(|r| &r.id == id)
-                .ok_or(Error::StaleWrite)?;
+        self.shopping_mutate(generation, operation, |items, book, _| {
+            let recipe = recipe_from_book(book, id)?;
             shopping::add(items, &recipe, indices)
         })
     }
@@ -1019,11 +1030,8 @@ impl Service {
         scale: u32,
         operation: &Operation,
     ) -> Result<ShoppingResult> {
-        self.shopping_mutate(generation, operation, |items, book| {
-            let recipe = Self::recipes(book)?
-                .into_iter()
-                .find(|r| &r.id == id)
-                .ok_or(Error::StaleWrite)?;
+        self.shopping_mutate(generation, operation, |items, book, _| {
+            let recipe = recipe_from_book(book, id)?;
             shopping::add_scaled(items, &recipe, indices, scale)
         })
     }
@@ -1033,10 +1041,13 @@ impl Service {
         edit: ShoppingEdit,
         operation: &Operation,
     ) -> Result<ShoppingResult> {
-        self.shopping_mutate(generation, operation, |items, book| {
+        self.shopping_mutate(generation, operation, |items, _, setup| {
             let mut items = items.to_vec();
             match edit {
                 ShoppingEdit::AddManual { text } => items.push(shopping::Item::manual(text)?),
+                ShoppingEdit::AddManualItems { names } => {
+                    shopping::add_idea_items(&mut items, &names)?;
+                }
                 ShoppingEdit::Edit { id, text } => {
                     let old = items
                         .iter_mut()
@@ -1065,8 +1076,7 @@ impl Service {
                         .iter()
                         .position(|i| i.id == id)
                         .ok_or(Error::StaleWrite)?;
-                    book.shopping_setup
-                        .remember(&items[pos].name, &category_id)?;
+                    setup.remember(&items[pos].name, &category_id)?;
                     let mut item = items.remove(pos);
                     item.category_id = category_id;
                     if let Some(before_id) = before_id {
@@ -1085,7 +1095,7 @@ impl Service {
                     }
                 }
                 ShoppingEdit::ReorderItems { category_id, ids } => {
-                    if !book.shopping_setup.contains(&category_id) {
+                    if !setup.contains(&category_id) {
                         return Err(Error::InvalidData);
                     }
                     let slots: Vec<_> = items
@@ -1109,15 +1119,13 @@ impl Service {
                     }
                 }
                 ShoppingEdit::AddCategory { name } => {
-                    book.shopping_setup
-                        .categories
-                        .push(crate::shopping_categories::Category {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            name: name.trim().into(),
-                        });
+                    setup.categories.push(crate::shopping_categories::Category {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        name: name.trim().into(),
+                    });
                 }
                 ShoppingEdit::RenameCategory { id, name } => {
-                    book.shopping_setup
+                    setup
                         .categories
                         .iter_mut()
                         .find(|c| c.id == id)
@@ -1125,30 +1133,29 @@ impl Service {
                         .name = name.trim().into();
                 }
                 ShoppingEdit::DeleteCategory { id } => {
-                    if id == crate::shopping_categories::OTHER || !book.shopping_setup.contains(&id)
-                    {
+                    if id == crate::shopping_categories::OTHER || !setup.contains(&id) {
                         return Err(Error::InvalidData);
                     }
-                    book.shopping_setup.categories.retain(|c| c.id != id);
+                    setup.categories.retain(|c| c.id != id);
                     for item in &mut items {
                         if item.category_id == id {
                             item.category_id = crate::shopping_categories::OTHER.into();
                         }
                     }
-                    for category in book.shopping_setup.placements.values_mut() {
+                    for category in setup.placements.values_mut() {
                         if *category == id {
                             *category = crate::shopping_categories::OTHER.into();
                         }
                     }
                 }
                 ShoppingEdit::ReorderCategories { ids } => {
-                    let old = &book.shopping_setup.categories;
+                    let old = &setup.categories;
                     if ids.len() != old.len()
                         || ids.iter().collect::<HashSet<_>>().len() != ids.len()
                     {
                         return Err(Error::InvalidData);
                     }
-                    book.shopping_setup.categories = ids
+                    setup.categories = ids
                         .iter()
                         .map(|id| {
                             old.iter()
@@ -1175,7 +1182,7 @@ impl Service {
         operation: &Operation,
     ) -> Result<Snapshot> {
         Ok(self
-            .shopping_mutate(generation, operation, |items, _| undo.apply(items))?
+            .shopping_mutate(generation, operation, |items, _, _| undo.apply(items))?
             .snapshot)
     }
 }

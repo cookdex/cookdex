@@ -7,6 +7,7 @@ import '../editor_model.dart';
 import '../import_service.dart';
 import '../name_matching.dart';
 import '../recipe_store.dart';
+import '../smart_review_values.dart';
 import '../src/rust/api.dart' as core;
 import 'components.dart';
 import 'pixel_scroll.dart';
@@ -14,8 +15,8 @@ import 'recipe_editor.dart';
 
 /// Content comparison deliberately excludes identity, favorites and history.
 bool sameTextRecipe(core.Recipe a, core.Recipe b) =>
-    jsonEncode(recipeToJson(a)['fields']) ==
-    jsonEncode(recipeToJson(b)['fields']);
+    jsonEncode(recipeFieldsToJson(a.fields)) ==
+    jsonEncode(recipeFieldsToJson(b.fields));
 
 List<NameMatch> textImportNameMatches(
   Iterable<core.RecipeFields> fields,
@@ -53,13 +54,17 @@ List<NameMatch> textImportNameMatches(
   return matches;
 }
 
-/// Only consented spellings change; even whitespace and tag order otherwise stay.
+/// Apart from the imported tag casing, only consented name changes are applied.
 core.RecipeFields applyTextImportNames(
   core.RecipeFields fields,
   List<NameMatch> matches,
-  Set<int> accepted,
-) {
-  if (accepted.isEmpty) return fields;
+  Set<int> accepted, {
+  List<String>? importTags,
+}) {
+  if (accepted.isEmpty &&
+      (importTags == null || identical(importTags, fields.tags))) {
+    return fields;
+  }
   String name(String raw, bool tag) {
     for (final index in accepted) {
       final match = matches[index];
@@ -80,18 +85,20 @@ core.RecipeFields applyTextImportNames(
     source: fields.source,
     notes: fields.notes,
     steps: fields.steps,
-    tags: fields.tags.map((t) => name(t, true)).toList(),
-    ingredients: [
-      for (final i in fields.ingredients)
-        core.Ingredient(
-          amount: i.amount,
-          unit: i.unit,
-          name: name(i.name, false),
-          prepNote: i.prepNote,
-          optional: i.optional,
-          section: i.section,
-        ),
-    ],
+    tags: (importTags ?? fields.tags).map((t) => name(t, true)).toList(),
+    ingredients: accepted.isEmpty
+        ? fields.ingredients
+        : [
+            for (final i in fields.ingredients)
+              core.Ingredient(
+                amount: i.amount,
+                unit: i.unit,
+                name: name(i.name, false),
+                prepNote: i.prepNote,
+                optional: i.optional,
+                section: i.section,
+              ),
+          ],
   );
 }
 
@@ -116,6 +123,7 @@ class _TextImportReviewState extends State<TextImportReview> {
   final _exact = <int>{};
   final _sameName = <int>{};
   final _saved = <int, core.Recipe>{};
+  final _fields = <int, core.RecipeFields>{};
   bool _loading = true, _saving = false, _smart = false;
   int _epoch = 0, _generation = -1;
   String? _error;
@@ -136,11 +144,15 @@ class _TextImportReviewState extends State<TextImportReview> {
     });
     try {
       final generation = widget.store.generation;
-      final library = <core.Recipe>[];
+      final titles = <String>{};
+      final libraryFields = <String>{};
       for (final summary in List.of(widget.store.summaries)) {
         final recipe = await widget.store.repository.detail(summary.id);
         if (!mounted || epoch != _epoch) return;
-        if (recipe != null) library.add(recipe);
+        if (recipe != null) {
+          titles.add(normalizeDuplicateTitle(recipe.fields.title));
+          libraryFields.add(jsonEncode(recipeFieldsToJson(recipe.fields)));
+        }
       }
       if (generation != widget.store.generation) {
         throw StateError('Your library changed. Check again before importing.');
@@ -148,18 +160,28 @@ class _TextImportReviewState extends State<TextImportReview> {
       _exact.clear();
       _sameName.clear();
       _selected.clear();
+      _fields.clear();
+      final spellTags = sourceTagSpelling(widget.store.summaries);
       for (final (index, block) in widget.blocks.indexed) {
         final recipe = block.candidate?.recipe;
         if (recipe == null || _saved.containsKey(index)) continue;
-        if (library.any((r) => sameTextRecipe(r, recipe))) {
+        _fields[index] = applyTextImportNames(
+          recipe.fields,
+          const [],
+          const {},
+          importTags: spellTags(recipe.fields.tags),
+        );
+        // An exact source copy or its normal library-cased save is already present.
+        if (libraryFields.contains(
+              jsonEncode(recipeFieldsToJson(recipe.fields)),
+            ) ||
+            libraryFields.contains(
+              jsonEncode(recipeFieldsToJson(_fields[index]!)),
+            )) {
           _exact.add(index);
         } else {
           _selected.add(index);
-          if (library.any(
-            (r) =>
-                normalizeDuplicateTitle(r.fields.title) ==
-                normalizeDuplicateTitle(recipe.fields.title),
-          )) {
+          if (titles.contains(normalizeDuplicateTitle(recipe.fields.title))) {
             _sameName.add(index);
           }
         }
@@ -193,7 +215,7 @@ class _TextImportReviewState extends State<TextImportReview> {
       var generation = _generation;
       final selected = _selected.toList()..sort();
       final matches = textImportNameMatches(
-        selected.map((i) => widget.blocks[i].candidate!.recipe.fields),
+        selected.map((i) => _fields[i]!),
         widget.store.summaries,
       );
       final accepted = matches.isEmpty
@@ -211,11 +233,7 @@ class _TextImportReviewState extends State<TextImportReview> {
         }
         final saved = await widget.store.importRecipe(
           generation: generation,
-          fields: applyTextImportNames(
-            widget.blocks[index].candidate!.recipe.fields,
-            matches,
-            accepted,
-          ),
+          fields: applyTextImportNames(_fields[index]!, matches, accepted),
           choice: const core.DuplicateChoice.keepBoth(),
         );
         _saved[index] = saved;

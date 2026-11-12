@@ -51,12 +51,13 @@ class NameSuggestion {
 /// are omitted; suggestions are sorted by distinct recipe count, then recency,
 /// then key for stable display.
 List<NameSuggestion> groupNameSuggestions(
-  Iterable<NameObservation> observations,
-) {
+  Iterable<NameObservation> observations, {
+  String Function(String) keyOf = sameNameKey,
+}) {
   final groups = <String, Map<String, _NameUsage>>{};
   for (final observation in observations) {
     final name = normalizeNameWhitespace(observation.name);
-    final key = sameNameKey(name);
+    final key = keyOf(name);
     if (key.isEmpty) continue;
     final spellings = groups.putIfAbsent(key, () => {});
     final usage = spellings.putIfAbsent(name, _NameUsage.new);

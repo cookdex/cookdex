@@ -66,7 +66,6 @@ class ShoppingFake extends FakeRepository implements ShoppingRepository {
     hasPrevious: generation > 0,
   );
   Future<ShoppingResult> _result(List<ShoppingItem> before) async {
-    if (gate != null) await gate!.future;
     generation++;
     return ShoppingResult(
       snapshot: current,
@@ -78,6 +77,8 @@ class ShoppingFake extends FakeRepository implements ShoppingRepository {
   Future<ShoppingResult> editShopping(int generation, ShoppingEdit edit) async {
     edits++;
     lastEdit = edit;
+    // Pause before committing so rejected writes never enter the durable fixture.
+    if (gate != null) await gate!.future;
     if (fail) {
       throw const ServiceError(
         code: ErrorCode.storage,
@@ -88,6 +89,10 @@ class ShoppingFake extends FakeRepository implements ShoppingRepository {
     switch (edit) {
       case ShoppingEdit_AddManual(:final text):
         items.add(item('manual-$edits', text.trim()));
+      case ShoppingEdit_AddManualItems(:final names):
+        for (final (i, name) in names.indexed) {
+          items.add(item('manual-$edits-$i', name.trim()));
+        }
       case ShoppingEdit_Edit(:final id, :final text):
         items = [
           for (final row in items)
@@ -381,6 +386,42 @@ void main() {
     },
   );
 
+  testWidgets('first shopping save refreshes recovery in retained Settings', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final (store, _) = await setup([]);
+    await tester.pumpWidget(
+      CookdexApp(store: store, platform: _ShoppingAppPlatform()),
+    );
+
+    Future<void> openTab(String name) async {
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationRail),
+          matching: find.text(name),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
+    }
+
+    await openTab('Settings');
+    expect(find.text('No previous save'), findsOneWidget);
+    await openTab('Shopping list');
+    await store.editShopping(const ShoppingEdit.addManual(text: 'Rice'));
+    expect(store.hasPrevious, isTrue);
+    await tester.pump();
+    await openTab('Settings');
+    expect(find.text('Recover previous save'), findsOneWidget);
+    expect(find.text('No previous save'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   for (final failSave in [false, true]) {
     testWidgets(
       'app shopping save ${failSave ? 'error' : 'success'} replaces local Undo above input',
@@ -438,6 +479,35 @@ void main() {
   }
 
   testWidgets(
+    'Add accepts a new draft while a check or another add is saving',
+    (tester) async {
+      final (store, repo) = await setup([item('apples', 'Apples')]);
+      await screen(tester, store);
+      repo.gate = Completer<void>();
+      await tester.tap(find.byKey(const ValueKey('apples')));
+      await tester.pump();
+      final add = find.byTooltip('Add item');
+      final button = find.byWidgetPredicate(
+        (widget) => widget is IconButton && widget.tooltip == 'Add item',
+      );
+      expect(tester.widget<IconButton>(button).onPressed, isNotNull);
+      expect(tester.widget<TextField>(input()).readOnly, isFalse);
+      await tester.enterText(input(), 'Rice');
+      await tester.tap(add);
+      await tester.tap(add);
+      await tester.enterText(input(), 'Oats');
+      await tester.tap(add);
+      expect(repo.edits, 1);
+      repo.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(store.shopping.first.checked, isTrue);
+      expect(store.shopping.map((row) => row.name), ['Apples', 'Rice', 'Oats']);
+      expect(repo.edits, 3);
+      expect(tester.widget<TextField>(input()).controller!.text, isEmpty);
+    },
+  );
+
+  testWidgets(
     'pinned Enter input validates emptiness and retains failed manual input',
     (tester) async {
       final (store, repo) = await setup([]);
@@ -476,7 +546,7 @@ void main() {
       expect(find.text('2 cups Flour'), findsOneWidget);
       await tester.tap(find.text('2 cups Flour'));
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
       expect(store.uncheckedShoppingCount, 1);
       expect(find.text('Checked (1)'), findsOneWidget);
@@ -569,7 +639,7 @@ void main() {
       tester.widget<Text>(find.text('Flour')).style!.decoration,
       TextDecoration.lineThrough,
     );
-    await tester.pump(const Duration(milliseconds: 299));
+    await tester.pump(const Duration(milliseconds: 349));
     expect(find.text('Checked (1)'), findsNothing);
     await tester.pump(const Duration(milliseconds: 1));
     await tester.pump(const Duration(milliseconds: 100));
@@ -589,7 +659,7 @@ void main() {
     await tester.pump();
     expect(store.shopping.first.checked, false);
     expect(find.text('Checked (1)'), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pumpAndSettle();
     expect(find.text('Checked (1)'), findsNothing);
@@ -660,7 +730,7 @@ void main() {
       await screen(tester, store);
       await tester.tap(find.text('Flour'));
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 400));
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.byType(SnackBar), findsNothing);
       await store.editShopping(ShoppingEdit.check(ids: ['a'], checked: false));
@@ -791,7 +861,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Flour'));
     expect(repo.edits, 2);
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 50));
     await store.editShopping(ShoppingEdit.remove(ids: ['a']));
     await tester.pump(const Duration(milliseconds: 600));

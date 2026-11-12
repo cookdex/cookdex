@@ -59,7 +59,9 @@ void main() {
         if (menu) {
           await tap(find.byTooltip('Recipe actions'));
         }
-        await tap(find.text('Add to shopping list').last);
+        await tap(
+          find.text(menu ? 'Add to list' : 'Add to shopping list').last,
+        );
         expect(
           find.widgetWithText(AlertDialog, 'Add to shopping list'),
           findsOneWidget,

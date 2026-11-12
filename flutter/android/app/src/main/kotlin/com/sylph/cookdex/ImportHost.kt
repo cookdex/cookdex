@@ -37,6 +37,7 @@ class ImportHost(private val activity: Activity) {
     private val prefs = activity.getSharedPreferences("cookdex_flutter_v1_smart", Activity.MODE_PRIVATE)
     private var picker: MethodChannel.Result? = null
     private var pickerLimit = 8
+    private var retainOriginals = true
     private var cameraFile: File? = null
     @Volatile private var connection: HttpURLConnection? = null
     @Volatile private var generation = 0
@@ -86,6 +87,8 @@ class ImportHost(private val activity: Activity) {
                 putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/plain", "application/octet-stream"))
             })
             "pickPhotos" -> {
+                if (picker != null) { result.error("busy", "Finish choosing the current photos first.", null); return }
+                retainOriginals = call.argument<Boolean>("retainOriginals") != false
                 pickerLimit = (call.argument<Int>("maxCount") ?: 8).coerceIn(0, 8)
                 if (pickerLimit == 0) { result.error("limit", "Choose at most 8 photos.", null); return }
                 if (call.argument<Boolean>("camera") == true) {
@@ -163,7 +166,14 @@ class ImportHost(private val activity: Activity) {
         if (picker != null) { result.error("busy", "A picker is already open.", null); return }
         picker = result
         try { activity.startActivityForResult(intent, code) }
-        catch (_: Exception) { picker = null; result.error("picker", "Unable to open the picker.", null) }
+        catch (_: Exception) {
+            picker = null
+            if (code == CAMERA) {
+                cameraFile?.delete()
+                cameraFile = null
+                result.error("camera", "Could not open the camera. You can choose Gallery.", null)
+            } else result.error("picker", "Unable to open the picker.", null)
+        }
     }
     fun onActivityResult(code: Int, status: Int, data: Intent?): Boolean {
         if (code !in listOf(TEXT, PHOTOS, CAMERA)) return false
@@ -190,7 +200,8 @@ class ImportHost(private val activity: Activity) {
                         try {
                             val bytes = open().use { bounded(it, 25 * 1024 * 1024) }
                             val prepared = preparePhoto(bytes)
-                            val originalId = if (code == CAMERA) originals.retain(checkNotNull(capture))
+                            val originalId = if (!retainOriginals) null
+                                else if (code == CAMERA) originals.retain(checkNotNull(capture))
                                 else originals.retainPhoto(bytes) { preparePhoto(it, fullResolution = true) }
                             photos.add(prepared); originalIds.add(originalId)
                         }
@@ -229,10 +240,12 @@ class ImportHost(private val activity: Activity) {
         }
     }
     fun readSharedText(uri: Uri): String {
-        val bytes = activity.contentResolver.openInputStream(uri)?.use { bounded(it, 5 * 1024 * 1024) }
+        val bytes = activity.contentResolver.openInputStream(uri)?.use { bounded(it, IncomingShareTypes.MAX_TEXT) }
             ?: throw IllegalArgumentException()
-        return Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-            .decode(ByteBuffer.wrap(bytes)).toString()
+        val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes)).toString().removePrefix("\uFEFF")
+        require(text.none { it.code < 32 && it !in "\t\n\r\u000C" })
+        return text
     }
 
     private fun preparePhoto(bytes: ByteArray, fullResolution: Boolean = false): ByteArray {

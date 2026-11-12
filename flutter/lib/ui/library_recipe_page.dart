@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app_platform.dart';
 import '../cook_controller.dart';
 import '../recipe_store.dart';
+import 'app_navigation.dart';
 import 'recipe_detail.dart';
 import 'window_size.dart';
 
@@ -12,6 +13,8 @@ class LibraryRecipePage extends StatefulWidget {
     super.key,
     required this.store,
     required this.recipeId,
+    this.backTooltip = 'Back to Library',
+    this.onDestinationSelected,
     required this.platform,
     required this.onEdit,
     required this.onActions,
@@ -19,6 +22,8 @@ class LibraryRecipePage extends StatefulWidget {
   });
   final RecipeStore store;
   final String recipeId;
+  final String backTooltip;
+  final ValueChanged<int>? onDestinationSelected;
   final AppPlatform platform;
   final VoidCallback onEdit;
   final ValueChanged<int> onActions, onAddToShopping;
@@ -64,15 +69,21 @@ class _LibraryRecipePageState extends State<LibraryRecipePage>
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
+  Widget build(BuildContext context) {
+    final onSelect = widget.onDestinationSelected;
+    final compact = WindowSizeClass.of(context) == WindowSizeClass.compact;
+    final detail = SafeArea(
+      bottom: onSelect == null,
       child: RecipeTextScale(
         factor: widget.store.preferences.recipeTextSize.factor,
         child: RecipeDetail(
-          backTooltip: 'Back to Library',
+          backTooltip: widget.backTooltip,
           store: widget.store,
           recipeId: widget.recipeId,
           cook: _cook,
+          systemBottomInset: onSelect == null
+              ? 0
+              : MediaQuery.viewPaddingOf(context).bottom,
           onBack: () => Navigator.of(context).maybePop(),
           onActions: () => widget.onActions(_cook.scale),
           onEdit: widget.onEdit,
@@ -80,6 +91,33 @@ class _LibraryRecipePageState extends State<LibraryRecipePage>
           onAddToShopping: () => widget.onAddToShopping(_cook.scale),
         ),
       ),
-    ),
-  );
+    );
+    if (onSelect == null) return Scaffold(body: detail);
+    return Scaffold(
+      body: Row(
+        children: [
+          if (!compact)
+            AppNavigation(
+              store: widget.store,
+              selected: 0,
+              onSelect: onSelect,
+              rail: true,
+            ),
+          Expanded(child: detail),
+        ],
+      ),
+      bottomNavigationBar:
+          compact && MediaQuery.viewInsetsOf(context).bottom == 0
+          ? ListenableBuilder(
+              listenable: _cook,
+              builder: (_, _) => AppNavigation(
+                store: widget.store,
+                selected: 0,
+                onSelect: onSelect,
+                cooking: _cook.active,
+              ),
+            )
+          : null,
+    );
+  }
 }

@@ -147,27 +147,24 @@ void main() {
     prefs.setSort(RecipeSort.added);
     expect(ids(), ['a', 'b', 'c']);
   });
-  test(
-    'prefix, inner substring, case, accents and punctuation stay literal',
-    () async {
-      await setup([
-        searchRecipe('a', 'Beef café [fresh]'),
-        searchRecipe('b', 'Beet cafe'),
-      ]);
-      prefs.setQuery('BEE');
-      expect(ids(), ['a', 'b']);
-      prefs.setQuery('eef');
-      expect(ids(), ['a']);
-      prefs.setQuery('cafe');
-      expect(ids(), ['b']);
-      prefs.setQuery('CAFÉ');
-      expect(ids(), ['a']);
-      prefs.setQuery('[fresh]');
-      expect(ids(), ['a']);
-      prefs.setQuery('"beef"');
-      expect(ids(), isEmpty);
-    },
-  );
+  test('prefix, inner substring and punctuation stay literal and accents add matches', () async {
+    await setup([
+      searchRecipe('a', 'Beef café [fresh]'),
+      searchRecipe('b', 'Beet cafe'),
+    ]);
+    prefs.setQuery('BEE');
+    expect(ids(), ['a', 'b']);
+    prefs.setQuery('eef');
+    expect(ids(), ['a']);
+    prefs.setQuery('cafe');
+    expect(ids(), ['b', 'a']);
+    prefs.setQuery('CAFÉ');
+    expect(ids(), ['a', 'b']);
+    prefs.setQuery('[fresh]');
+    expect(ids(), ['a']);
+    prefs.setQuery('"beef"');
+    expect(ids(), isEmpty);
+  });
   test(
     'only selected targets contribute inclusion, rank and full boundary',
     () async {
@@ -238,10 +235,10 @@ void main() {
     prefs.setSearchFields({SearchField.title});
     prefs.setQuery('rice soup');
     expect(ids(), ['a']);
-    expect(store.partialMatchStart, isNull);
+    expect(store.partialMatchStart, 0);
   });
   test(
-    'adding a term widens inclusion; full-only and partial-only have no label',
+    'adding a term widens inclusion and places the partial-only label first',
     () async {
       await setup([searchRecipe('a', 'Chicken'), searchRecipe('b', 'Rice')]);
       prefs.setQuery('chicken');
@@ -249,9 +246,78 @@ void main() {
       expect(store.partialMatchStart, isNull);
       prefs.setQuery('chicken rice');
       expect(ids(), ['a', 'b']);
-      expect(store.partialMatchStart, isNull);
+      expect(store.partialMatchStart, 0);
       prefs.setQuery('rice');
       expect(ids(), ['b']);
+    },
+  );
+  test(
+    'picker requires filler words and uses selected sort among literals',
+    () async {
+      await setup([
+        searchRecipe('a', 'Supper', notes: 'chicken'),
+        searchRecipe('b', 'Chicken'),
+        searchRecipe('c', 'Chicken and rice'),
+      ]);
+      prefs.setSearchFields(SearchField.values.toSet());
+      prefs.setQuery('chicken');
+      expect(ids(), ['b', 'c', 'a']);
+      expect(store.recipesMatching(prefs).map((r) => r.id), ['a', 'b', 'c']);
+      prefs.setQuery('chicken and');
+      expect(ids(), ['b', 'c', 'a']);
+      expect(store.recipesMatching(prefs).map((r) => r.id), ['c']);
+    },
+  );
+
+  test('chicken rise keeps chicken-only rows below the full match', () async {
+    await setup([
+      searchRecipe('a', 'Chicken rice'),
+      searchRecipe('b', 'Chicken rise'),
+      searchRecipe('c', 'Chicken'),
+      searchRecipe('d', 'Rice'),
+    ]);
+    prefs.setQuery('chicken rise');
+    expect(ids(), ['b', 'a', 'c']);
+    expect(store.partialMatchStart, 1);
+    expect(store.recipesMatching(prefs).map((r) => r.id), ['b']);
+  });
+
+  test(
+    'repeated phrase words retain their role in equivalent phrases',
+    () async {
+      await setup([
+        searchRecipe('a', 'Scallion'),
+        searchRecipe('b', 'Green onion'),
+        searchRecipe('c', 'Green'),
+      ]);
+      prefs.setQuery('green onion spring onion');
+      expect(ids(), ['b', 'a', 'c']);
+      expect(store.partialMatchStart, 2);
+      expect(store.recipesMatching(prefs).map((r) => r.id), ['b', 'a']);
+      prefs.setQuery('green lime onion');
+      expect(ids(), ['b', 'c']);
+      expect(store.fullMatchCount, 0);
+      expect(store.recipesMatching(prefs), isEmpty);
+    },
+  );
+
+  test(
+    'punctuation-only and quoted searches preserve literal substrings',
+    () async {
+      await setup([
+        searchRecipe('a', 'Rice'),
+        searchRecipe('b', 'A [rice] bowl'),
+        searchRecipe('c', 'Use "rice"'),
+      ]);
+      for (final (query, id) in [
+        ('[', 'b'),
+        ('[rice]', 'b'),
+        ('"rice"', 'c'),
+      ]) {
+        prefs.setQuery(query);
+        expect(ids(), [id]);
+        expect(store.recipesMatching(prefs).single.id, id);
+      }
     },
   );
   test('results ready in notification; builds, scroll and view changes reuse cache', () async {

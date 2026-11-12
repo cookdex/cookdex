@@ -41,6 +41,126 @@ fn add(s: &Service, name: &str) -> String {
         .id
         .clone()
 }
+#[test]
+fn idea_items_are_categorized_and_committed_together_without_a_recipe() {
+    let root = Root::new();
+    let service = Service::open(&root).unwrap();
+    let added = edit(
+        &service,
+        Edit::AddManualItems {
+            names: vec!["carrots".into(), "milk".into()],
+        },
+    );
+    assert_eq!(added.shopping[0].category_id, "produce");
+    assert_eq!(added.shopping[1].category_id, "dairy");
+    assert!(
+        added
+            .shopping
+            .iter()
+            .all(|item| item.contributors.is_empty())
+    );
+    assert!(
+        service
+            .edit_shopping(
+                added.generation,
+                Edit::AddManualItems {
+                    names: vec!["apples".into(), "".into()]
+                },
+                &op()
+            )
+            .is_err()
+    );
+    assert_eq!(service.snapshot().unwrap().shopping, added.shopping);
+}
+
+#[test]
+fn four_idea_purchases_on_an_empty_list_after_aisle_changes() {
+    let root = Root::new();
+    let s = Service::open(&root).unwrap();
+    let created = edit(
+        &s,
+        Edit::AddCategory {
+            name: "Market".into(),
+        },
+    );
+    let aisle = created.shopping_categories.last().unwrap().id.clone();
+    let onion = add(&s, "green onions");
+    let sauce = add(&s, "buffalo hot sauce");
+    for (item, destination) in [(&onion, aisle.as_str()), (&sauce, "household")] {
+        edit(
+            &s,
+            Edit::Move {
+                id: item.clone(),
+                category_id: destination.into(),
+                before_id: None,
+            },
+        );
+    }
+    edit(
+        &s,
+        Edit::RenameCategory {
+            id: aisle.clone(),
+            name: "Farm stand".into(),
+        },
+    );
+    let setup = edit(
+        &s,
+        Edit::DeleteCategory {
+            id: "household".into(),
+        },
+    );
+    let order = setup
+        .shopping_categories
+        .iter()
+        .rev()
+        .map(|c| c.id.clone())
+        .collect();
+    let setup = edit(&s, Edit::ReorderCategories { ids: order });
+    edit(
+        &s,
+        Edit::Remove {
+            ids: vec![onion, sauce],
+        },
+    );
+    drop(s);
+    let s = Service::open(&root).unwrap();
+    assert!(s.snapshot().unwrap().shopping.is_empty());
+    let names = [
+        "russet potatoes",
+        "buffalo hot sauce",
+        "sour cream",
+        "green onions",
+    ];
+    let added = edit(
+        &s,
+        Edit::AddManualItems {
+            names: names.map(String::from).to_vec(),
+        },
+    );
+    assert_eq!(added.shopping_categories, setup.shopping_categories);
+    assert_eq!(
+        added
+            .shopping
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect::<Vec<_>>(),
+        names
+    );
+    // Deleting an aisle intentionally remembers Other for its former items.
+    assert_eq!(
+        added
+            .shopping
+            .iter()
+            .map(|i| i.category_id.as_str())
+            .collect::<Vec<_>>(),
+        ["produce", "other", "dairy", aisle.as_str()]
+    );
+    drop(s);
+    assert_eq!(
+        Service::open(&root).unwrap().snapshot().unwrap().shopping,
+        added.shopping
+    );
+}
 fn recipe() -> Recipe {
     let v: serde_json::Value =
         serde_json::from_str(include_str!("../../../../tests/fixtures/corpus.json")).unwrap();
@@ -396,6 +516,11 @@ fn pre_a3_local_rows_get_categories_without_recipe_rewrite() {
     ];
     session.save(0, &book, "2026-10-14T00:00:00Z").unwrap();
     drop(session);
+    // Older libraries also predate the optional shoppingSetup key.
+    let db = rusqlite::Connection::open(root.0.join("flutter-v1/cookdex.sqlite3")).unwrap();
+    db.execute("DELETE FROM local WHERE key = 'shoppingSetup'", [])
+        .unwrap();
+    drop(db);
     let s = Service::open(&root).unwrap();
     assert_eq!(s.snapshot().unwrap().shopping[0].category_id, "produce");
     assert!(s.snapshot().unwrap().shopping[0].checked);
@@ -403,6 +528,44 @@ fn pre_a3_local_rows_get_categories_without_recipe_rewrite() {
         serde_json::to_value(s.detail(&r.id).unwrap().unwrap()).unwrap(),
         raw
     );
+    let before = s.snapshot().unwrap();
+    let names = [
+        "onion",
+        "fresh thyme",
+        "carrots",
+        "buffalo hot sauce",
+        "sour cream",
+        "russet potatoes",
+        "green onions",
+        "chicken thighs",
+        "chicken broth",
+        "lemon",
+    ];
+    let after = edit(
+        &s,
+        Edit::AddManualItems {
+            names: names.map(String::from).to_vec(),
+        },
+    );
+    assert_eq!(after.shopping.len(), 10);
+    assert_eq!(after.shopping[0].id, before.shopping[0].id);
+    assert!(!after.shopping[0].checked);
+    assert_eq!(after.shopping[1].category_id, "produce");
+    assert_eq!(after.shopping[2].category_id, "produce");
+    for names in [
+        vec![],
+        vec!["extra".into(); 11],
+        vec!["new item".into(), " ".into()],
+    ] {
+        assert!(
+            s.edit_shopping(after.generation, Edit::AddManualItems { names }, &op())
+                .is_err()
+        );
+    }
+    drop(s);
+    let reopened = Service::open(&root).unwrap().snapshot().unwrap();
+    assert_eq!(reopened.shopping, after.shopping);
+    assert_eq!(reopened.generation, after.generation);
 }
 #[test]
 fn malformed_setup_is_rejected_before_restore() {

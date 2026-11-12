@@ -558,7 +558,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Baked garden pasta'));
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Edit recipe'), findsOneWidget);
+      expect(find.byTooltip('Recipe actions'), findsOneWidget);
       await tester.tap(find.byTooltip('Back to Library'));
       await tester.pumpAndSettle();
       expect(find.text('Show all (6)'), findsOneWidget);

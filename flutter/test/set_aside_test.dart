@@ -248,17 +248,19 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Getting started'));
       await tester.pumpAndSettle();
+      final backups = helpSections.singleWhere((s) => s.id == 'backups');
       await tester.scrollUntilVisible(
-        find.text('Backups'),
+        find.text(backups.title),
         180,
         scrollable: find.byType(Scrollable).first,
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Backups'));
+      await tester.tap(find.text(backups.title));
       await tester.pumpAndSettle();
-      final paragraphs = helpSections
-          .singleWhere((s) => s.id == 'backups')
-          .paragraphs;
+      final paragraphs = [
+        backups.paragraphs.singleWhere((p) => p.contains('Review options')),
+        backups.paragraphs.singleWhere((p) => p.startsWith('• Recipe ZIP')),
+      ];
       for (var i = 0; i < 2; i++) {
         final paragraph = find.byKey(
           ValueKey('help-paragraph-${paragraphs[i]}'),

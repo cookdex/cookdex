@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'facelift_motion.dart';
+
 import '../sync_presentation.dart';
 
 class SyncIndicator extends StatelessWidget {
@@ -12,9 +14,10 @@ class SyncIndicator extends StatelessWidget {
       status.color,
       Theme.of(context).brightness,
     );
-    final duration = MediaQuery.disableAnimationsOf(context)
-        ? Duration.zero
-        : const Duration(milliseconds: 200);
+    final duration = FaceliftMotion.accessible(
+      context,
+      FaceliftMotion.statusFade,
+    );
     if (duration == Duration.zero) {
       return TextButton(
         onPressed: onTap,

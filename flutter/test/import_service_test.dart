@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cookdex/import_service.dart';
-import 'package:cookdex/import_controller.dart';
 import 'package:cookdex/draft_storage.dart';
 import 'package:cookdex/import_diagnostics.dart';
 import 'package:cookdex/import_page_fetcher.dart';
@@ -19,6 +18,7 @@ class PlatformFake extends Fake implements ImportPlatform {
   String effort = 'standard';
   int settingsReads = 0, requests = 0;
   Object? fetchError;
+  final fetchedUrls = <String>[];
   String? redirectedUrl;
   String rawReply = '{"steps":[]}';
   Completer<ProviderReply>? gate;
@@ -36,6 +36,7 @@ class PlatformFake extends Fake implements ImportPlatform {
   Future<void> cancel() async {}
   @override
   Future<ImportPage> fetchPage(String url) async {
+    fetchedUrls.add(url);
     if (fetchError != null) throw fetchError!;
     return ImportPage(html: 'fixture', url: redirectedUrl ?? url);
   }
@@ -268,40 +269,40 @@ void main() {
     );
     expect(api.pageInspections, 0);
   });
-  test('blocked download never falls through to remote AI retrieval', () async {
-    platform.fetchError = const HttpException('Download blocked (HTTP 403).');
-    for (final useAi in [false, true]) {
-      await expectLater(
-        service.link('https://example.com/recipe', useAi: useAi),
-        throwsA(isA<HttpException>()),
-      );
+  test('only an explicit AI import retries a refused public page', () async {
+    const url = 'https://meadow.example/morning-bread';
+    platform.fetchError = ImportPageRefused(403);
+    for (final key in [false, true]) {
+      platform.hasKey = key;
+      final local = await service.link(url);
+      expect(local.websiteAiHint, key);
+      expect(local.candidates, isEmpty);
+      expect(platform.requests, 0);
     }
-    expect(platform.requests, 0);
-    expect(api.sent, isEmpty);
+    api.outputs = [ProviderOutput.recipe(recipe('bread'))];
+    final ai = await service.link(url, useAi: true);
+    expect(platform.requests, 1);
+    expect(api.sent.single.mode, ProviderMode.urlRecipe);
+    expect(api.sent.single.text, isEmpty);
+    expect(api.sent.single.source, url);
+    expect(ai.candidates.single.recipe.fields.source, url);
   });
   test(
-    'HTTP inputs and insecure redirects never reach parsing or AI',
+    'HTTP input opens only HTTPS and does not retry cleartext on failure',
     () async {
+      final result = await service.link('http://example.com/recipe');
+      expect(result.source, 'https://example.com/recipe');
+      platform.fetchError = const HttpException('TLS unavailable.');
       for (final useAi in [false, true]) {
         await expectLater(
           service.link('http://example.com/recipe', useAi: useAi),
-          throwsA(isA<InsecureImportUrl>()),
-        );
-        platform.fetchError = const InsecureImportUrl();
-        await expectLater(
-          service.link('https://example.com/recipe', useAi: useAi),
-          throwsA(isA<InsecureImportUrl>()),
-        );
-        platform.fetchError = null;
-        platform.redirectedUrl = 'http://example.com/final';
-        await expectLater(
-          service.link('https://example.com/recipe', useAi: useAi),
-          throwsA(isA<InsecureImportUrl>()),
+          throwsA(isA<HttpException>()),
         );
       }
+      expect(platform.fetchedUrls, everyElement('https://example.com/recipe'));
+      expect(platform.fetchedUrls, hasLength(3));
+      expect(api.pageInspections, 1);
       expect(platform.requests, 0);
-      expect(api.pageInspections, 0);
-      expect(api.sent, isEmpty);
     },
   );
   test(
@@ -318,21 +319,6 @@ void main() {
         throwsA(isA<StateError>()),
       );
       expect(platform.requests, 0);
-    },
-  );
-  test(
-    'insecure link displays paste guidance without offering AI retry',
-    () async {
-      final controller = ImportController(
-        service: service,
-        storage: MemoryDraftStorage(),
-      )..tab = ImportTab.link;
-      controller.link = 'http://example.com/recipe';
-      expect(await controller.discover(), isNull);
-      expect(controller.error, insecureImportMessage);
-      expect(controller.canTryWithAi, false);
-      await controller.flush();
-      controller.dispose();
     },
   );
   test('own format never consults credentials or a provider', () async {
@@ -454,7 +440,15 @@ void main() {
       const ProviderOutput.retry(),
       ProviderOutput.recipe(recipe('result')),
     ];
-    await service.text('Only selected source');
+    final phases = <ImportPhase>[];
+    await service.text('Only selected source', onPhase: phases.add);
+    expect(phases, [
+      ImportPhase.readingText,
+      ImportPhase.writing,
+      ImportPhase.checking,
+      ImportPhase.retrying,
+      ImportPhase.checking,
+    ]);
     expect(platform.requests, 2);
     expect(api.sent.single.text, 'Only selected source');
   });
@@ -487,7 +481,12 @@ void main() {
   });
   test('unchecked local page selection never reads settings or enhances ingredients', () async {
     api.pageCandidates = [api.candidate('First'), api.candidate('Second')];
-    final result = await service.link('https://example.com/recipe');
+    final phases = <ImportPhase>[];
+    final result = await service.link(
+      'https://example.com/recipe',
+      onPhase: phases.add,
+    );
+    expect(phases, [ImportPhase.readingPage]);
     final selected = await service.select(result, 1);
     expect(selected.recipe.fields.title, 'Second');
     expect(platform.requests, 0);
@@ -499,7 +498,7 @@ void main() {
     () async {
       final result = await service.link('https://example.com/recipe');
       expect(result.candidates, isEmpty);
-      expect(result.canTryWithAi, true);
+      expect(result.websiteAiHint, true);
       expect(result.warnings, contains(contains('No embedded recipe')));
       expect(platform.settingsReads, 0);
       expect(platform.requests, 0);
@@ -536,7 +535,7 @@ void main() {
         ),
       ];
       final result = await service.link('https://example.com/recipe');
-      expect(result.canTryWithAi, true);
+      expect(result.websiteAiHint, true);
       await service.select(result, 0);
       expect(platform.settingsReads, 0);
       expect(platform.requests, 0);

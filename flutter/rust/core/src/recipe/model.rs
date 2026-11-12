@@ -286,9 +286,6 @@ impl RecipeContent {
     }
     pub fn validate(&self) -> Result<()> {
         self.validate_fields()?;
-        if !self.source.is_empty() && !safe_source(&self.source) {
-            return Err(error("Use an http:// or https:// source link."));
-        }
         for ingredient in &self.ingredients {
             ingredient.validate()?;
         }

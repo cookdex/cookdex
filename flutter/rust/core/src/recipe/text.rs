@@ -5,6 +5,7 @@ use super::{
 pub const HEADER: &str = "Recipe Book Text v1";
 const END: &str = "--- End recipe ---";
 const INGREDIENTS: &str = "Ingredients (amount | unit | name | prep note | optional):";
+const SOURCE_SECTION: &str = "Section: Source: ";
 fn escape(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -50,13 +51,20 @@ pub fn export_recipe(recipe: &Recipe) -> Result<String> {
     let r = &recipe.content;
     let mut out = vec![HEADER.to_string()];
     for (name, value) in [
-        ("Title", &r.title),
+        ("Title", r.title.as_str()),
         ("Description", &r.description),
         ("Servings", &r.servings),
         ("Prep time", &r.prep_time),
         ("Cook time", &r.cook_time),
         ("Total time", &r.total_time),
-        ("Source", &r.source),
+        (
+            "Source",
+            if super::model::safe_source(&r.source) {
+                &r.source
+            } else {
+                ""
+            },
+        ),
     ] {
         out.push(format!("{name}: {}", escape(value)));
     }
@@ -85,6 +93,10 @@ pub fn export_recipe(recipe: &Recipe) -> Result<String> {
             .collect::<Vec<_>>()
             .join(" | ")
         ));
+    }
+    if !r.source.is_empty() && !super::model::safe_source(&r.source) {
+        // An empty trailing section has no ingredient rows in older readers.
+        out.push(format!("{SOURCE_SECTION}{}", escape(&r.source)));
     }
     out.extend([String::new(), "Steps:".into()]);
     for (index, step) in r.steps.iter().enumerate() {
@@ -118,11 +130,11 @@ struct Reader<'a> {
     lines: Vec<&'a str>,
     position: usize,
 }
-impl Reader<'_> {
+impl<'a> Reader<'a> {
     fn peek(&self) -> Option<&str> {
         self.lines.get(self.position).copied()
     }
-    fn next(&mut self) -> Result<&str> {
+    fn next(&mut self) -> Result<&'a str> {
         let s = self
             .lines
             .get(self.position)
@@ -201,6 +213,12 @@ fn import_strict(text: &str, now: &str) -> Result<ImportCandidates> {
             }
             if let Some(value) = line.strip_prefix("Section: ") {
                 section = single(value)?;
+                if content.source.is_empty() && line.starts_with(SOURCE_SECTION) {
+                    reader.blanks();
+                    if reader.peek() == Some("Steps:") {
+                        content.source = single(&line[SOURCE_SECTION.len()..])?;
+                    }
+                }
                 continue;
             }
             let fields = split(

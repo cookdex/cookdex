@@ -1,10 +1,13 @@
 package com.sylph.cookdex
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.android.FlutterFragment
@@ -17,6 +20,13 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.Executors
+
+internal fun cameraPermissionAnswer(result: Int?, showRationale: Boolean): String = when {
+    result == null -> "cancelled"
+    result == PackageManager.PERMISSION_GRANTED -> "granted"
+    showRationale -> "denied"
+    else -> "blocked"
+}
 
 class MainActivity : FlutterFragmentActivity() {
     private var platformChannel: MethodChannel? = null
@@ -59,6 +69,13 @@ class MainActivity : FlutterFragmentActivity() {
     private val fileWorker = Executors.newSingleThreadExecutor()
     private val zipRequest = 4505
     private var networkPermission: MethodChannel.Result? = null
+    private var cameraPermission: MethodChannel.Result? = null
+    private var cameraSettings: MethodChannel.Result? = null
+    private val cameraPermissionRequest = 4510
+    private val cameraSettingsRequest = 4511
+
+    private fun hasCameraPermission() =
+        checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -103,14 +120,40 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success("${applicationInfo.loadLabel(packageManager)}\nVersion: ${info.versionName}\nBuild: $code\nDevice: ${Build.MODEL}\nAndroid: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
                     }
                     "hasLocalNetwork" -> result.success(hasLocalNetwork())
+                    "requestCameraPermission" -> {
+                        if (hasCameraPermission()) result.success("granted")
+                        else if (cameraPermission != null || networkPermission != null) result.success("cancelled")
+                        else {
+                            cameraPermission = result
+                            try { requestPermissions(arrayOf(Manifest.permission.CAMERA), cameraPermissionRequest) }
+                            catch (_: Exception) {
+                                cameraPermission = null
+                                result.error("permission", "Could not request camera access.", null)
+                            }
+                        }
+                    }
+                    "openCameraSettings" -> {
+                        if (cameraSettings != null) result.error("busy", "App settings are already open.", null)
+                        else {
+                            cameraSettings = result
+                            try {
+                                startActivityForResult(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.fromParts("package", packageName, null)), cameraSettingsRequest)
+                            } catch (_: Exception) {
+                                cameraSettings = null
+                                result.error("settings", "Could not open app settings.", null)
+                            }
+                        }
+                    }
                     "requestLocalNetwork" -> {
                         val permission = "android.permission.ACCESS_LOCAL_NETWORK"
                         if (hasLocalNetwork()) result.success(true)
-                        else if (networkPermission != null) result.error("busy", "Permission request already open.", null)
+                        else if (networkPermission != null || cameraPermission != null) result.error("busy", "Permission request already open.", null)
                         else { networkPermission = result; requestPermissions(arrayOf(permission), 4509) }
                     }
                     "privateRoot" -> {
                         // OS-owned package directory, with no old-app resolver.
+                        PhoneBackupAgent.finishRestore(this)
                         val root = File(filesDir, "flutter-v1")
                         if (!root.exists() && !root.mkdirs()) result.error("storage", "Cannot open private storage.", null)
                         else result.success(root.absolutePath)
@@ -160,6 +203,12 @@ class MainActivity : FlutterFragmentActivity() {
     @Deprecated("Activity result compatibility with FlutterActivity")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == cameraSettingsRequest) {
+            val callback = cameraSettings
+            cameraSettings = null
+            callback?.success(hasCameraPermission())
+            return
+        }
         if (importHost?.onActivityResult(requestCode, resultCode, data) == true) return
         if (exportHost?.onActivityResult(requestCode, resultCode, data) == true) return
         if (requestCode != zipRequest) return
@@ -196,6 +245,12 @@ class MainActivity : FlutterFragmentActivity() {
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == cameraPermissionRequest) {
+            val callback = cameraPermission
+            cameraPermission = null
+            val answer = grantResults.getOrNull(permissions.indexOf(Manifest.permission.CAMERA))
+            callback?.success(cameraPermissionAnswer(answer, shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)))
+        }
         if (requestCode == 4509) {
             networkPermission?.success(grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
             networkPermission = null
@@ -208,6 +263,8 @@ class MainActivity : FlutterFragmentActivity() {
         platformChannel?.setMethodCallHandler(null)
         platformChannel = null
         networkPermission?.success(false); networkPermission = null
+        cameraPermission?.success("cancelled"); cameraPermission = null
+        cameraSettings?.success(false); cameraSettings = null
         incomingShareHost?.close()
         importHost?.close()
         exportHost?.close()

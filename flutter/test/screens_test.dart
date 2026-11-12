@@ -505,7 +505,7 @@ void main() {
       expect(tester.getSize(surface).height, 36);
       expect(
         tester.getCenter(button).dy,
-        tester.getCenter(find.byTooltip('Edit recipe')).dy,
+        tester.getCenter(find.byTooltip('Recipe actions')).dy,
       );
       expect(tester.getSize(button).height, 48);
     },
@@ -535,7 +535,7 @@ void main() {
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
       expect(preferences.cookStep('one'), 1);
-      expect(find.text('2/2'), findsOneWidget);
+      expect(find.text('Step 2'), findsOneWidget);
       expect(find.byType(SnackBar), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       store.dispose();
@@ -714,7 +714,7 @@ void main() {
         expect(find.text('salt, to taste'), findsOneWidget);
         cook.toggle();
         await tester.pumpAndSettle();
-        expect(find.text('Previous'), findsOneWidget);
+        expect(find.text('Back'), findsOneWidget);
         expect(find.text('Next'), findsOneWidget);
         expect(tester.takeException(), isNull);
         if (width == 1000) {
@@ -781,9 +781,7 @@ void main() {
       expect(cook.step, 0);
       expect(
         tester
-            .widget<OutlinedButton>(
-              find.widgetWithText(OutlinedButton, 'Previous'),
-            )
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Back'))
             .onPressed,
         isNull,
       );
@@ -834,9 +832,7 @@ void main() {
     },
   );
 
-  testWidgets('scroll hides FAB, keeps search pinned and returns FAB upward', (
-    tester,
-  ) async {
+  testWidgets('scroll keeps Add available and search pinned', (tester) async {
     final preferences = LocalPreferences.memory();
     final store = RecipeStore(
       _Repository(List.generate(30, (i) => _recipe('$i'))),
@@ -864,7 +860,7 @@ void main() {
     await finger.moveBy(const Offset(0, -450));
     await tester.pump(const Duration(milliseconds: 200));
     expect(find.byKey(const Key('add-recipe')), findsOneWidget);
-    expect(find.byKey(const Key('add-recipe')).hitTestable(), findsNothing);
+    expect(find.byKey(const Key('add-recipe')).hitTestable(), findsOneWidget);
     await finger.up();
     await tester.pumpAndSettle();
     final pinnedSearchTop = tester

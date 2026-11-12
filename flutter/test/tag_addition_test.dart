@@ -11,6 +11,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'selection_actions.dart';
+
 import 'import_test.dart' show ShellPlatform, ImportFakeService;
 import 'library_screen_test.dart' show LibraryFakeRepository;
 import 'recipe_store_test.dart' show recipe;
@@ -132,7 +134,7 @@ void main() {
       await tester.enterText(find.byType(TextField).last, 'picnic');
       await tester.pumpAndSettle();
       await tap('Choose recipes');
-      await tester.enterText(find.byType(TextField).last, 'quick');
+      await tester.enterText(find.byType(TextField).last, 'quikc');
       await tester.pumpAndSettle();
       await tester.pumpAndSettle();
       await tap('Favorites');
@@ -214,7 +216,7 @@ void main() {
         expect(row.value, isTrue);
         expect(row.onChanged, isNull);
       }
-      await tester.enterText(find.byType(TextField).last, 'quick');
+      await tester.enterText(find.byType(TextField).last, 'quikc');
       await tester.pumpAndSettle();
       expect(find.text('Select all (19)'), findsOneWidget);
       expect(
@@ -268,8 +270,10 @@ void main() {
   testWidgets(
     'Recipes Select all includes every field-and-Favorites match and Add tag uses exactly that set',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(390, 844));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
       final prefs = LocalPreferences.memory()
         ..query = 'quick'
         ..searchFields = {SearchField.tags}
@@ -307,18 +311,18 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Select'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Select all'));
+      await tapSelectionAction(tester, 'Select all', 'Select all');
       await tester.pumpAndSettle();
       expect(
         tester.widget<RecipesScreen>(find.byType(RecipesScreen)).selectedIds,
         {for (var i = 0; i < 60; i += 6) 'tag-$i'},
       );
-      await tester.tap(find.byTooltip('Add tag'));
+      await tapSelectionAction(tester, 'Add tag', 'Add tag');
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(repo.changes, 0);
-      await tester.tap(find.byTooltip('Add tag'));
+      await tapSelectionAction(tester, 'Add tag', 'Add tag');
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).last, 'Summer!');
       await tester.pumpAndSettle();
@@ -329,7 +333,7 @@ void main() {
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(repo.changes, 0);
-      await tester.tap(find.byTooltip('Add tag'));
+      await tapSelectionAction(tester, 'Add tag', 'Add tag');
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).last, 'Summer!');
       await tester.pumpAndSettle();
@@ -355,7 +359,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Select'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Select all'));
+      await tapSelectionAction(tester, 'Select all', 'Select all');
       await tester.pumpAndSettle();
       expect(
         tester.widget<RecipesScreen>(find.byType(RecipesScreen)).selectedIds,

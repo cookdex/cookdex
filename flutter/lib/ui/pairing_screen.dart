@@ -1,3 +1,4 @@
+import 'page_headings.dart';
 import 'pixel_scroll.dart';
 import 'retained_screen.dart';
 import 'navigation_feedback.dart';
@@ -9,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import 'scan_invitation_screen.dart';
+import 'camera_permission.dart';
 import 'pairing_invitation_qr.dart';
 
 import '../sync_controller.dart';
@@ -28,7 +30,8 @@ class PairingScreen extends StatefulWidget {
   State<PairingScreen> createState() => _PairingScreenState();
 }
 
-class _PairingScreenState extends State<PairingScreen> {
+class _PairingScreenState extends State<PairingScreen>
+    with CameraPermissionFeedback<PairingScreen> {
   final _code = TextEditingController();
   final _elapsed = Stopwatch();
   Timer? _tick;
@@ -167,12 +170,13 @@ class _PairingScreenState extends State<PairingScreen> {
       final c = widget.controller;
       final addresses = c.status?.addresses ?? [];
       return Scaffold(
-        appBar: AppBar(
-          title: Text(switch (_path) {
+        appBar: pageHeadingBar(
+          context,
+          title: switch (_path) {
             PairingPath.invite => 'Invite a device',
             PairingPath.join => 'Join a device',
             null => 'Add a device',
-          }),
+          },
         ),
         body: SafeArea(
           top: false,
@@ -303,16 +307,20 @@ class _PairingScreenState extends State<PairingScreen> {
                       Align(
                         alignment: Alignment.centerLeft,
                         child: FilledButton.icon(
-                          onPressed: c.busy ? null : _scan,
+                          onPressed: c.busy ? null : () => withCameraAccess(_scan),
                           icon: const Icon(Symbols.qr_code_scanner),
                           label: const Text('Scan QR code'),
                         ),
                       ),
+                    ?cameraPermissionNotice(scanning: true),
                     if (c.isAndroid && !_paste)
                       Align(
                         alignment: Alignment.centerLeft,
                         child: TextButton(
-                          onPressed: () => setState(() => _paste = true),
+                          onPressed: () {
+                            clearCameraNotice();
+                            setState(() => _paste = true);
+                          },
                           child: const Text('Paste invitation'),
                         ),
                       ),

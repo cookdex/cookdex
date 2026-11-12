@@ -48,32 +48,113 @@ Future<void> _expand(WidgetTester tester, String id) async {
 }
 
 void main() {
+  test('help follows the reviewed section and subheading order', () {
+    expect(helpSections.map((section) => section.title), [
+      'Getting started',
+      'Adding and editing recipes',
+      'Smart Import',
+      'Smart Create',
+      'Your Gemini key',
+      'Finding recipes',
+      'Reading and cooking',
+      'Shopping list',
+      'Sharing recipes',
+      'Syncing your devices',
+      'Backups and moving phones',
+      'Ingredients and tags',
+      'Appearance and settings',
+      'What’s kept and what’s sent',
+      'Coming later',
+      'Problems and feedback',
+    ]);
+    expect(helpSections.expand((s) => s.groups).map((group) => group.title), [
+      'Websites',
+      'YouTube',
+      'Photos',
+      'Text',
+      'Social apps',
+      'Smart Create settings',
+      'On your device',
+      'What Smart Import sends',
+      'What Smart Create sends',
+      'How Google uses what you send',
+      'Other connections and copies',
+      'Removing your data',
+    ]);
+  });
+
+  test(
+    'Smart Create help covers options, estimates and both food settings',
+    () {
+      final guide = helpSections.singleWhere(
+        (section) => section.id == 'create',
+      );
+      final wording = [
+        ...guide.paragraphs,
+        ...guide.groups.single.paragraphs,
+      ].join(' ');
+      for (final phrase in [
+        'What you have',
+        'Options',
+        'per serving',
+        'aren’t saved with the recipe',
+        'Foods to avoid',
+        'Other preferences',
+      ]) {
+        expect(wording, contains(phrase));
+      }
+      final data = dataHelp.groups.singleWhere(
+        (g) => g.title == 'What Smart Create sends',
+      );
+      expect(
+        data.paragraphs.where((p) => p.contains('other preferences')),
+        hasLength(2),
+      );
+    },
+  );
+
   testWidgets('help starts with quick steps and expands only chosen sections', (
     tester,
   ) async {
     await _pump(tester);
     expect(find.text(helpTitle), findsOneWidget);
     expect(find.text(helpSections.first.paragraphs.first), findsOneWidget);
-    expect(find.text(helpSections[1].paragraphs.first), findsNothing);
+    final adding = helpSections.firstWhere((section) => section.id == 'adding');
+    expect(find.text(adding.paragraphs.first), findsNothing);
     await _expand(tester, 'adding');
-    expect(find.text(helpSections[1].paragraphs.first), findsOneWidget);
+    expect(find.text(adding.paragraphs.first), findsOneWidget);
     await _expand(tester, 'adding');
-    expect(find.text(helpSections[1].paragraphs.first), findsNothing);
+    expect(find.text(adding.paragraphs.first), findsNothing);
   });
 
-  testWidgets('Google setup links open the official source through platform', (
-    tester,
-  ) async {
+  testWidgets('every help link opens its intended destination', (tester) async {
     final opened = <String>[];
     await _pump(tester, openUrl: (url) async => opened.add(url));
-    await _expand(tester, 'smart');
-    final section = helpSections.firstWhere((section) => section.id == 'smart');
-    for (final link in section.links) {
-      await _reveal(tester, find.text(link.label));
-      await tester.tap(find.text(link.label));
-      await tester.pumpAndSettle();
+    const destinations = {
+      'smart': {
+        'Open Google AI Studio': 'https://aistudio.google.com/apikey',
+        'Google’s key setup guide':
+            'https://ai.google.dev/gemini-api/docs/api-key',
+      },
+      'data': {
+        'Google’s Gemini API terms': 'https://ai.google.dev/gemini-api/terms',
+      },
+      'feedback': {
+        'Report a problem on GitHub':
+            'https://github.com/cookdex/cookdex/issues',
+      },
+    };
+    for (final section in destinations.entries) {
+      await _expand(tester, section.key);
+      for (final link in section.value.entries) {
+        final button = find.text(link.key);
+        await tester.ensureVisible(button);
+        await tester.pumpAndSettle();
+        await tester.tap(button);
+        expect(opened.last, link.value);
+      }
     }
-    expect(opened, section.links.map((link) => link.url).toList());
+    expect(opened, hasLength(4));
   });
 
   testWidgets('Copy app info copies the platform details without a send', (
@@ -129,7 +210,10 @@ void main() {
       await _pump(tester, textScale: 2);
       for (final section in helpSections.skip(1)) {
         await _expand(tester, section.id);
-        for (final paragraph in section.paragraphs) {
+        for (final paragraph in [
+          ...section.paragraphs,
+          for (final group in section.groups) ...group.paragraphs,
+        ]) {
           await _reveal(
             tester,
             find.byKey(ValueKey('help-paragraph-$paragraph')),

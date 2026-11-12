@@ -249,7 +249,7 @@ void main() {
             'Synthetic family recipe',
           );
           FocusManager.instance.primaryFocus?.unfocus();
-          await tap(find.widgetWithText(FilledButton, 'Smart Import'));
+          await tap(find.byKey(const Key('smart-import-action')));
           await tap(find.text('First recipe'));
           await shot('import-review-warning');
 

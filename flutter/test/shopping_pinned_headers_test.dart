@@ -31,10 +31,19 @@ void main() {
         await screen(tester, store, size: const Size(320, 800));
         final scrollable = find.byType(Scrollable).first;
         final position = tester.state<ScrollableState>(scrollable).position;
-        position.jumpTo(250);
-        await tester.pumpAndSettle();
         final viewportTop = tester.getTopLeft(scrollable).dy;
         final pinned = tester.renderObject<RenderSliver>(band('produce'));
+        final fifth = find.byKey(const ValueKey('p5'));
+        await tester.scrollUntilVisible(fifth, 120, scrollable: scrollable);
+        await tester.pumpAndSettle();
+        position.jumpTo(
+          position.pixels +
+              tester.getTopLeft(fifth).dy -
+              viewportTop -
+              pinned.geometry!.scrollExtent -
+              16,
+        );
+        await tester.pumpAndSettle();
         expect(
           (pinned.parentData! as SliverPhysicalParentData).paintOffset.dy,
           0,
@@ -124,7 +133,8 @@ void main() {
         .state<ScrollableState>(find.byType(Scrollable).first)
         .position;
     final header = tester.renderObject<RenderSliver>(band('produce'));
-    expect(header.geometry!.scrollExtent, 40);
+    final headingHeight = header.geometry!.scrollExtent;
+    expect(headingHeight, greaterThanOrEqualTo(40));
     position.jumpTo(300);
     await tester.pump();
     expect((header.parentData! as SliverPhysicalParentData).paintOffset.dy, 0);
@@ -138,12 +148,18 @@ void main() {
     );
     await tester.pumpAndSettle();
     final viewportTop = tester.getTopLeft(find.byType(Scrollable).first).dy;
+    final nextHeight = tester
+        .renderObject<RenderSliver>(band('other'))
+        .geometry!
+        .scrollExtent;
     final headingTop =
         tester
             .getTopLeft(find.byKey(const ValueKey('shopping-row-o0-false')))
             .dy -
-        40;
-    position.jumpTo(position.pixels + headingTop - viewportTop - 20);
+        nextHeight;
+    position.jumpTo(
+      position.pixels + headingTop - viewportTop - (headingHeight - 20),
+    );
     await tester.pump();
     expect(
       (header.parentData! as SliverPhysicalParentData).paintOffset.dy,

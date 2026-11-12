@@ -1,3 +1,4 @@
+import 'page_headings.dart';
 import 'pixel_scroll.dart';
 import 'retained_screen.dart';
 import 'navigation_feedback.dart';
@@ -134,7 +135,7 @@ class SyncScreen extends StatelessWidget {
             '${status!.peers.where((peer) => peer.id == report.id).firstOrNull?.name ?? report.name}: ${report.error ?? 'Transfer could not complete.'}',
       };
       return Scaffold(
-        appBar: AppBar(title: const Text('Sync')),
+        appBar: pageHeadingBar(context, title: 'Sync'),
         body: SafeArea(
           top: false,
           child: PixelListView(
@@ -528,7 +529,7 @@ class SyncDeviceDetailsScreen extends StatelessWidget {
           .where((peer) => peer.id == deviceId)
           .firstOrNull;
       return Scaffold(
-        appBar: AppBar(title: Text(peer?.name ?? 'Device details')),
+        appBar: pageHeadingBar(context, title: peer?.name ?? 'Device details'),
         body: SafeArea(
           top: false,
           child: PixelListView(
@@ -640,7 +641,7 @@ class ConflictsScreen extends StatelessWidget {
   Widget build(BuildContext context) => VisibleListenableBuilder(
     listenable: Listenable.merge([controller, store]),
     builder: (context) => Scaffold(
-      appBar: AppBar(title: const Text('Resolve conflicts')),
+      appBar: pageHeadingBar(context, title: 'Resolve conflicts'),
       body: PixelListView(
         padding: const EdgeInsets.all(16),
         children: [

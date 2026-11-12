@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'facelift_motion.dart';
+
 /// Paint-only motion around a stable button, outside the recipe slivers.
 class RecipeActionMotion extends StatelessWidget {
   const RecipeActionMotion({
@@ -15,9 +17,11 @@ class RecipeActionMotion extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final duration = MediaQuery.disableAnimationsOf(context)
-        ? Duration.zero
-        : Duration(milliseconds: visible ? 300 : 180);
+    final duration = FaceliftMotion.duration(
+      context,
+      MotionGroup.floating,
+      fraction: visible ? 1 : .6,
+    );
     final curve = visible
         ? Easing.emphasizedDecelerate
         : Easing.emphasizedAccelerate;

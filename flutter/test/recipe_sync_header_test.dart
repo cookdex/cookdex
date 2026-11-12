@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'ingredient_section_screenshots_test.dart' show loadSectionCaptureFonts;
 import 'recipe_store_test.dart' show FakeRepository, recipe;
 
 const _statuses = [
@@ -122,6 +123,7 @@ void main() {
         testWidgets(
           '${status.label} stays top-right after long scroll at $width dp / $scale system text',
           (tester) async {
+            await loadSectionCaptureFonts(tester);
             var taps = 0;
             final scroll = await _mount(
               tester,
@@ -135,7 +137,7 @@ void main() {
             final before = tester.getRect(indicator);
             expect(before.top, greaterThanOrEqualTo(0));
             expect(before.bottom, lessThanOrEqualTo(80));
-            expect(before.right, closeTo(width - 16, 1));
+            expect(before.right, closeTo(width - 8, 1));
             expect(tester.takeException(), isNull);
 
             expect(scroll.position.maxScrollExtent, greaterThan(1000));

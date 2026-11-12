@@ -1,21 +1,36 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+import 'facelift_motion.dart';
 
 import 'retained_screen.dart';
 
 /// Declarative tab routes need the same painted surface as imperative forms.
 class OpaqueMaterialPage<T> extends MaterialPage<T> {
-  OpaqueMaterialPage({required Widget child, super.key, super.name})
-    : super(
-        child: Builder(
-          builder: (context) => ColoredBox(
-            color: Theme.of(context).scaffoldBackgroundColor,
-            child: RetainedScreen(child: SizedBox.expand(child: child)),
-          ),
-        ),
-      );
+  final bool recipeOpening;
+  OpaqueMaterialPage({
+    required Widget child,
+    super.key,
+    super.name,
+    this.recipeOpening = false,
+  }) : super(
+         child: Builder(
+           builder: (context) => ColoredBox(
+             color: Theme.of(context).scaffoldBackgroundColor,
+             child: RetainedScreen(child: SizedBox.expand(child: child)),
+           ),
+         ),
+       );
 
   @override
-  Route<T> createRoute(BuildContext context) => _OpaquePageRoute<T>(this);
+  Route<T> createRoute(BuildContext context) => _OpaquePageRoute<T>(
+    this,
+    recipeOpening
+        ? FaceliftMotion.speedOf(context, MotionGroup.recipeOpening)
+        : 1,
+    MediaQuery.disableAnimationsOf(context),
+  );
 }
 
 // A nested navigator's current route can still belong to an invisible tab or
@@ -40,7 +55,16 @@ bool _canPreview(PageRoute<dynamic> route) {
 
 class _OpaquePageRoute<T> extends PageRoute<T>
     with MaterialRouteTransitionMixin<T> {
-  _OpaquePageRoute(OpaqueMaterialPage<T> page) : super(settings: page);
+  _OpaquePageRoute(OpaqueMaterialPage<T> page, this.speed, this.reduced)
+    : super(settings: page);
+  final double speed;
+  final bool reduced;
+  @override
+  Duration get transitionDuration =>
+      reduced ? Duration.zero : super.transitionDuration * (1 / speed);
+  @override
+  Duration get reverseTransitionDuration =>
+      reduced ? Duration.zero : super.reverseTransitionDuration * (1 / speed);
   OpaqueMaterialPage<T> get _page => settings as OpaqueMaterialPage<T>;
   @override
   Widget buildContent(BuildContext context) => _page.child;
@@ -247,12 +271,14 @@ class RetainedTabTransition extends StatefulWidget {
     super.key,
     required this.index,
     required this.children,
+    this.readyToWarm = true,
     this.backProgress,
     this.backFromRight = false,
   });
 
   final int index;
   final List<Widget> children;
+  final bool readyToWarm;
   final double? backProgress;
   final bool backFromRight;
 
@@ -263,21 +289,54 @@ class RetainedTabTransition extends StatefulWidget {
 class _RetainedTabTransitionState extends State<RetainedTabTransition>
     with SingleTickerProviderStateMixin {
   late final AnimationController _animation =
-      AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 240),
-        value: 1,
-      )..addStatusListener((status) {
-        if (status == AnimationStatus.completed && _outgoing != null) {
-          setState(() => _outgoing = null);
-        }
-      });
+      AnimationController(vsync: this, duration: Duration.zero, value: 1)
+        ..addStatusListener((status) {
+          if (status == AnimationStatus.completed && _outgoing != null) {
+            setState(() => _outgoing = null);
+          }
+        });
   int? _outgoing;
+  late final _mountedTabs = <int>{widget.index};
+  Timer? _warmTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.readyToWarm) _startWarmUp();
+  }
+
+  void _startWarmUp() {
+    // Leave the first populated library frame and startup cover time to settle.
+    _warmTimer = Timer(const Duration(milliseconds: 300), () {
+      _warmNextAfterFrame();
+      WidgetsBinding.instance.ensureVisualUpdate();
+    });
+  }
+
+  void _warmNextAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (WidgetsBinding.instance.transientCallbackCount > 0) {
+        // The running animation already requested the next frame.
+        _warmNextAfterFrame();
+        return;
+      }
+      for (var i = 0; i < widget.children.length; i++) {
+        if (_mountedTabs.add(i)) {
+          setState(() {});
+          _warmNextAfterFrame();
+          break;
+        }
+      }
+    });
+  }
 
   @override
   void didUpdateWidget(RetainedTabTransition oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.readyToWarm && !oldWidget.readyToWarm) _startWarmUp();
     if (oldWidget.index != widget.index) {
+      _mountedTabs.add(widget.index);
       if (MediaQuery.disableAnimationsOf(context)) {
         _outgoing = null;
         _animation.value = 1;
@@ -291,6 +350,7 @@ class _RetainedTabTransitionState extends State<RetainedTabTransition>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _animation.duration = FaceliftMotion.duration(context, MotionGroup.tabs);
     if (MediaQuery.disableAnimationsOf(context)) {
       _outgoing = null;
       _animation.value = 1;
@@ -299,6 +359,7 @@ class _RetainedTabTransitionState extends State<RetainedTabTransition>
 
   @override
   void dispose() {
+    _warmTimer?.cancel();
     _animation.dispose();
     super.dispose();
   }
@@ -310,7 +371,7 @@ class _RetainedTabTransitionState extends State<RetainedTabTransition>
       final progress = _animation.value;
       final incoming = const Interval(
         .35,
-        1,
+        .90,
         curve: Curves.easeOutCubic,
       ).transform(progress);
       final outgoing = 1 - const Interval(0, .35).transform(progress);
@@ -322,38 +383,38 @@ class _RetainedTabTransitionState extends State<RetainedTabTransition>
         fit: StackFit.expand,
         children: [
           for (var i = 0; i < widget.children.length; i++)
-            Offstage(
-              offstage: preview != null
-                  ? i != widget.index && i != 0
-                  : i != widget.index && i != _outgoing,
-              child: TickerMode(
-                enabled: i == widget.index,
-                child: IgnorePointer(
-                  ignoring: i != widget.index || incoming < 1,
-                  child: ExcludeSemantics(
-                    excluding: i != widget.index,
-                    child: Opacity(
-                      opacity: preview != null
-                          ? 1
-                          : i == widget.index
-                          ? incoming
-                          : outgoing,
-                      child: Transform.translate(
-                        offset: i == widget.index
-                            ? Offset(
-                                (widget.backFromRight ? -1 : 1) *
-                                    28 *
-                                    previewAmount,
-                                0,
-                              )
-                            : Offset.zero,
-                        child: Transform.scale(
-                          scale: i == widget.index
-                              ? (preview != null
-                                    ? 1 - .06 * previewAmount
-                                    : .96 + .04 * incoming)
-                              : 1,
+            if (!_mountedTabs.contains(i))
+              const SizedBox.shrink()
+            else
+              Offstage(
+                offstage: preview != null
+                    ? i != widget.index && i != 0
+                    : i != widget.index && i != _outgoing,
+                child: TickerMode(
+                  enabled: i == widget.index,
+                  child: IgnorePointer(
+                    ignoring: i != widget.index,
+                    child: ExcludeSemantics(
+                      excluding: i != widget.index,
+                      child: Opacity(
+                        opacity: preview != null
+                            ? 1
+                            : i == widget.index
+                            ? incoming
+                            : outgoing,
+                        child: Transform.translate(
+                          offset: i == widget.index
+                              ? Offset(
+                                  (widget.backFromRight ? -1 : 1) *
+                                      28 *
+                                      previewAmount,
+                                  0,
+                                )
+                              : Offset.zero,
                           child: ClipRRect(
+                            clipBehavior: previewAmount == 0
+                                ? Clip.none
+                                : Clip.antiAlias,
                             borderRadius: BorderRadius.circular(
                               i == widget.index ? 24 * previewAmount : 0,
                             ),
@@ -371,7 +432,6 @@ class _RetainedTabTransitionState extends State<RetainedTabTransition>
                   ),
                 ),
               ),
-            ),
         ],
       );
     },
@@ -387,9 +447,11 @@ class ScrollAwareFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final duration = MediaQuery.disableAnimationsOf(context)
-        ? Duration.zero
-        : const Duration(milliseconds: 200);
+    final duration = FaceliftMotion.duration(
+      context,
+      MotionGroup.floating,
+      fraction: 2 / 3,
+    );
     return IgnorePointer(
       ignoring: !visible,
       child: ExcludeSemantics(

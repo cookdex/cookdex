@@ -5,6 +5,7 @@ use std::{collections::HashSet, io::Read};
 
 pub const MAX_SETUP_BYTES: usize = 4 * 1024 * 1024;
 const SETUP_ENTRY: &str = ".cookdex-shopping.json";
+const SOURCE_COMMENT: &[u8] = b"cookdex-source-v1\0";
 pub const MAX_ZIP_BYTES: usize = MAX_COLLECTION_BYTES + MAX_ITEMS * 286 + 22 + MAX_SETUP_BYTES;
 fn bad() -> Error {
     Error::InvalidZip
@@ -66,7 +67,22 @@ pub fn write_with_setup(
     validate_collection(recipes)?;
     let mut entries = recipes
         .iter()
-        .map(|r| Ok((format!("{}.json", r.id.0), r.to_json()?)))
+        .map(|r| {
+            let mut comment = Vec::new();
+            let body = if !r.content.source.is_empty()
+                && !crate::recipe::model::safe_source(&r.content.source)
+            {
+                let mut legacy = r.clone();
+                let source = std::mem::take(&mut legacy.content.source);
+                comment.extend_from_slice(SOURCE_COMMENT);
+                comment.extend_from_slice(&crc32fast::hash(source.as_bytes()).to_le_bytes());
+                comment.extend_from_slice(source.as_bytes());
+                legacy.to_json()?
+            } else {
+                r.to_json()?
+            };
+            Ok((format!("{}.json", r.id.0), body, comment))
+        })
         .collect::<Result<Vec<_>>>()?;
     if let Some(setup) = setup {
         setup.validate()?;
@@ -74,11 +90,11 @@ pub fn write_with_setup(
         if data.len() > MAX_SETUP_BYTES {
             return Err(Error::Limit);
         }
-        entries.push((SETUP_ENTRY.into(), data));
+        entries.push((SETUP_ENTRY.into(), data, Vec::new()));
     }
     let mut out = vec![];
     let mut directory = vec![];
-    for (name, data) in &entries {
+    for (name, data, comment) in &entries {
         let crc = crc32fast::hash(&data) as usize;
         let mut local = vec![0; 30];
         put32(&mut local, 0, 0x04034b50);
@@ -97,12 +113,14 @@ pub fn write_with_setup(
         put32(&mut central, 20, data.len());
         put32(&mut central, 24, data.len());
         put16(&mut central, 28, name.len());
+        put16(&mut central, 32, comment.len());
         put32(&mut central, 42, out.len());
         out.extend(local);
         out.extend(name.as_bytes());
         out.extend(data);
         directory.extend(central);
         directory.extend(name.as_bytes());
+        directory.extend_from_slice(comment);
     }
     let mut end = vec![0; 22];
     put32(&mut end, 0, 0x06054b50);
@@ -253,7 +271,16 @@ pub fn read_with_setup(
             value.validate().map_err(|_| bad())?;
             setup = Some(value);
         } else {
-            let recipe = Recipe::from_json(&data)?;
+            let mut recipe = Recipe::from_json(&data)?;
+            let start = p + 46 + n + extra;
+            if let Some(payload) = b[start..start + comment].strip_prefix(SOURCE_COMMENT) {
+                let (crc, raw) = payload.split_at_checked(4).ok_or_else(bad)?;
+                if !recipe.content.source.is_empty() || crc != crc32fast::hash(raw).to_le_bytes() {
+                    return Err(bad());
+                }
+                recipe.content.source = std::str::from_utf8(raw).map_err(|_| bad())?.to_owned();
+                recipe.validate()?;
+            }
             if recipe.id.0 != id {
                 return Err(bad());
             }

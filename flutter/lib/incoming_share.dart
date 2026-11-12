@@ -4,6 +4,32 @@ import 'package:flutter/services.dart';
 
 import 'import_controller.dart';
 import 'import_service.dart';
+import 'import_link_policy.dart';
+
+String _sharedLink(String raw, Uri uri) {
+  if (uri.scheme == 'http') {
+    // Preserve the original path, query bytes and fragment. Uri.authority
+    // drops HTTP's default port so the secure link uses its normal TLS port.
+    final end = raw.indexOf(RegExp(r'[/#?]'), 'http://'.length);
+    raw = 'https://${uri.authority}${end < 0 ? '' : raw.substring(end)}';
+  }
+  if (!uri.hasQuery || socialSite(uri) == null) return raw;
+  final start = raw.indexOf('?');
+  final fragment = raw.indexOf('#', start);
+  final end = fragment < 0 ? raw.length : fragment;
+  final parts = raw.substring(start + 1, end).split('&');
+  final retained = parts.where((part) {
+    final key = part.split('=').first.toLowerCase();
+    return key != 'si' &&
+        key != 'igsh' &&
+        key != 'igshid' &&
+        key != 'fbclid' &&
+        !key.startsWith('utm_');
+  }).toList();
+  if (retained.length == parts.length) return raw;
+  final query = retained.isEmpty ? '' : '?${retained.join('&')}';
+  return raw.substring(0, start) + query + raw.substring(end);
+}
 
 class IncomingShare {
   const IncomingShare(this.value);
@@ -38,7 +64,7 @@ class IncomingShare {
           uri.host.isNotEmpty;
       c.tab = link ? ImportTab.link : ImportTab.text;
       if (link) {
-        c.link = trimmed;
+        c.link = _sharedLink(trimmed, uri);
       } else {
         c.text = text;
       }

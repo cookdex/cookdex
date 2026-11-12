@@ -12,6 +12,10 @@ class CookdexScrollBehavior extends MaterialScrollBehavior {
   ScrollController createController() => PixelScrollController();
 }
 
+/// A picker remembers its unfiltered list, but each search gets a fresh view.
+Key searchResultsKey(String list, String query) =>
+    query.isEmpty ? PageStorageKey(list) : ValueKey((list, query));
+
 class PixelScrollController extends ScrollController {
   PixelScrollController({
     super.initialScrollOffset,

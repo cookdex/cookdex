@@ -21,7 +21,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
     expect(find.text('Checked (40)'), findsOneWidget);
     expect(find.text('Item 0'), findsNothing);
@@ -55,7 +55,7 @@ void main() {
       expect(tester.getTopLeft(input()), inputBefore);
       repo.gate!.complete();
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 80));
       expect(
         tester.getTopLeft(find.text('Flour')),
         before,
@@ -78,7 +78,7 @@ void main() {
     await tester.tap(find.text('Carrots'));
     await tester.pump();
     // Deliberately delay the first rendered animation frame, as a real device can.
-    await tester.pump(const Duration(milliseconds: 340));
+    await tester.pump(const Duration(milliseconds: 440));
     await tester.pump(const Duration(milliseconds: 160));
     expect(
       find.byKey(const ValueKey('shopping-row-a-false')),

@@ -391,11 +391,11 @@ fn protocol_gate_rejects_before_key_lookup_and_backs_off() {
         .unwrap()
         .invite
         .key = "not-a-key".into();
-    for version in [3, 5] {
+    for version in [3, 4, 6] {
         let (address, worker) = listen(&b);
         let mut socket = TcpStream::connect(address).unwrap();
         write_frame(&mut socket, format!("cookdex-sync/{version}").as_bytes()).unwrap();
-        assert_eq!(read_frame(&mut socket, 128).unwrap(), b"cookdex-sync/4");
+        assert_eq!(read_frame(&mut socket, 128).unwrap(), b"cookdex-sync/5");
         assert_eq!(
             worker.join().unwrap().unwrap_err(),
             version_message(version)
@@ -441,7 +441,7 @@ fn protocol_three_wire_refuses_new_hello_without_using_old_key() {
         // known/pending ID, then refuse an unknown value without any Noise call.
         let pair = String::from_utf8(read_frame(&mut socket, 128).unwrap()).unwrap();
         assert_ne!(pair, old_pair);
-        assert_eq!(pair, "cookdex-sync/4");
+        assert_eq!(pair, "cookdex-sync/5");
     });
     assert_eq!(
         a.exchange_at(peer, address, false).unwrap_err(),
@@ -657,8 +657,148 @@ fn old_client_is_refused_before_any_noise_key_is_selected() {
     // v3 writes pairing ID first and expects a Noise reply. v4 responds with a
     // public version marker, then closes. v3's Snow decoder returns an error.
     write_frame(&mut old, invitation.pair.as_bytes()).unwrap();
-    assert_eq!(read_frame(&mut old, 128).unwrap(), b"cookdex-sync/4");
+    assert_eq!(read_frame(&mut old, 128).unwrap(), b"cookdex-sync/5");
     assert_eq!(worker.join().unwrap().unwrap_err(), VERSION_ERROR);
     assert!(lock(&b.runtime).unwrap().pending.is_some());
     assert!(lock(&b.runtime).unwrap().config.peers.is_empty());
+}
+
+#[test]
+fn upgraded_client_stops_at_protocol_four_greeting_before_identifying() {
+    let (client, old_peer) = (service(), service());
+    let invitation = invite(&old_peer);
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    let worker = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        assert_eq!(read_frame(&mut socket, 128).unwrap(), b"cookdex-sync/5");
+        write_frame(&mut socket, b"cookdex-sync/4").unwrap();
+        assert!(read_frame(&mut socket, 128).is_err());
+    });
+    let before = recipe_rows(&client);
+    assert_eq!(
+        client.exchange_at(invitation, address, true).unwrap_err(),
+        VERSION_ERROR
+    );
+    worker.join().unwrap();
+    assert_eq!(before, recipe_rows(&client));
+}
+
+#[test]
+fn paired_protocol_four_devices_upgrade_and_exchange_without_pairing_again() {
+    let (a, b) = (service(), service());
+    pair(&a, &b);
+    seed(&a);
+    let upgrade = |s: &Service| {
+        let db = lock(&s.db).unwrap();
+        let mut saved = storage::local(&db, "syncConfig").unwrap().unwrap();
+        saved["protocol"] = json!(4);
+        saved["peers"][0]["acknowledged"] = json!("previous-version-inventory");
+        storage::put_local(&db, "syncConfig", &saved).unwrap();
+        drop(db);
+        let updated = Service::new(s.db.clone()).unwrap();
+        updated.active.store(true, Ordering::SeqCst);
+        let config = &lock(&updated.runtime).unwrap().config;
+        assert_eq!(config.peers.len(), 1);
+        assert_eq!(
+            config.peers[0].key,
+            saved["peers"][0]["key"].as_str().unwrap()
+        );
+        assert_eq!(
+            config.peers[0].pair,
+            saved["peers"][0]["pair"].as_str().unwrap()
+        );
+        assert!(config.peers[0].acknowledged.is_none());
+        updated.clone()
+    };
+    let (a, b) = (upgrade(&a), upgrade(&b));
+    let (address, worker) = listen(&b);
+    let peer = lock(&a.runtime).unwrap().config.peers[0].clone();
+    a.exchange_at(peer, address, true).unwrap();
+    worker.join().unwrap().unwrap();
+    assert_eq!(
+        storage::load(&mut lock(&a.db).unwrap())
+            .unwrap()
+            .book
+            .recipes,
+        storage::load(&mut lock(&b.db).unwrap())
+            .unwrap()
+            .book
+            .recipes
+    );
+}
+
+#[test]
+fn restored_phone_first_authenticated_sync_keeps_edits_from_the_old_and_new_phones() {
+    let (old, other, restored) = (service(), service(), service());
+    seed(&old);
+    let sync = |a: &Service, b: &Service| {
+        let id = b.identity().unwrap().id;
+        let peer = lock(&a.runtime)
+            .unwrap()
+            .config
+            .peers
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .clone();
+        let (address, worker) = listen(b);
+        a.exchange_at(peer, address, true).unwrap();
+        worker.join().unwrap().unwrap();
+    };
+    pair(&old, &other);
+    sync(&old, &other);
+    let archive = sync_store::phone_backup::encode(&mut lock(&old.db).unwrap()).unwrap();
+    sync_store::phone_backup::restore(&mut lock(&restored.db).unwrap(), &archive).unwrap();
+    assert_ne!(old.identity().unwrap().id, restored.identity().unwrap().id);
+    assert!(lock(&restored.runtime).unwrap().config.peers.is_empty());
+    for (s, name) in [
+        (&old, "old-phone-addition"),
+        (&restored, "new-phone-addition"),
+    ] {
+        let mut db = lock(&s.db).unwrap();
+        let mut snapshot = storage::load(&mut db).unwrap();
+        let mut recipe = snapshot.book.recipes[0].clone();
+        recipe["id"] = json!(name);
+        recipe["notes"] = json!(name);
+        snapshot.book.recipes.push(recipe);
+        storage::save(
+            &mut db,
+            snapshot.generation,
+            &snapshot.book,
+            "after migration",
+        )
+        .unwrap();
+    }
+    sync(&old, &other);
+    pair(&restored, &other);
+    sync(&restored, &other);
+    sync(&old, &other);
+    let expected = storage::load(&mut lock(&other.db).unwrap())
+        .unwrap()
+        .book
+        .recipes;
+    assert_eq!(
+        expected
+            .iter()
+            .filter(|r| r["id"] == "old-phone-addition" || r["id"] == "new-phone-addition")
+            .count(),
+        2
+    );
+    for s in [&old, &restored] {
+        assert_eq!(
+            storage::load(&mut lock(&s.db).unwrap())
+                .unwrap()
+                .book
+                .recipes,
+            expected
+        );
+        assert!(
+            sync_store::conflicts(&lock(&s.db).unwrap())
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
 }

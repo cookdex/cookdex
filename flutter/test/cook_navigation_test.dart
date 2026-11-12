@@ -5,8 +5,8 @@ import 'package:cookdex/ui/recipe_detail.dart';
 import 'package:cookdex/ui/theme.dart';
 import 'package:cookdex/ui/window_size.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:material_symbols_icons/symbols.dart';
 
 Recipe _recipe() => Recipe(
   id: 'cook-navigation-fixture',
@@ -79,49 +79,85 @@ Future<CookController> _mount(
 }
 
 void main() {
-  testWidgets('kitchen buttons show arrows and bounded progress through Done', (
-    tester,
-  ) async {
-    final cook = await _mount(tester, width: 600);
-    final previous = find.widgetWithText(OutlinedButton, 'Previous');
-    final next = find.widgetWithText(FilledButton, 'Next');
-    expect(tester.widget<OutlinedButton>(previous).onPressed, isNull);
-    expect(tester.widget<FilledButton>(next).onPressed, isNotNull);
-    expect(find.text('Step 1 of 13'), findsOneWidget);
-    expect(
-      find.descendant(of: previous, matching: find.byIcon(Symbols.arrow_back)),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: next, matching: find.byIcon(Symbols.arrow_forward)),
-      findsOneWidget,
-    );
-    expect(tester.getSize(previous).height, greaterThanOrEqualTo(56));
-    expect(tester.getSize(next).height, greaterThanOrEqualTo(56));
-    await tester.tap(next);
-    await tester.pumpAndSettle();
-    expect(cook.step, 1);
-    expect(find.text('Step 2 of 13'), findsOneWidget);
-    expect(tester.widget<OutlinedButton>(previous).onPressed, isNotNull);
-    await tester.tap(previous);
-    await tester.pumpAndSettle();
-    expect(cook.step, 0);
-    cook.selectStep(8);
-    await tester.pumpAndSettle();
-    expect(find.text('Step 9 of 13'), findsOneWidget);
-    cook.selectStep(12);
-    await tester.pumpAndSettle();
-    expect(find.text('Next'), findsNothing);
-    expect(find.text('Step 13 of 13'), findsOneWidget);
-    final done = find.widgetWithText(FilledButton, 'Done');
-    expect(tester.widget<FilledButton>(done).onPressed, isNotNull);
-    await tester.tap(done);
-    await tester.pumpAndSettle();
-    expect(cook.active, isFalse);
-    expect(cook.step, 12);
-    expect(cook.preferences.cookStep('cook-navigation-fixture'), 12);
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'kitchen buttons show centered progress and bounded navigation through Done',
+    (tester) async {
+      final cook = await _mount(tester, width: 600);
+      final impacts = <Object?>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'HapticFeedback.vibrate') {
+            impacts.add(call.arguments);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final previous = find.widgetWithText(FilledButton, 'Back');
+      final next = find.widgetWithText(FilledButton, 'Next');
+      expect(tester.widget<FilledButton>(previous).onPressed, isNull);
+      final backStyle = tester.widget<FilledButton>(previous).style!;
+      final colors = Theme.of(tester.element(previous)).colorScheme;
+      expect(
+        backStyle.backgroundColor!.resolve({WidgetState.disabled}),
+        isNull,
+      );
+      expect(backStyle.backgroundColor!.resolve({}), colors.primaryContainer);
+      expect(backStyle.foregroundColor!.resolve({}), colors.onPrimaryContainer);
+      expect(tester.widget<FilledButton>(next).onPressed, isNotNull);
+      expect(find.text('Step 1'), findsOneWidget);
+      expect(find.text('of 13'), findsOneWidget);
+      expect(
+        tester.getRect(find.text('of 13')).top,
+        greaterThanOrEqualTo(tester.getRect(find.text('Step 1')).bottom),
+      );
+      expect(find.bySemanticsLabel('Step 1 of 13'), findsOneWidget);
+      expect(tester.getSize(previous), tester.getSize(next));
+      final counter = tester.getCenter(find.byKey(const Key('cook-progress')));
+      expect(
+        counter.dx,
+        closeTo(
+          (tester.getCenter(previous).dx + tester.getCenter(next).dx) / 2,
+          1,
+        ),
+      );
+      expect(tester.getSize(previous).height, greaterThanOrEqualTo(54));
+      expect(tester.getSize(next).height, greaterThanOrEqualTo(54));
+      await tester.tap(next);
+      await tester.pumpAndSettle();
+      expect(cook.step, 1);
+      expect(find.text('Step 2'), findsOneWidget);
+      expect(tester.widget<FilledButton>(previous).onPressed, isNotNull);
+      await tester.tap(previous);
+      await tester.pumpAndSettle();
+      expect(cook.step, 0);
+      expect(
+        impacts.where((v) => v == 'HapticFeedbackType.lightImpact'),
+        hasLength(2),
+      );
+      cook.selectStep(8);
+      await tester.pumpAndSettle();
+      expect(find.text('Step 9'), findsOneWidget);
+      cook.selectStep(12);
+      await tester.pumpAndSettle();
+      expect(find.text('Next'), findsNothing);
+      expect(find.text('Step 13'), findsOneWidget);
+      final done = find.widgetWithText(FilledButton, 'Done');
+      expect(tester.widget<FilledButton>(done).onPressed, isNotNull);
+      await tester.tap(done);
+      await tester.pumpAndSettle();
+      expect(cook.active, isFalse);
+      expect(cook.step, 12);
+      expect(cook.preferences.cookStep('cook-navigation-fixture'), 12);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   for (final width in [390.0, 600.0, 364.0]) {
     testWidgets('Cook footer clears the gesture inset at $width dp', (
@@ -130,23 +166,25 @@ void main() {
       await _mount(tester, width: width);
       final footer = tester.getRect(find.byType(CookNavigation));
       final previous = tester.getRect(
-        find.widgetWithText(OutlinedButton, 'Previous'),
+        find.widgetWithText(FilledButton, 'Back'),
       );
       final next = tester.getRect(find.widgetWithText(FilledButton, 'Next'));
       expect(footer.bottom, 760);
       expect(previous.bottom, lessThanOrEqualTo(760 - 28));
       expect(next.bottom, lessThanOrEqualTo(760 - 28));
-      expect(previous.left, greaterThanOrEqualTo(12));
-      expect(next.right, lessThanOrEqualTo(width - 12));
+      expect(previous.left, greaterThanOrEqualTo(8));
+      expect(next.right, lessThanOrEqualTo(width - 8));
       final card = tester.getRect(find.byKey(const Key('cook-controls-card')));
-      expect(card.left, 8);
-      expect(card.right, width - 8);
+      expect(card.left, greaterThanOrEqualTo(8));
+      expect(card.center.dx, width / 2);
+      expect(card.width, lessThanOrEqualTo(width >= 600 ? 460 : 372));
+      expect(card.bottom, 760 - 28 - (width >= 600 ? 24 : 16));
       expect(card.bottom, lessThanOrEqualTo(760 - 28 - 8));
       expect(
         tester
             .widget<Material>(find.byKey(const Key('cook-controls-card')))
-            .borderRadius,
-        BorderRadius.circular(16),
+            .shape,
+        const StadiumBorder(),
       );
       expect(tester.takeException(), isNull);
     });
@@ -175,12 +213,15 @@ void main() {
           final previous = find.byKey(const Key('cook-previous'));
           final previousLabel = find.byKey(const Key('cook-previous-label'));
           final next = find.widgetWithText(FilledButton, 'Next');
-          final progress = tester.getRect(find.text('1/13'));
-          expect(progress.bottom, lessThan(tester.getRect(previous).top));
+          final progress = tester.getRect(
+            find.byKey(const Key('cook-progress')),
+          );
+          expect(progress.overlaps(tester.getRect(previous)), isFalse);
+          expect(progress.overlaps(tester.getRect(next)), isFalse);
           expect(previousLabel.hitTestable(), findsOneWidget);
           expect(next.hitTestable(), findsOneWidget);
-          expect(tester.getSize(previous).height, greaterThanOrEqualTo(56));
-          expect(tester.getSize(next).height, greaterThanOrEqualTo(56));
+          expect(tester.getSize(previous).height, greaterThanOrEqualTo(54));
+          expect(tester.getSize(next).height, greaterThanOrEqualTo(54));
           expect(tester.getRect(next).bottom, lessThanOrEqualTo(760 - 28));
           final previousText = tester.widget<Text>(previousLabel);
           expect(previousText.maxLines, 1);
@@ -221,24 +262,22 @@ void main() {
     tester,
   ) async {
     await _mount(tester, recipeScale: 1);
-    final original = tester.getSize(find.text('Previous'));
+    final original = tester.getSize(find.text('Back'));
     await _mount(tester, recipeScale: 1.3);
-    expect(tester.getSize(find.text('Previous')), original);
-    final context = tester.element(find.text('Previous'));
+    expect(tester.getSize(find.text('Back')), original);
+    final context = tester.element(find.text('Back'));
     expect(MediaQuery.textScalerOf(context).scale(16), 16);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('counter shortens before buttons leave a single row', (
+  testWidgets('counter stays centered between equal-width controls', (
     tester,
   ) async {
     await _mount(tester, width: 460);
-    expect(find.text('1/13'), findsOneWidget);
-    final previous = tester.getRect(
-      find.widgetWithText(OutlinedButton, 'Previous'),
-    );
+    expect(find.text('Step 1'), findsOneWidget);
+    final previous = tester.getRect(find.widgetWithText(FilledButton, 'Back'));
     final next = tester.getRect(find.widgetWithText(FilledButton, 'Next'));
-    final counter = tester.getRect(find.text('1/13'));
+    final counter = tester.getRect(find.byKey(const Key('cook-progress')));
     expect(previous.top, next.top);
     expect(counter.center.dy, closeTo(previous.center.dy, 1));
     expect(tester.takeException(), isNull);

@@ -49,6 +49,11 @@ void main() {
     final cook = CookController(preferences: prefs, setWake: (_) async {});
     cook.setRecipe(recipe('a'));
     cook.toggle();
+    expect(cook.resumedStepOnEntry, isFalse);
+    cook.toggle();
+    cook.toggle();
+    expect(cook.resumedStepOnEntry, isTrue);
+    expect(cook.step, 0);
     cook.selectStep(99);
     expect(cook.step, 1);
     expect(cook.canNext, false);

@@ -183,7 +183,7 @@ fn hyphenated_mixed_numbers_have_precedence_only_for_proper_fractional_parts() {
     );
 }
 #[test]
-fn save_cleanup_recovery_is_conservative_and_idempotent() {
+fn editor_save_recovers_legacy_ranges_conservatively_and_idempotently() {
     for (prep, unit, expected, remaining) in [
         ("6–7 cloves; minced", "", "6–7", "minced"),
         ("1/2 to 1 cups", "", "1/2–1", ""),

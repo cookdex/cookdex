@@ -175,31 +175,56 @@ fn merge_weights(measures: &mut Vec<Measure>, incoming: &Measure) -> Result<bool
     });
     Ok(true)
 }
-fn add_row(items: &mut Vec<Item>, row: &Ingredient, source: &RecipeId) -> Result<()> {
-    let incoming = Measure {
-        amount: row.amount,
-        unit: crate::recipe::units::normalize(&row.unit),
-    };
-    let match_index = if row.amount.bounds().is_some() {
-        items.iter().position(|item| {
-            normalize_name(&item.name) == normalize_name(&row.name)
-                && item.measures.iter().all(|m| {
-                    let existing = crate::recipe::units::package_key(&m.unit);
-                    let incoming = crate::recipe::units::package_key(&row.unit);
-                    (existing.is_none() && incoming.is_none()) || existing == incoming
-                })
-                && item
-                    .measures
+/// Ideas supply a shopping name only. A recipe contributes an actual measure
+/// and source. Both choose a row here before the service assigns its aisle.
+fn add_row(
+    items: &mut Vec<Item>,
+    name: &str,
+    recipe_row: Option<(&Ingredient, &RecipeId)>,
+) -> Result<()> {
+    let original_unit = recipe_row.map_or("", |(row, _)| row.unit.as_str());
+    let contribution = recipe_row.map(|(row, source)| {
+        (
+            Measure {
+                amount: row.amount,
+                unit: crate::recipe::units::normalize(&row.unit),
+            },
+            source,
+        )
+    });
+    let key = normalize_name(name);
+    if key.is_empty() || name.encode_utf16().count() > 20_000 {
+        return Err(Error::InvalidData);
+    }
+    let mut matches = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| normalize_name(&item.name) == key);
+    let matched = match &contribution {
+        Some((incoming, _)) if incoming.amount.bounds().is_some() => {
+            let package = crate::recipe::units::package_key(original_unit);
+            matches.find(|(_, item)| {
+                item.measures
                     .first()
                     .is_some_and(|m| m.amount.bounds().is_some())
-        })
-    } else {
-        None
-    };
-    if let Some(index) = match_index {
+                    && item
+                        .measures
+                        .iter()
+                        .all(|m| crate::recipe::units::package_key(&m.unit) == package)
+            })
+        }
+        Some(_) => None,
+        None => matches.min_by_key(|(_, item)| item.checked),
+    }
+    .map(|(index, _)| index);
+    if let Some(index) = matched {
         let item = &mut items[index];
-        let (lower, upper) = row.amount.bounds().expect("numeric amount");
-        let (family, from) = unit(&row.unit);
+        item.checked = false;
+        let Some((incoming, source)) = contribution else {
+            return Ok(());
+        };
+        let (lower, upper) = incoming.amount.bounds().expect("numeric amount");
+        let (family, from) = unit(original_unit);
         let mut merged = merge_weights(&mut item.measures, &incoming)?;
         for measure in &mut item.measures {
             if merged {
@@ -211,7 +236,7 @@ fn add_row(items: &mut Vec<Item>, row: &Ingredient, source: &RecipeId) -> Result
                     let sum_lower = old_lower.checked_add(lower.convert(from, to)?)?;
                     let sum_upper = old_upper.checked_add(upper.convert(from, to)?)?;
                     if family.starts_with("literal:")
-                        || normalize_name(&measure.unit) == normalize_name(&row.unit)
+                        || normalize_name(&measure.unit) == normalize_name(original_unit)
                         || ([1, 2, 3, 4, 8].contains(&sum_lower.denominator())
                             && [1, 2, 3, 4, 8].contains(&sum_upper.denominator()))
                     {
@@ -231,13 +256,16 @@ fn add_row(items: &mut Vec<Item>, row: &Ingredient, source: &RecipeId) -> Result
                 item.contributor_scales.push(String::new());
             }
         }
-        item.checked = false;
     } else {
+        let (measures, contributors) = match contribution {
+            Some((measure, source)) => (vec![measure], vec![source.clone()]),
+            None => (Vec::new(), Vec::new()),
+        };
         items.push(Item {
             id: uuid::Uuid::new_v4().to_string(),
-            name: row.name.clone(),
-            measures: vec![incoming],
-            contributors: vec![source.clone()],
+            name: name.into(),
+            measures,
+            contributors,
             contributor_scales: vec![],
             checked: false,
             category_id: String::new(),
@@ -261,11 +289,22 @@ pub fn add(existing: &[Item], recipe: &Recipe, indices: &[u32]) -> Result<Vec<It
             .get(index as usize)
             .ok_or(Error::InvalidData)?;
         if !crate::shopping_categories::recipe_omitted(&row.name) {
-            add_row(&mut result, row, &recipe.id)?;
+            add_row(&mut result, &row.name, Some((row, &recipe.id)))?;
         }
     }
     validate(&result)?;
     Ok(result)
+}
+
+/// The longest supported batch is a mood-only idea with ten purchases.
+pub(crate) fn add_idea_items(items: &mut Vec<Item>, names: &[String]) -> Result<()> {
+    if names.is_empty() || names.len() > 10 {
+        return Err(Error::InvalidData);
+    }
+    for name in names {
+        add_row(items, name.trim(), None)?;
+    }
+    Ok(())
 }
 
 /// Scale selected rows in memory, retaining local multiplier provenance.

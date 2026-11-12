@@ -11,7 +11,6 @@ import 'package:cookdex/ui/sync_screen.dart';
 import 'package:cookdex/local_preferences.dart';
 import 'package:cookdex/recipe_store.dart';
 import 'package:cookdex/ui/app.dart';
-import 'package:cookdex/ui/components.dart';
 import 'package:cookdex/ui/library_screen.dart';
 import 'package:cookdex/ui/recipe_editor.dart';
 import 'package:cookdex/ui/pixel_scroll.dart';
@@ -376,13 +375,13 @@ void main() {
           ),
         );
         if (large) await capture('import-key-keyboard-large');
-        await tester.ensureVisible(
-          find.ancestor(
-            of: find.byType(TextField).last,
-            matching: find.byType(DialogFieldPadding),
-          ),
-        );
-        await keyboard('Model');
+        FocusManager.instance.primaryFocus?.unfocus();
+        tester.view.resetViewInsets();
+        await tester.pumpAndSettle();
+        await reveal(tester, find.text('Advanced'));
+        await tap('Advanced');
+        await tester.ensureVisible(find.byType(TextField).last);
+        await keyboard('Custom model ID');
         if (large) await capture('import-model-keyboard-large');
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pumpAndSettle();

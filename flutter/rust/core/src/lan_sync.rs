@@ -28,7 +28,7 @@ const DOMAIN: &str = if cfg!(feature = "production-sync") {
     "cookdex-flutter-development/1"
 };
 const MAX: usize = 96 * 1024 * 1024;
-const VERSION: u32 = 4;
+const VERSION: u32 = sync_store::VERSION;
 const VERSION_ERROR: &str = "Update cookdex on the other device to keep syncing.";
 const NEWER_VERSION_ERROR: &str = "This device needs an update to keep syncing.";
 const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -591,9 +591,16 @@ impl Service {
                 return Err(NEWER_VERSION_ERROR.into());
             }
             if config.protocol != VERSION {
-                config.re_pair_required |= !config.peers.is_empty();
-                config.peers.clear();
-                config.staged.clear();
+                if config.protocol < 4 {
+                    config.re_pair_required |= !config.peers.is_empty();
+                    config.peers.clear();
+                    config.staged.clear();
+                } else {
+                    // Protocol 5 changes the recipe validator, not the pairing credentials.
+                    for peer in &mut config.peers {
+                        peer.acknowledged = None;
+                    }
+                }
                 config.protocol = VERSION;
                 // One atomic local-row replacement. No recipe/history/schema writes.
                 storage::put_local(

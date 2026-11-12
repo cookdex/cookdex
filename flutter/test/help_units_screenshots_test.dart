@@ -249,7 +249,10 @@ void main() {
           final bullets = helpSections
               .firstWhere((s) => s.id == 'adding')
               .paragraphs;
-          await show(find.byKey(ValueKey('help-paragraph-${bullets[1]}')));
+          final amounts = bullets.singleWhere(
+            (text) => text.startsWith('• Amounts'),
+          );
+          await show(find.byKey(ValueKey('help-paragraph-$amounts')));
           await capture('help-bullets');
           await tap(find.text('Adding and editing recipes'));
           await tap(find.text('Problems and feedback'));

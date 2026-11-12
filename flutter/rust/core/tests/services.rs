@@ -729,6 +729,35 @@ fn targeted_writes_preserve_unrelated_rows_and_previous_save() {
 }
 
 #[test]
+fn failed_shopping_commit_keeps_cached_view_and_retries_in_order() {
+    let root = Root::new();
+    let s = Service::open(&root).unwrap();
+    let seeded = seed(&s);
+    let db = rusqlite::Connection::open(root.0.join("flutter-v1/cookdex.sqlite3")).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER fail_shop BEFORE UPDATE ON state BEGIN SELECT RAISE(ABORT,'stop'); END;",
+    )
+    .unwrap();
+    let before = s.snapshot().unwrap();
+    let add = || ShoppingEdit::AddManual {
+        text: "Lemon".into(),
+    };
+    assert!(s.edit_shopping(before.generation, add(), &op()).is_err());
+    assert_eq!(s.snapshot().unwrap(), before);
+    db.execute_batch("DROP TRIGGER fail_shop").unwrap();
+    let saved = s.edit_shopping(before.generation, add(), &op()).unwrap();
+    assert_eq!(saved.snapshot.generation, before.generation + 1);
+    assert_eq!(saved.snapshot.summaries, seeded.summaries);
+    assert!(s.edit_shopping(before.generation, add(), &op()).is_err());
+    assert_eq!(s.snapshot().unwrap(), saved.snapshot);
+    let undone = s
+        .undo_shopping(saved.snapshot.generation, &saved.undo, &op())
+        .unwrap();
+    assert_eq!(undone.shopping, before.shopping);
+    assert_eq!(s.snapshot().unwrap(), undone);
+}
+
+#[test]
 fn cancellation_staleness_validation_and_database_failure_are_atomic() {
     let root = Root::new();
     let s = Service::open(&root).unwrap();
@@ -1087,15 +1116,53 @@ fn reviewed_tags_keep_spelling_without_rewriting_restored_recipes() {
 }
 
 #[test]
-fn remote_url_tool_is_rejected_and_downloaded_text_uses_no_tools() {
+fn url_tool_is_limited_to_checked_public_links_and_downloaded_text_uses_no_tools() {
     let mut request = input();
     request.mode = provider::Mode::UrlRecipe;
-    for url in ["http://example.com/recipe", "https://example.com/recipe"] {
+    for url in [
+        "http://example.com/recipe",
+        "https://127.0.0.1/r",
+        "https://localhost/r",
+        "https://router.local/r",
+        "https://[::1]/",
+    ] {
         request.source = url.into();
         assert_eq!(
             provider::request(&request, "test-model", false),
             Err(Error::Validation)
         );
+    }
+    request.source = "https://example.com/recipe".into();
+    let body: serde_json::Value =
+        serde_json::from_slice(&provider::request(&request, "test-model", false).unwrap()).unwrap();
+    assert_eq!(body["tools"], serde_json::json!([{"type":"url_context"}]));
+    for (url, status, accepted) in [
+        ("https://example.com/recipe", "success", true),
+        ("https://example.com/other", "success", false),
+        ("https://example.com/recipe", "paywall", false),
+    ] {
+        let envelope = serde_json::json!({"steps":[{"type":"url_context_result","result":[{"url":url,"status":status}]}]});
+        assert_eq!(
+            provider::verify_url_response(&serde_json::to_vec(&envelope).unwrap(), &request)
+                .is_ok(),
+            accepted
+        );
+    }
+    assert!(provider::verify_url_response(b"{}", &request).is_err());
+    let target = &request.source;
+    let success = serde_json::json!({"type":"url_context_result","result":[{"url":target,"status":"success"}]});
+    for other in [
+        serde_json::json!({"type":"url_context_call","arguments":{"urls":[target,"https://example.org/other"]}}),
+        serde_json::json!({"type":"url_context_result","result":[{"url":"https://example.org/other","status":"success"}]}),
+    ] {
+        let mixed = serde_json::json!({"steps":[success,other]});
+        assert!(
+            provider::verify_url_response(&serde_json::to_vec(&mixed).unwrap(), &request).is_err()
+        );
+    }
+    for address in ["https://8.8.8.8/r", "https://[2606:4700:4700::1111]/r"] {
+        request.source = address.to_owned();
+        assert!(provider::request(&request, "test-model", false).is_ok());
     }
     request.mode = provider::Mode::Recipe;
     request.text = "Securely downloaded recipe text".into();
@@ -1111,7 +1178,7 @@ fn remote_url_tool_is_rejected_and_downloaded_text_uses_no_tools() {
 }
 
 #[test]
-fn ai_review_policy_filters_tags_and_keeps_guess_markers_outside_recipe() {
+fn ai_review_supplies_library_spelling_and_keeps_guess_markers_outside_recipe() {
     let mut input = input();
     input.existing_tags = vec!["Family Favorite".into()];
     let body: serde_json::Value =
@@ -1119,10 +1186,10 @@ fn ai_review_policy_filters_tags_and_keeps_guess_markers_outside_recipe() {
     let context: serde_json::Value =
         serde_json::from_str(body["input"][0]["text"].as_str().unwrap()).unwrap();
     assert!(
-        context["allowedTags"]
+        context["existingTags"]
             .as_array()
             .unwrap()
-            .contains(&serde_json::json!("family favorite"))
+            .contains(&serde_json::json!("Family Favorite"))
     );
     assert!(
         body["system_instruction"]
@@ -1134,7 +1201,7 @@ fn ai_review_policy_filters_tags_and_keeps_guess_markers_outside_recipe() {
         body["system_instruction"]
             .as_str()
             .unwrap()
-            .contains("reasonably confident")
+            .contains("two to four relevant")
     );
     let mut source = written();
     source["servings"] = serde_json::json!("4");
@@ -1153,7 +1220,16 @@ fn ai_review_policy_filters_tags_and_keeps_guess_markers_outside_recipe() {
     let provider::Output::Recipe(mut recipe) =
         provider::response(&bytes, &provider::Mode::Recipe).unwrap();
     let review = provider::review_response(&bytes, &input, &mut recipe).unwrap();
-    assert_eq!(recipe.content.tags, ["family favorite", "soup", "quick"]);
+    assert_eq!(
+        recipe.content.tags,
+        [
+            "new invented tag",
+            "family favorite",
+            "soup",
+            "quick",
+            "dinner"
+        ]
+    );
     assert_eq!(review.ai_guessed_fields, ["servings", "tags", "totalTime"]);
     assert_eq!(review.ai_guessed_steps, [0, 1]);
     let mut source = written();
@@ -1322,27 +1398,19 @@ fn a1_service_migrates_views_without_rewriting_legacy_history_or_unchanged_resto
     assert_eq!(loaded.len(), book.recipes.len());
     assert!(loaded.iter().all(|r| book.recipes.contains(r)));
     drop(db);
-    let cleanup = service.preview_cleanup().unwrap();
-    assert_eq!(cleanup.changed, 1);
-    service.cleanup(&cleanup, &op()).unwrap();
+    let base = service.detail(&first.id).unwrap().unwrap();
+    let edited = base.content.parse_editor(&[None]).unwrap();
+    let generation = service.snapshot().unwrap().generation;
+    service.save(generation, Some(base), edited, &op()).unwrap();
     let fixed = service.detail(&first.id).unwrap().unwrap();
     assert_eq!(fixed.content.ingredients[0].amount.text(), "6–7");
     assert_eq!(fixed.content.ingredients[0].unit, "clove");
     assert_eq!(fixed.content.ingredients[0].prep_note, "minced");
     assert_eq!(fixed.revision, first.revision + 1);
-    assert_eq!(service.preview_cleanup().unwrap().changed, 0);
     let db = storage::open(&path).unwrap();
     let after = sync_store::export(&db).unwrap();
     assert_eq!(after.events.len(), before.events.len() + 1);
     assert!(before.events.iter().all(|e| after.events.contains(e)));
-    assert_eq!(
-        after
-            .events
-            .iter()
-            .filter(|e| e.recipe_id == second.id.0)
-            .count(),
-        1
-    );
     drop(db);
     let base = service.detail(&second.id).unwrap().unwrap();
     let mut edited = base.content.clone();

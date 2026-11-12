@@ -1693,7 +1693,7 @@ void main() {
     await editor(tester, c, size: const Size(320, 780), scale: 1.5);
     await reveal(tester, field('Ingredient'));
     expect(tester.takeException(), isNull);
-    await reveal(tester, field('Source link'));
+    await reveal(tester, field('Source'));
     expect(tester.takeException(), isNull);
     tester.view.physicalSize = const Size(1200, 900);
     await tester.pumpAndSettle();

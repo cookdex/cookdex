@@ -36,6 +36,7 @@ class RecipeTopButton extends StatelessWidget {
             key: const Key('recipe-top-button'),
             onPressed: onPressed,
             style: ButtonStyle(
+              shape: const WidgetStatePropertyAll(StadiumBorder()),
               minimumSize: const WidgetStatePropertyAll(Size(0, 48)),
               padding: const WidgetStatePropertyAll(
                 EdgeInsets.symmetric(horizontal: 16),

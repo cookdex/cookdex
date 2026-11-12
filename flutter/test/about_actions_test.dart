@@ -62,12 +62,12 @@ void main() {
           matching: find.byType(Scrollable),
         );
         Future<void> tap(String label) async {
-          await tester.scrollUntilVisible(
-            find.text(label),
-            200,
-            scrollable: scrollable,
-          );
-          await tester.tap(find.text(label));
+          final target = find.text(label);
+          await tester.scrollUntilVisible(target, 200, scrollable: scrollable);
+          await tester.pumpAndSettle();
+          await Scrollable.ensureVisible(tester.element(target), alignment: .5);
+          await tester.pumpAndSettle();
+          await tester.tap(target.hitTestable());
           await tester.pumpAndSettle();
         }
 

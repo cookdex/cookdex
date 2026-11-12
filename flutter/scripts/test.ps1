@@ -1,7 +1,18 @@
-param([switch]$SkipWindowsNative)
+param([switch]$SkipWindowsNative,[switch]$InMemoryJob)
 . "$PSScriptRoot/env.ps1"
+if (-not $InMemoryJob) {
+    $out = Join-Path $cookdexRoot 'artifacts/test-memory'
+    New-Item -ItemType Directory -Force $out | Out-Null
+    $log = Join-Path $out ("flutter-" + (Get-Date -Format yyyyMMdd-HHmmssfff) + ".json")
+    $extra = if ($SkipWindowsNative) { @('-SkipWindowsNative') } else { @() }
+    & python "$PSScriptRoot/guard_test_memory.py" --log $log -- (Get-Process -Id $PID).Path -NoProfile -File $PSCommandPath -InMemoryJob @extra
+    if ($LASTEXITCODE -ne 0) { throw "Test job stopped; inspect $log and the test output." }
+    return
+}
 & "$PSScriptRoot/test_env.ps1"
-& "$PSScriptRoot/test_profile_adb.ps1"
+if (Test-Path -LiteralPath "$PSScriptRoot/profile-app.ps1") {
+    & "$PSScriptRoot/test_profile_adb.ps1"
+}
 if (Test-Path (Join-Path $cookdexRoot 'scripts/test-maintenance.ps1')) {
     & (Join-Path $cookdexRoot 'scripts/test-maintenance.ps1')
 }
@@ -16,7 +27,7 @@ try {
     Assert-FlutterExit
     flutter analyze
     Assert-FlutterExit
-    flutter test test
+    flutter test --concurrency=1 test
     Assert-FlutterExit
     if ($SkipWindowsNative) { return }
     cargo build --manifest-path rust/Cargo.toml --release --locked --offline -p cookdex-core-probe -p cookdex-bridge

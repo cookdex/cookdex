@@ -1,3 +1,4 @@
+import 'page_headings.dart';
 import 'pixel_scroll.dart';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,14 @@ import '../src/rust/api.dart';
 import '../recipe_store.dart';
 import '../export_service.dart';
 import 'feedback.dart';
+import 'facelift_motion.dart';
+import 'facelift_tokens.dart';
+import 'recipe_metadata.dart';
+import 'facelift_sheet_tiles.dart';
+
+export 'facelift_sheet_tiles.dart';
+
+part 'recipe_action_sheets.dart';
 
 /// Future editor/import routes use this shell; fields never request focus here.
 /// A pushed route covers the tab shell and returns to its exact origin on Back.
@@ -17,10 +26,14 @@ class CookdexFormScaffold extends StatelessWidget {
     required this.title,
     required this.child,
     this.onSave,
+    this.bottomNavigationBar,
+    this.actions = const [],
   });
   final String title;
   final Widget child;
   final VoidCallback? onSave;
+  final Widget? bottomNavigationBar;
+  final List<Widget> actions;
   @override
   Widget build(BuildContext context) => Shortcuts(
     shortcuts: const {
@@ -36,19 +49,22 @@ class CookdexFormScaffold extends StatelessWidget {
         ),
       },
       child: Scaffold(
-        appBar: AppBar(
+        appBar: pageHeadingBar(
+          context,
           leading: IconButton(
             icon: const Icon(Symbols.arrow_back),
             tooltip: 'Back',
             onPressed: () => Navigator.of(context).maybePop(),
           ),
-          title: Text(title),
+          title: title,
           actions: [
+            ...actions,
             if (onSave != null)
               TextButton(onPressed: onSave, child: const Text('Save')),
           ],
         ),
         body: SafeArea(top: false, child: child),
+        bottomNavigationBar: bottomNavigationBar,
       ),
     ),
   );
@@ -62,7 +78,7 @@ class TonalTag extends StatelessWidget {
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(FaceliftTokens.tagRadius),
     ),
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -75,49 +91,100 @@ class TonalTag extends StatelessWidget {
   );
 }
 
-Future<T?> showCookdexSheet<T>(BuildContext context, {required Widget child}) =>
-    showModalBottomSheet<T>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      constraints: const BoxConstraints(maxWidth: 560),
-      requestFocus: true,
-      sheetAnimationStyle: MediaQuery.disableAnimationsOf(context)
-          ? AnimationStyle.noAnimation
-          : null,
-      builder: (sheetContext) => Shortcuts(
-        shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+Future<T?> showCookdexSheet<T>(
+  BuildContext context, {
+  required Widget child,
+  Color? backgroundColor,
+  bool useRootNavigator = false,
+}) {
+  final duration = FaceliftMotion.duration(context, MotionGroup.sheets);
+  return showModalBottomSheet<T>(
+    context: context,
+    backgroundColor: backgroundColor,
+    useRootNavigator: useRootNavigator,
+    isScrollControlled: true,
+    useSafeArea: true,
+    showDragHandle: false,
+    constraints: const BoxConstraints(maxWidth: 560),
+    requestFocus: true,
+    sheetAnimationStyle: AnimationStyle(
+      duration: duration,
+      reverseDuration: duration,
+    ),
+    builder: (sheetContext) => Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+      },
+      child: Actions(
+        actions: {
+          DismissIntent: CallbackAction<DismissIntent>(
+            onInvoke: (_) {
+              Navigator.of(sheetContext).pop();
+              return null;
+            },
+          ),
         },
-        child: Actions(
-          actions: {
-            DismissIntent: CallbackAction<DismissIntent>(
-              onInvoke: (_) {
-                Navigator.of(sheetContext).pop();
-                return null;
-              },
+        child: FocusTraversalGroup(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * .85,
             ),
-          },
-          child: FocusTraversalGroup(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(sheetContext).height * .85,
-              ),
-              child: SafeArea(
-                top: false,
-                child: PixelSingleChildScrollView(
-                  padding: EdgeInsets.only(
-                    bottom: MediaQuery.viewInsetsOf(sheetContext).bottom + 12,
+            child: SafeArea(
+              top: false,
+              child: Stack(
+                children: [
+                  Padding(
+                    padding: EdgeInsets.only(
+                      top: FaceliftTokens.sheetHeadingInset,
+                      bottom:
+                          MediaQuery.viewInsetsOf(sheetContext).bottom +
+                          FaceliftTokens.sheetBottom,
+                    ),
+                    child: PixelSingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: FaceliftTokens.sheetSide,
+                      ),
+                      child: child,
+                    ),
                   ),
-                  child: child,
-                ),
+                  Align(
+                    alignment: Alignment.topCenter,
+                    heightFactor: 1,
+                    child: Semantics(
+                      button: true,
+                      label: MaterialLocalizations.of(sheetContext)
+                          .modalBarrierDismissLabel,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => Navigator.pop(sheetContext),
+                        child: SizedBox.square(
+                          dimension: kMinInteractiveDimension,
+                          child: Align(
+                            alignment: const Alignment(0, -.45),
+                            child: Container(
+                              width: 32,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: Theme.of(sheetContext)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
         ),
       ),
-    );
+    ),
+  );
+}
 
 void showDeferred(BuildContext context, String feature) {
   showFeedback(context, '$feature is coming in a later migration chunk.');
@@ -185,33 +252,73 @@ Future<ExportAction?> showShareOptions(
   required bool isAndroid,
 }) => showCookdexSheet<ExportAction>(
   context,
+  backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
   child: Builder(
     builder: (sheetContext) {
-      Widget option(ExportAction action, String label, IconData icon) =>
-          ListTile(
-            leading: Icon(icon),
-            title: Text(label),
-            minVerticalPadding: 12,
-            onTap: () => Navigator.of(sheetContext).pop(action),
-          );
+      const groups = [
+        (
+          'Recipe file',
+          'Best for other cookdex users. Open the .txt file with cookdex.',
+          [
+            (
+              ExportAction.shareFile,
+              'Send as .txt file',
+              'Attach a recipe file to a message',
+              Symbols.attach_file,
+            ),
+            (
+              ExportAction.save,
+              'Save .txt file',
+              'Choose where to save the recipe file',
+              Symbols.download,
+            ),
+          ],
+        ),
+        (
+          'Plain text',
+          'For anyone without cookdex, or to paste the whole recipe.',
+          [
+            (
+              ExportAction.share,
+              'Send as message',
+              'Share recipe text in another app',
+              Symbols.chat,
+            ),
+            (
+              ExportAction.copy,
+              'Copy text',
+              'Copy the recipe to your clipboard',
+              Symbols.content_copy,
+            ),
+          ],
+        ),
+      ];
       return Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(
-              'Share',
-              style: Theme.of(context).textTheme.titleMedium,
+          Text('Share', style: FaceliftTokens.sheetTitle(context)),
+          for (final group in groups) ...[
+            const SizedBox(height: 16),
+            Semantics(
+              header: true,
+              child: Text(
+                group.$1,
+                style: FaceliftTokens.categoryTitle(context),
+              ),
             ),
-          ),
-          option(ExportAction.share, 'Send as message', Symbols.chat),
-          option(
-            ExportAction.shareFile,
-            'Send as .txt file',
-            Symbols.attach_file,
-          ),
-          option(ExportAction.copy, 'Copy text', Symbols.content_copy),
-          option(ExportAction.save, 'Save .txt file', Symbols.download),
+            const SizedBox(height: 2),
+            Text(group.$2, style: FaceliftTokens.tileSubtitle(context)),
+            for (final choice in group.$3) ...[
+              const SizedBox(height: FaceliftTokens.tileGap),
+              FaceliftSheetTile(
+                title: choice.$2,
+                subtitle: choice.$3,
+                icon: choice.$4,
+                onTap: () => Navigator.of(sheetContext).pop(choice.$1),
+              ),
+            ],
+          ],
         ],
       );
     },
@@ -228,66 +335,11 @@ Future<void> showRecipeActions({
 }) async {
   final choice = await showCookdexSheet<String>(
     context,
-    child: Builder(
-      builder: (sheetContext) {
-        Widget item(
-          String key,
-          String title,
-          IconData icon, {
-          bool destructive = false,
-        }) => ListTile(
-          leading: Icon(
-            icon,
-            color: destructive ? Theme.of(context).colorScheme.error : null,
-          ),
-          title: Text(
-            title,
-            style: destructive
-                ? TextStyle(color: Theme.of(context).colorScheme.error)
-                : null,
-          ),
-          onTap: () => Navigator.of(sheetContext).pop(key),
-          minVerticalPadding: 12,
-        );
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                recipe.title,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            item('select', 'Select', Symbols.check_box),
-            item('edit', 'Edit', Symbols.edit),
-            item('share', 'Share', Symbols.share),
-            item('shopping', 'Add to shopping list', Symbols.shopping_cart),
-            item(
-              'favorite',
-              recipe.favorite ? 'Unfavorite' : 'Favorite',
-              recipe.favorite ? Symbols.star : Symbols.star_outline,
-            ),
-            item('delete', 'Delete', Symbols.delete, destructive: true),
-          ],
-        );
-      },
-    ),
+    backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+    child: _RecipeActionChoices(recipe: recipe, store: store),
   );
   if (choice == null || !context.mounted) return;
-  if (choice == 'favorite') {
-    try {
-      await store.toggleFavorite(recipe.id);
-    } catch (_) {
-      if (context.mounted) {
-        showFeedback(
-          context,
-          'Could not update favorite.',
-          kind: FeedbackKind.error,
-        );
-      }
-    }
-  } else if (choice == 'delete') {
+  if (choice == 'delete') {
     if (!await confirmCookdex(
       context,
       title: 'Delete this recipe?',

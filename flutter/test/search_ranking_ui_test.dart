@@ -10,9 +10,9 @@ import 'package:cookdex/ui/recipes_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'final_pass_screenshots_test.dart' show ScreenshotPlatform;
 import 'import_test.dart' show ShellPlatform, ImportFakeService;
 import 'ingredient_section_screenshots_test.dart' show loadSectionCaptureFonts;
 import 'recipe_store_test.dart' show FakeRepository;
@@ -51,6 +51,17 @@ void main() {
           );
           final label = find.byKey(const Key('partial-matches'));
           expect(label, findsOneWidget);
+          expect(tester.widget<Text>(label).data, 'Partial matches');
+          expect(
+            find.ancestor(
+              of: label,
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is Semantics && widget.properties.header == true,
+              ),
+            ),
+            findsOneWidget,
+          );
           final before = tester.getRect(label);
           final full = tester.getRect(find.byKey(const ValueKey('a')));
           final partial = tester.getRect(find.byKey(const ValueKey('b')));
@@ -78,6 +89,28 @@ void main() {
           prefs.setQuery('lemon herbs');
           await tester.pumpAndSettle();
           expect(label, findsNothing);
+          prefs.setQuery('chicken saffron');
+          final semantics = tester.ensureSemantics();
+          try {
+            await tester.pumpAndSettle();
+            const explanation =
+                'No recipes match every word.\nThese match some of them.';
+            expect(tester.widget<Text>(label).data, explanation);
+            final heading = tester.getSemantics(label).getSemanticsData();
+            expect(heading.flagsCollection.isHeader, isTrue);
+            expect(heading.label, explanation);
+          } finally {
+            semantics.dispose();
+          }
+          expect(
+            tester.getRect(label).bottom,
+            lessThanOrEqualTo(
+              tester.getRect(find.byKey(const ValueKey('a'))).top,
+            ),
+          );
+          prefs.setQuery('saffron persimmon');
+          await tester.pumpAndSettle();
+          expect(label, findsNothing);
           expect(tester.takeException(), isNull);
           await tester.pumpWidget(const SizedBox.shrink());
           store.dispose();
@@ -87,19 +120,15 @@ void main() {
       );
     }
   }
+  final discovery =
+      Platform.environment['SMART_CREATE_DISCOVERY_SCREENS'] == '1';
+  final shareFixes =
+      Platform.environment['SMART_CREATE_SHARE_FIXES_SCREENS'] == '1';
+  final partialOnly = discovery || shareFixes;
+  final skipGallery =
+      !partialOnly && Platform.environment['SEARCH_RANKING_SCREENSHOTS'] != '1';
   testWidgets('search ranking real-font host states', (tester) async {
     await loadSectionCaptureFonts(tester);
-    await tester.runAsync(() async {
-      final font = FontLoader('Segoe UI');
-      for (final name in ['segoeui.ttf', 'segoeuib.ttf']) {
-        font.addFont(
-          File('${Platform.environment['WINDIR']}/Fonts/$name')
-              .readAsBytes()
-              .then(ByteData.sublistView),
-        );
-      }
-      await font.load();
-    });
     debugDisableShadows = false;
     addTearDown(() => debugDisableShadows = true);
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
@@ -107,21 +136,22 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    const output = '../artifacts/search-ranking/screenshots';
+    final output = shareFixes
+        ? '../artifacts/smart-create-share-fixes/screens'
+        : discovery
+        ? '../artifacts/smart-create-discovery/screens'
+        : '../artifacts/search-1.10.2/screenshots';
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
     final manifest = <Map<String, Object>>[];
     for (final dark in [false, true]) {
       for (final (profile, size, scale) in [
         ('small-phone', const Size(320, 800), 1.0),
         ('normal-phone', const Size(390, 844), 1.0),
-        ('largest-phone', const Size(390, 844), 2.0),
+        ('large-text-phone', const Size(390, 844), 1.5),
         ('tablet-landscape', const Size(1280, 800), 1.0),
-        ('windows', const Size(1280, 800), 1.0),
       ]) {
         tester.view.physicalSize = size;
         tester.platformDispatcher.textScaleFactorTestValue = scale;
-        debugDefaultTargetPlatformOverride = profile == 'windows'
-            ? TargetPlatform.windows
-            : TargetPlatform.android;
         for (final view in RecipeView.values) {
           for (final favorites in [
             false,
@@ -130,7 +160,7 @@ void main() {
             final prefs = LocalPreferences.memory()
               ..themeMode = dark ? ThemeMode.dark : ThemeMode.light
               ..recipeTextSize = scale > 1
-                  ? RecipeTextSize.extraLarge
+                  ? RecipeTextSize.large
                   : RecipeTextSize.normal
               ..view = view
               ..favoritesOnly = favorites;
@@ -139,13 +169,13 @@ void main() {
               prefs,
             );
             await store.initialize();
-            prefs.setQuery('chicken rice');
+            prefs.setQuery(partialOnly ? 'chicken saffron' : 'chicken rice');
             await tester.pumpWidget(
               RepaintBoundary(
                 key: const Key('search-capture'),
                 child: CookdexApp(
                   store: store,
-                  platform: ShellPlatform(),
+                  platform: ScreenshotPlatform(true),
                   importService: ImportFakeService(),
                 ),
               ),
@@ -156,17 +186,50 @@ void main() {
                   '${dark ? 'dark' : 'light'}-$profile-${view.name}-${favorites ? 'favorites' : 'all'}-$state.png';
               expect(tester.takeException(), isNull, reason: name);
               final label = find.byKey(const Key('partial-matches'));
-              expect(label, state == 'mixed' ? findsOneWidget : findsNothing);
+              expect(
+                label,
+                state == 'mixed' || state == 'partial-only'
+                    ? findsOneWidget
+                    : findsNothing,
+              );
+              if (state == 'partial-only') {
+                expect(label.hitTestable(), findsOneWidget, reason: name);
+                expect(
+                  tester.getRect(label).bottom,
+                  lessThanOrEqualTo(
+                    tester.getRect(find.byKey(const ValueKey('a'))).top,
+                  ),
+                );
+              }
               if (state == 'mixed') {
+                expect(label.hitTestable(), findsOneWidget, reason: name);
+                final full = find.byKey(const ValueKey('a'));
+                final partial = find.byKey(const ValueKey('b'));
                 final rect = tester.getRect(label);
+                expect(
+                  rect.top,
+                  greaterThanOrEqualTo(tester.getRect(full).bottom),
+                );
+                expect(
+                  rect.bottom,
+                  lessThanOrEqualTo(tester.getRect(partial).top),
+                );
                 expect(rect.bottom, lessThan(size.height - 80), reason: name);
                 expect(rect.left, greaterThanOrEqualTo(16));
+                expect(rect.right, lessThanOrEqualTo(size.width - 16));
+                if (profile == 'normal-phone') {
+                  expect(full.hitTestable(), findsOneWidget, reason: name);
+                  expect(partial.hitTestable(), findsOneWidget, reason: name);
+                }
               }
               final boundary = tester.renderObject<RenderRepaintBoundary>(
                 find.byKey(const Key('search-capture')),
               );
+              expect(boundary.size, size, reason: name);
               await tester.runAsync(() async {
                 final image = await boundary.toImage();
+                expect(image.width, size.width.toInt(), reason: name);
+                expect(image.height, size.height.toInt(), reason: name);
                 final data = await image.toByteData(
                   format: ui.ImageByteFormat.png,
                 );
@@ -185,8 +248,9 @@ void main() {
               });
             }
 
-            await shot('mixed');
-            if (profile == 'normal-phone' &&
+            await shot(partialOnly ? 'partial-only' : 'mixed');
+            if (!partialOnly &&
+                profile == 'normal-phone' &&
                 view == RecipeView.cards &&
                 !favorites) {
               prefs.setQuery('chicken');
@@ -204,10 +268,10 @@ void main() {
       }
     }
     await tester.runAsync(
-      () => File('$output/manifest.json')
+      () => File('$output/${partialOnly ? 'search-manifest' : 'manifest'}.json')
           .writeAsString(const JsonEncoder.withIndent('  ').convert(manifest)),
     );
     debugDefaultTargetPlatformOverride = null;
     debugDisableShadows = true;
-  }, skip: Platform.environment['SEARCH_RANKING_SCREENSHOTS'] != '1');
+  }, skip: skipGallery);
 }

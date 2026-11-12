@@ -28,10 +28,12 @@ Candidate candidate(String id, String title) => Candidate(
 
 class ImportFakePlatform implements ImportPlatform {
   String? text;
+  bool hasKey = false;
+  String model = 'test-model';
   PhotoSelection selection = const PhotoSelection(photos: []);
   @override
   Future<SmartImportSettings> settings() async =>
-      const SmartImportSettings(hasKey: false, model: 'test-model');
+      SmartImportSettings(hasKey: hasKey, model: model);
   @override
   Future<void> saveSettings({
     required String key,
@@ -89,19 +91,29 @@ class ImportFakeService implements ImportService {
   int? selected;
   int cancelled = 0;
   @override
-  Future<ImportDiscovery> text(String value) async {
+  Future<ImportDiscovery> text(
+    String value, {
+    ImportPhaseCallback? onPhase,
+  }) async {
     received = value;
     return pending == null ? result : pending!.future;
   }
 
   @override
-  Future<ImportDiscovery> link(String value, {bool useAi = false}) async {
+  Future<ImportDiscovery> link(
+    String value, {
+    bool useAi = false,
+    ImportPhaseCallback? onPhase,
+  }) async {
     received = value;
     return result;
   }
 
   @override
-  Future<ImportDiscovery> photos(List<ImportPhoto> photos) async => result;
+  Future<ImportDiscovery> photos(
+    List<ImportPhoto> photos, {
+    ImportPhaseCallback? onPhase,
+  }) async => result;
   @override
   Future<Candidate> select(ImportDiscovery discovery, int index) async {
     selected = index;
@@ -224,7 +236,7 @@ void main() {
       await tester.tap(find.text('Smart Import'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).last, 'new source text');
-      await tester.tap(find.widgetWithText(FilledButton, 'Smart Import'));
+      await tester.tap(find.byKey(const Key('smart-import-action')));
       await tester.pumpAndSettle();
       expect(find.text('Resume draft?'), findsOneWidget);
       await tester.tap(find.text('Resume'));
@@ -307,13 +319,19 @@ void main() {
     final c = await EditorController.create(
       store: store,
       storage: storage,
+      importSourceLine: 'From watching the video',
       imported: Candidate(
         recipe: recipe('incoming', title: 'First recipe'),
         warnings: const [],
         ingredientSources: const [],
         aiReview: AiReview(
           rewrittenSteps: true,
-          guessedFields: const ['servings', 'totalTime', 'tags'],
+          guessedFields: const [
+            'servings',
+            'totalTime',
+            'tags',
+            'ingredientAmount:0',
+          ],
           guessedSteps: Uint32List.fromList([0]),
         ),
       ),
@@ -326,11 +344,15 @@ void main() {
     expect(savedDraft!['imported'], true);
     final recovered = EditorDraft.fromJson(savedDraft);
     expect(recovered.aiGuessedFields, {'servings', 'totalTime', 'tags'});
+    expect(recovered.importSourceLine, 'From watching the video');
+    expect(recovered.ingredients.first.$2.aiGuessedAmount, isTrue);
     expect(recovered.steps.first.aiGuess, true);
     expect(recovered.aiRewrittenSteps, true);
     final legacyDraft = Map<String, dynamic>.of(savedDraft)
-      ..remove('aiRewrittenSteps');
+      ..remove('aiRewrittenSteps')
+      ..remove('importSourceLine');
     expect(EditorDraft.fromJson(legacyDraft).aiRewrittenSteps, false);
+    expect(EditorDraft.fromJson(legacyDraft).importSourceLine, isEmpty);
     final guessed = recovered.steps.first;
     c.reorder(c.draft.steps, 0, c.draft.steps.length - 1);
     expect(c.draft.steps.any((s) => s.aiGuess), true);
@@ -346,6 +368,8 @@ void main() {
     expect(saved!.id, 'existing');
     expect(repository.imports, 1);
     expect(c.draft.aiGuessedFields, isEmpty);
+    expect(c.draft.importSourceLine, isEmpty);
+    expect(c.draft.ingredients.first.$2.aiGuessedAmount, isFalse);
     expect(c.draft.aiRewrittenSteps, false);
     expect(c.draft.steps.any((s) => s.aiGuess), false);
     expect(saved.createdAt, repository.savedBase!.createdAt);
@@ -428,7 +452,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).first, 'recipes');
-      await tester.tap(find.widgetWithText(FilledButton, 'Smart Import'));
+      await tester.tap(find.byKey(const Key('smart-import-action')));
       await tester.pumpAndSettle();
       expect(find.text('Choose one recipe'), findsOneWidget);
       expect(reviewed, isEmpty);

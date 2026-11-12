@@ -544,6 +544,10 @@ void main() {
   testWidgets(
     'Android tabs, overlay Back, system root exit, wallpaper off and IME navigation',
     (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       var systemPops = 0;
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         SystemChannels.platform,
@@ -625,6 +629,10 @@ void main() {
       'empty library Restore a backup routes through ${chooseZip ? 'preview cancellation' : 'picker cancellation'}',
       (tester) async {
         final preferences = LocalPreferences.memory();
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(390, 844);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
         final repository = _RestoreRepository();
         final store = RecipeStore(repository, preferences);
         final platform = _Platform()

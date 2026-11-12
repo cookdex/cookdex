@@ -19,7 +19,7 @@ SettingsScreen snapshotSettingsFixture({
   VoidCallback? onSnapshots,
   double recipeTextScale = 1,
 }) => SettingsScreen(
-  hasPrevious: false,
+  readHasPrevious: () => false,
   syncSummary: 'Sync is off',
   onSnapshots: onSnapshots ?? () {},
   snapshotsFailing: failing,

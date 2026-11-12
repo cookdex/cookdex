@@ -1517,11 +1517,12 @@ extension ShoppingEditPatterns on ShoppingEdit {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( ShoppingEdit_AddManual value)?  addManual,TResult Function( ShoppingEdit_Edit value)?  edit,TResult Function( ShoppingEdit_Check value)?  check,TResult Function( ShoppingEdit_Remove value)?  remove,TResult Function( ShoppingEdit_Move value)?  move,TResult Function( ShoppingEdit_ReorderItems value)?  reorderItems,TResult Function( ShoppingEdit_AddCategory value)?  addCategory,TResult Function( ShoppingEdit_RenameCategory value)?  renameCategory,TResult Function( ShoppingEdit_DeleteCategory value)?  deleteCategory,TResult Function( ShoppingEdit_ReorderCategories value)?  reorderCategories,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( ShoppingEdit_AddManual value)?  addManual,TResult Function( ShoppingEdit_AddManualItems value)?  addManualItems,TResult Function( ShoppingEdit_Edit value)?  edit,TResult Function( ShoppingEdit_Check value)?  check,TResult Function( ShoppingEdit_Remove value)?  remove,TResult Function( ShoppingEdit_Move value)?  move,TResult Function( ShoppingEdit_ReorderItems value)?  reorderItems,TResult Function( ShoppingEdit_AddCategory value)?  addCategory,TResult Function( ShoppingEdit_RenameCategory value)?  renameCategory,TResult Function( ShoppingEdit_DeleteCategory value)?  deleteCategory,TResult Function( ShoppingEdit_ReorderCategories value)?  reorderCategories,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case ShoppingEdit_AddManual() when addManual != null:
-return addManual(_that);case ShoppingEdit_Edit() when edit != null:
+return addManual(_that);case ShoppingEdit_AddManualItems() when addManualItems != null:
+return addManualItems(_that);case ShoppingEdit_Edit() when edit != null:
 return edit(_that);case ShoppingEdit_Check() when check != null:
 return check(_that);case ShoppingEdit_Remove() when remove != null:
 return remove(_that);case ShoppingEdit_Move() when move != null:
@@ -1548,11 +1549,12 @@ return reorderCategories(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( ShoppingEdit_AddManual value)  addManual,required TResult Function( ShoppingEdit_Edit value)  edit,required TResult Function( ShoppingEdit_Check value)  check,required TResult Function( ShoppingEdit_Remove value)  remove,required TResult Function( ShoppingEdit_Move value)  move,required TResult Function( ShoppingEdit_ReorderItems value)  reorderItems,required TResult Function( ShoppingEdit_AddCategory value)  addCategory,required TResult Function( ShoppingEdit_RenameCategory value)  renameCategory,required TResult Function( ShoppingEdit_DeleteCategory value)  deleteCategory,required TResult Function( ShoppingEdit_ReorderCategories value)  reorderCategories,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( ShoppingEdit_AddManual value)  addManual,required TResult Function( ShoppingEdit_AddManualItems value)  addManualItems,required TResult Function( ShoppingEdit_Edit value)  edit,required TResult Function( ShoppingEdit_Check value)  check,required TResult Function( ShoppingEdit_Remove value)  remove,required TResult Function( ShoppingEdit_Move value)  move,required TResult Function( ShoppingEdit_ReorderItems value)  reorderItems,required TResult Function( ShoppingEdit_AddCategory value)  addCategory,required TResult Function( ShoppingEdit_RenameCategory value)  renameCategory,required TResult Function( ShoppingEdit_DeleteCategory value)  deleteCategory,required TResult Function( ShoppingEdit_ReorderCategories value)  reorderCategories,}){
 final _that = this;
 switch (_that) {
 case ShoppingEdit_AddManual():
-return addManual(_that);case ShoppingEdit_Edit():
+return addManual(_that);case ShoppingEdit_AddManualItems():
+return addManualItems(_that);case ShoppingEdit_Edit():
 return edit(_that);case ShoppingEdit_Check():
 return check(_that);case ShoppingEdit_Remove():
 return remove(_that);case ShoppingEdit_Move():
@@ -1575,11 +1577,12 @@ return reorderCategories(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( ShoppingEdit_AddManual value)?  addManual,TResult? Function( ShoppingEdit_Edit value)?  edit,TResult? Function( ShoppingEdit_Check value)?  check,TResult? Function( ShoppingEdit_Remove value)?  remove,TResult? Function( ShoppingEdit_Move value)?  move,TResult? Function( ShoppingEdit_ReorderItems value)?  reorderItems,TResult? Function( ShoppingEdit_AddCategory value)?  addCategory,TResult? Function( ShoppingEdit_RenameCategory value)?  renameCategory,TResult? Function( ShoppingEdit_DeleteCategory value)?  deleteCategory,TResult? Function( ShoppingEdit_ReorderCategories value)?  reorderCategories,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( ShoppingEdit_AddManual value)?  addManual,TResult? Function( ShoppingEdit_AddManualItems value)?  addManualItems,TResult? Function( ShoppingEdit_Edit value)?  edit,TResult? Function( ShoppingEdit_Check value)?  check,TResult? Function( ShoppingEdit_Remove value)?  remove,TResult? Function( ShoppingEdit_Move value)?  move,TResult? Function( ShoppingEdit_ReorderItems value)?  reorderItems,TResult? Function( ShoppingEdit_AddCategory value)?  addCategory,TResult? Function( ShoppingEdit_RenameCategory value)?  renameCategory,TResult? Function( ShoppingEdit_DeleteCategory value)?  deleteCategory,TResult? Function( ShoppingEdit_ReorderCategories value)?  reorderCategories,}){
 final _that = this;
 switch (_that) {
 case ShoppingEdit_AddManual() when addManual != null:
-return addManual(_that);case ShoppingEdit_Edit() when edit != null:
+return addManual(_that);case ShoppingEdit_AddManualItems() when addManualItems != null:
+return addManualItems(_that);case ShoppingEdit_Edit() when edit != null:
 return edit(_that);case ShoppingEdit_Check() when check != null:
 return check(_that);case ShoppingEdit_Remove() when remove != null:
 return remove(_that);case ShoppingEdit_Move() when move != null:
@@ -1605,10 +1608,11 @@ return reorderCategories(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String text)?  addManual,TResult Function( String id,  String text)?  edit,TResult Function( List<String> ids,  bool checked)?  check,TResult Function( List<String> ids)?  remove,TResult Function( String id,  String categoryId,  String? beforeId)?  move,TResult Function( String categoryId,  List<String> ids)?  reorderItems,TResult Function( String name)?  addCategory,TResult Function( String id,  String name)?  renameCategory,TResult Function( String id)?  deleteCategory,TResult Function( List<String> ids)?  reorderCategories,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String text)?  addManual,TResult Function( List<String> names)?  addManualItems,TResult Function( String id,  String text)?  edit,TResult Function( List<String> ids,  bool checked)?  check,TResult Function( List<String> ids)?  remove,TResult Function( String id,  String categoryId,  String? beforeId)?  move,TResult Function( String categoryId,  List<String> ids)?  reorderItems,TResult Function( String name)?  addCategory,TResult Function( String id,  String name)?  renameCategory,TResult Function( String id)?  deleteCategory,TResult Function( List<String> ids)?  reorderCategories,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case ShoppingEdit_AddManual() when addManual != null:
-return addManual(_that.text);case ShoppingEdit_Edit() when edit != null:
+return addManual(_that.text);case ShoppingEdit_AddManualItems() when addManualItems != null:
+return addManualItems(_that.names);case ShoppingEdit_Edit() when edit != null:
 return edit(_that.id,_that.text);case ShoppingEdit_Check() when check != null:
 return check(_that.ids,_that.checked);case ShoppingEdit_Remove() when remove != null:
 return remove(_that.ids);case ShoppingEdit_Move() when move != null:
@@ -1635,10 +1639,11 @@ return reorderCategories(_that.ids);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String text)  addManual,required TResult Function( String id,  String text)  edit,required TResult Function( List<String> ids,  bool checked)  check,required TResult Function( List<String> ids)  remove,required TResult Function( String id,  String categoryId,  String? beforeId)  move,required TResult Function( String categoryId,  List<String> ids)  reorderItems,required TResult Function( String name)  addCategory,required TResult Function( String id,  String name)  renameCategory,required TResult Function( String id)  deleteCategory,required TResult Function( List<String> ids)  reorderCategories,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String text)  addManual,required TResult Function( List<String> names)  addManualItems,required TResult Function( String id,  String text)  edit,required TResult Function( List<String> ids,  bool checked)  check,required TResult Function( List<String> ids)  remove,required TResult Function( String id,  String categoryId,  String? beforeId)  move,required TResult Function( String categoryId,  List<String> ids)  reorderItems,required TResult Function( String name)  addCategory,required TResult Function( String id,  String name)  renameCategory,required TResult Function( String id)  deleteCategory,required TResult Function( List<String> ids)  reorderCategories,}) {final _that = this;
 switch (_that) {
 case ShoppingEdit_AddManual():
-return addManual(_that.text);case ShoppingEdit_Edit():
+return addManual(_that.text);case ShoppingEdit_AddManualItems():
+return addManualItems(_that.names);case ShoppingEdit_Edit():
 return edit(_that.id,_that.text);case ShoppingEdit_Check():
 return check(_that.ids,_that.checked);case ShoppingEdit_Remove():
 return remove(_that.ids);case ShoppingEdit_Move():
@@ -1661,10 +1666,11 @@ return reorderCategories(_that.ids);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String text)?  addManual,TResult? Function( String id,  String text)?  edit,TResult? Function( List<String> ids,  bool checked)?  check,TResult? Function( List<String> ids)?  remove,TResult? Function( String id,  String categoryId,  String? beforeId)?  move,TResult? Function( String categoryId,  List<String> ids)?  reorderItems,TResult? Function( String name)?  addCategory,TResult? Function( String id,  String name)?  renameCategory,TResult? Function( String id)?  deleteCategory,TResult? Function( List<String> ids)?  reorderCategories,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String text)?  addManual,TResult? Function( List<String> names)?  addManualItems,TResult? Function( String id,  String text)?  edit,TResult? Function( List<String> ids,  bool checked)?  check,TResult? Function( List<String> ids)?  remove,TResult? Function( String id,  String categoryId,  String? beforeId)?  move,TResult? Function( String categoryId,  List<String> ids)?  reorderItems,TResult? Function( String name)?  addCategory,TResult? Function( String id,  String name)?  renameCategory,TResult? Function( String id)?  deleteCategory,TResult? Function( List<String> ids)?  reorderCategories,}) {final _that = this;
 switch (_that) {
 case ShoppingEdit_AddManual() when addManual != null:
-return addManual(_that.text);case ShoppingEdit_Edit() when edit != null:
+return addManual(_that.text);case ShoppingEdit_AddManualItems() when addManualItems != null:
+return addManualItems(_that.names);case ShoppingEdit_Edit() when edit != null:
 return edit(_that.id,_that.text);case ShoppingEdit_Check() when check != null:
 return check(_that.ids,_that.checked);case ShoppingEdit_Remove() when remove != null:
 return remove(_that.ids);case ShoppingEdit_Move() when move != null:
@@ -1743,6 +1749,80 @@ class _$ShoppingEdit_AddManualCopyWithImpl<$Res>
   return _then(ShoppingEdit_AddManual(
 text: null == text ? _self.text : text // ignore: cast_nullable_to_non_nullable
 as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class ShoppingEdit_AddManualItems extends ShoppingEdit {
+  const ShoppingEdit_AddManualItems({required  List<String> names}): _names = names,super._();
+
+
+ final  List<String> _names;
+ List<String> get names {
+  if (_names is EqualUnmodifiableListView) return _names;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_names);
+}
+
+
+/// Create a copy of ShoppingEdit
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$ShoppingEdit_AddManualItemsCopyWith<ShoppingEdit_AddManualItems> get copyWith => _$ShoppingEdit_AddManualItemsCopyWithImpl<ShoppingEdit_AddManualItems>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ShoppingEdit_AddManualItems&&const DeepCollectionEquality().equals(other.names, _names));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_names));
+}
+
+@override
+String toString() {
+    return 'ShoppingEdit.addManualItems(names: $names)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $ShoppingEdit_AddManualItemsCopyWith<$Res> implements $ShoppingEditCopyWith<$Res> {
+  factory $ShoppingEdit_AddManualItemsCopyWith(ShoppingEdit_AddManualItems value, $Res Function(ShoppingEdit_AddManualItems) _then) = _$ShoppingEdit_AddManualItemsCopyWithImpl;
+@useResult
+$Res call({
+ List<String> names
+});
+
+
+
+
+}
+/// @nodoc
+class _$ShoppingEdit_AddManualItemsCopyWithImpl<$Res>
+    implements $ShoppingEdit_AddManualItemsCopyWith<$Res> {
+  _$ShoppingEdit_AddManualItemsCopyWithImpl(this._self, this._then);
+
+  final ShoppingEdit_AddManualItems _self;
+  final $Res Function(ShoppingEdit_AddManualItems) _then;
+
+/// Create a copy of ShoppingEdit
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? names = null,}) {
+  return _then(ShoppingEdit_AddManualItems(
+names: null == names ? _self._names : names // ignore: cast_nullable_to_non_nullable
+as List<String>,
   ));
 }
 

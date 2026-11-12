@@ -63,11 +63,8 @@ void main() {
           allowance.dispose();
           expect(
             tester.getSize(name).width,
-            greaterThan(tester.getSize(unit).width),
-          );
-          expect(
-            tester.getSize(name).width,
-            greaterThan(tester.getSize(amount).width),
+            greaterThanOrEqualTo(88),
+            reason: 'Keep usable name space beside a package or wrap the name',
           );
           for (final field in [amount, unit]) {
             await reveal(tester, field);

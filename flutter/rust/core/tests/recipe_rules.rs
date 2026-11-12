@@ -205,7 +205,7 @@ fn canonical_malformed_variants_fail_closed() {
         ("revision", json!(0)),
         ("revision", json!(MAX_INTEGER + 1)),
         ("createdAt", json!("not a date")),
-        ("source", json!("javascript:alert(1)")),
+        ("source", json!("a".repeat(2001))),
         ("favorite", json!("yes")),
         ("prepTime", json!("a".repeat(81))),
         ("tags", json!([false])),
@@ -380,8 +380,8 @@ fn ordinary_recipe_preserves_unknown_text_and_invalid_attribution() {
     assert_eq!(r.ingredients[1].prep_note, "diced");
     assert_eq!(r.steps, ["Mix.", "Simmer."]);
     assert!(r.notes.contains("A family recipe"));
-    assert!(r.notes.contains("Source: Grandma"));
-    assert!(r.source.is_empty());
+    assert!(!r.notes.contains("Source: Grandma"));
+    assert_eq!(r.source, "Grandma");
     assert!(result.ordinary);
     let r = paste::parse_recipe_input(
         "Beans\nIngredients:\n1 (15 oz) can beans\nSalt to taste",

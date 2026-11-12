@@ -6,7 +6,7 @@ Android Kotlin adapters provide local platform integrations, permissions, secure
 
 ## Interchange
 
-Current recipe schema and SQLite layout are version 2; sync protocol is 4. Recipe IDs survive backup, restore and sync. ZIPs contain per-recipe JSON and optional local shopping category setup. Schema 1 and schema 2 backups remain readable. Snapshots use the same ZIP format. Shopping rows and credentials are not included in recipe backups. Shared recipes use readable Text v1; earlier text exports still import.
+The recipe schema and SQLite layout use version 2. Sync uses protocol 5. Both devices must update from 1.9.0 to sync again. Their existing pairing carries over. Recipe IDs survive backup, restore and sync. ZIPs contain per-recipe JSON and optional local shopping category setup. Schema 1 and schema 2 backups remain readable. Snapshots use the same ZIP format. Shopping rows and credentials are not included in recipe backups. Shared recipes use readable Text v1; earlier text exports still import.
 
 The immutable synthetic fixtures in `flutter/rust/core/tests/fixtures/compatibility` exercise every released format. The core validator is the authority for all recipe ingress. Database files are local and must never be copied between running apps as a sync mechanism.
 

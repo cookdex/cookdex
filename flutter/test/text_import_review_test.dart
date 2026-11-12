@@ -159,6 +159,66 @@ void main() {
   }
 
   testWidgets(
+    'batch Text v1 saves matching library case and retains other source tags',
+    (tester) async {
+      final repo = ImportRepositoryFake([recipe('existing')]);
+      final store = RecipeStore(repo, LocalPreferences.memory());
+      await store.initialize();
+      addTearDown(store.dispose);
+      final first = recipe('one', title: 'First')..fields.tags.clear();
+      first.fields.tags.addAll(['QUICK', 'New tag', 'Shelf-Stable']);
+      final second = recipe('two', title: 'Second')..fields.tags.clear();
+      second.fields.tags.addAll(['quick', 'Breakfast', 'breakfast']);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TextImportReview(
+            blocks: [block(first), block(second)],
+            store: store,
+            service: ImportFakeService(),
+            onReview: (_, _) async => null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Import selected (2)'));
+      await tester.pumpAndSettle();
+      expect(repo.imports, 2);
+      expect(
+        repo.recipes.values
+            .singleWhere((r) => r.fields.title == 'First')
+            .fields
+            .tags,
+        ['Quick', 'New tag', 'Shelf-Stable'],
+      );
+      expect(
+        repo.recipes.values
+            .singleWhere((r) => r.fields.title == 'Second')
+            .fields
+            .tags,
+        ['Quick', 'Breakfast', 'breakfast'],
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TextImportReview(
+            blocks: [block(first), block(second)],
+            store: store,
+            service: ImportFakeService(),
+            onReview: (_, _) async => null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Already in your library'), findsNWidgets(2));
+      expect(
+        tester
+            .widgetList<CheckboxListTile>(find.byType(CheckboxListTile))
+            .map((box) => box.value),
+        [false, false],
+      );
+    },
+  );
+  testWidgets(
     'partial failure retries only unsaved rows and always keeps both',
     (tester) async {
       final repo = PartialRepository();

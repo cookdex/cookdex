@@ -11,8 +11,9 @@ const _actions = [
   'Save readable cookbook',
   'Restore recipe ZIP',
   'Recover previous save',
-  'Clean up recipes',
+  'Gemini key',
   'Smart Import settings',
+  'Smart Create settings',
   'How cookdex works',
   'cookdex on GitHub',
   'Share cookdex',
@@ -20,6 +21,7 @@ const _actions = [
 
 SettingsScreen _screen({
   bool hasPrevious = true,
+  ValueNotifier<bool>? recovery,
   bool busy = false,
   bool isAndroid = true,
   void Function(String)? onAction,
@@ -36,7 +38,8 @@ SettingsScreen _screen({
   VoidCallback? action(String label) =>
       onAction == null ? null : () => onAction(label);
   return SettingsScreen(
-    hasPrevious: hasPrevious,
+    readHasPrevious: () => recovery?.value ?? hasPrevious,
+    recoveryChanges: recovery,
     busy: busy,
     syncSummary: 'Kitchen phone · Last synced today',
     onSync: action('Sync settings'),
@@ -44,7 +47,8 @@ SettingsScreen _screen({
     onSaveReadableCookbook: action('Save readable cookbook'),
     onRestoreRecipeZip: action('Restore recipe ZIP'),
     onRecoverPreviousSave: action('Recover previous save'),
-    onCleanUpRecipes: action('Clean up recipes'),
+    onGeminiKey: action('Gemini key'),
+    onSmartCreateSettings: action('Smart Create settings'),
     onSmartImportSettings: action('Smart Import settings'),
     onHowCookdexWorks: action('How cookdex works'),
     onGitHub: action('cookdex on GitHub'),
@@ -185,7 +189,7 @@ void main() {
       'Kitchen phone · Last synced today',
       'Backup & restore',
       ..._actions.skip(1),
-      'Smart Import',
+      'Smart features',
       'Shopping list',
       'Keep shopping screen awake',
       'Appearance',
@@ -200,8 +204,8 @@ void main() {
     }
     expect(
       find.text(
-        'Recipes stay on your devices. Optional encrypted LAN sync '
-        'connects paired devices. When you use Smart Import with AI, '
+        'Android can back up your recipes to your Google account with encryption. Optional encrypted LAN sync '
+        'connects paired devices. When you use Smart Import with AI or Smart Create, '
         'selected inputs are sent to Google. Link imports contact '
         'recipe websites. Update checks contact GitHub.',
       ),
@@ -241,6 +245,46 @@ void main() {
     await tester.tap(find.text('Recover previous save'));
     expect(calls, isEmpty);
   });
+
+  testWidgets(
+    'retained recovery action refreshes on reveal and while visible',
+    (tester) async {
+      const label = 'Recover previous save';
+      final visible = ValueNotifier(true);
+      final recovery = ValueNotifier(false);
+      addTearDown(visible.dispose);
+      addTearDown(recovery.dispose);
+      final calls = <String>[];
+      await _pump(
+        tester,
+        ValueListenableBuilder<bool>(
+          valueListenable: visible,
+          child: _screen(recovery: recovery, onAction: calls.add),
+          builder: (_, showing, child) => Offstage(
+            offstage: !showing,
+            child: TickerMode(enabled: showing, child: child!),
+          ),
+        ),
+        size: const Size(1280, 1000),
+      );
+      expect(_tile(tester, label).enabled, isFalse);
+      visible.value = false;
+      await tester.pump();
+      recovery.value = true;
+      await tester.pump();
+      visible.value = true;
+      await tester.pump();
+      expect(find.text('No previous save'), findsNothing);
+      expect(_tile(tester, label).enabled, isTrue);
+      await tester.tap(find.text(label));
+      expect(calls, [label]);
+      recovery.value = false;
+      await tester.pump();
+      expect(find.text('No previous save'), findsOneWidget);
+      expect(_tile(tester, label).onTap, isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('busy disables actions and preference controls', (tester) async {
     await _pump(tester, _screen(busy: true, onAction: (_) {}));

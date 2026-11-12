@@ -4,7 +4,6 @@ import 'package:flutter/gestures.dart';
 
 import 'import_test.dart' show ShellPlatform, ImportFakeService;
 
-import 'package:material_symbols_icons/symbols.dart';
 import 'package:cookdex/export_service.dart';
 import 'package:cookdex/local_preferences.dart';
 import 'package:cookdex/recipe_store.dart';
@@ -85,6 +84,12 @@ void main() {
 
   for (final android in [true, false]) {
     testWidgets('share options on Android=$android', (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       ExportAction? chosen;
       await tester.pumpWidget(
         MaterialApp(
@@ -100,21 +105,57 @@ void main() {
           ),
         ),
       );
-      await tester.tap(find.text('Open'));
-      await tester.pumpAndSettle();
-      expect(find.text('Send as message'), findsOneWidget);
-      expect(find.text('Copy text'), findsOneWidget);
-      expect(find.text('Save .txt file'), findsOneWidget);
-      await tester.tap(find.text('Send as .txt file'));
-      await tester.pumpAndSettle();
-      expect(chosen, ExportAction.shareFile);
+      for (final (label, action) in [
+        ('Send as .txt file', ExportAction.shareFile),
+        ('Save .txt file', ExportAction.save),
+        ('Send as message', ExportAction.share),
+        ('Copy text', ExportAction.copy),
+      ]) {
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+        final labels = [
+          'Recipe file',
+          'Best for other cookdex users. Open the .txt file with cookdex.',
+          'Send as .txt file',
+          'Attach a recipe file to a message',
+          'Save .txt file',
+          'Choose where to save the recipe file',
+          'Plain text',
+          'For anyone without cookdex, or to paste the whole recipe.',
+          'Send as message',
+          'Share recipe text in another app',
+          'Copy text',
+          'Copy the recipe to your clipboard',
+        ];
+        var previous = -double.infinity;
+        for (final text in labels) {
+          final top = tester.getTopLeft(find.text(text)).dy;
+          expect(top, greaterThan(previous));
+          previous = top;
+        }
+        final tile = find.widgetWithText(FaceliftSheetTile, label);
+        await tester.ensureVisible(tile);
+        await tester.pumpAndSettle();
+        expect(find.text(label).hitTestable(), findsOneWidget);
+        expect(
+          find
+              .text(tester.widget<FaceliftSheetTile>(tile).subtitle!)
+              .hitTestable(),
+          findsOneWidget,
+        );
+        await tester.tap(find.text(label));
+        await tester.pumpAndSettle();
+        expect(chosen, action);
+      }
     });
   }
   testWidgets('selection toggles cached rows and disables empty actions', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(320, 720));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 720);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
     final preferences = LocalPreferences.memory();
     final repository = FakeRepository([
       recipe('one'),
@@ -163,13 +204,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(opened, 0);
     expect(find.text('0 selected'), findsOneWidget);
+    await tester.tap(find.byTooltip('More selection actions'));
+    await tester.pumpAndSettle();
     expect(
       tester
-          .widget<IconButton>(find.widgetWithIcon(IconButton, Symbols.share))
+          .widget<MenuItemButton>(find.widgetWithText(MenuItemButton, 'Share'))
           .onPressed,
       isNull,
     );
-    await tester.tap(find.byTooltip('Select all'));
+    await tester.tap(find.text('Select all'));
     await tester.pumpAndSettle();
     expect(find.text('2 selected'), findsOneWidget);
     expect(tester.takeException(), isNull);

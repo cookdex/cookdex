@@ -74,10 +74,6 @@ pub fn written(value: &Value, now: &str) -> Result<(Recipe, Vec<String>)> {
         steps: Vec::new(),
         tags: Vec::new(),
     };
-    if !content.source.is_empty() && !super::model::safe_source(&content.source) {
-        warnings.push("Source was not an HTTP(S) link and was dropped.".into());
-        content.source.clear();
-    }
     for (i, tag) in list(value, "tags", &mut warnings).iter().enumerate() {
         if let Some(tag) = tag.as_str() {
             content.tags.push(bounded_text(
@@ -220,7 +216,11 @@ pub fn written(value: &Value, now: &str) -> Result<(Recipe, Vec<String>)> {
         }
         let name = bounded_text(&name, 2000, &format!("{label} name"), &mut warnings);
         unit = bounded_text(&unit, 2000, &format!("{label} unit"), &mut warnings);
-        let amount = match Amount::parse_new(&amount_text) {
+        // Models also write ".5" and ".25–.5". Give the same rational
+        // parser a leading zero, without changing stored or exact-import text.
+        let normalized =
+            super::rx(r"(?i)(^|[-–]\s*|\bto\s+)(\.\d+)").replace_all(&amount_text, "${1}0${2}");
+        let amount = match Amount::parse_new(&normalized) {
             Ok(amount) => amount,
             Err(_) => {
                 let original = [amount_text.as_str(), unit_text.as_str()]

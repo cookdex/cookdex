@@ -137,10 +137,25 @@ class NativeImportPlatform
   Future<PhotoSelection> pickPhotos({
     required bool camera,
     required int maxCount,
+  }) => _pickPhotos(camera: camera, maxCount: maxCount, retainOriginals: true);
+
+  Future<PhotoSelection> pickCreatePhotos({
+    required bool camera,
+    required int maxCount,
+  }) => _pickPhotos(camera: camera, maxCount: maxCount, retainOriginals: false);
+
+  Future<PhotoSelection> _pickPhotos({
+    required bool camera,
+    required int maxCount,
+    required bool retainOriginals,
   }) async {
     final result = await _channel.invokeMapMethod<String, dynamic>(
       'pickPhotos',
-      {'camera': camera, 'maxCount': maxCount},
+      {
+        'camera': camera,
+        'maxCount': maxCount,
+        'retainOriginals': retainOriginals,
+      },
     );
     if (result == null) return const PhotoSelection(photos: []);
     return PhotoSelection(

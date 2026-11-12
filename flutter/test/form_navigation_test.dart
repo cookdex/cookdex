@@ -92,14 +92,16 @@ Future<MaterialPageRoute<void>> _showForm(
 Future<void> _preview(WidgetTester tester, String title) async {
   await _gesture(tester, 'startBackGesture', 0);
   await _gesture(tester, 'updateBackGestureProgress', .4);
-  expect(
-    tester
-        .getTopLeft(
-          find.descendant(of: find.byType(AppBar), matching: find.text(title)),
-        )
-        .dx,
-    greaterThan(0),
+  final headers = tester
+      .widgetList<Scaffold>(find.byType(Scaffold))
+      .map((s) => s.appBar)
+      .whereType<Widget>()
+      .toSet();
+  final titleInBar = find.descendant(
+    of: find.byWidgetPredicate(headers.contains),
+    matching: find.text(title),
   );
+  expect(tester.getTopLeft(titleInBar).dx, greaterThan(0));
   expect(find.text('Origin'), findsOneWidget);
 }
 
@@ -263,7 +265,7 @@ void main() {
       );
       await tester.enterText(find.byType(TextField), 'Original import text');
       FocusManager.instance.primaryFocus?.unfocus();
-      await tester.tap(find.widgetWithText(FilledButton, 'Smart Import'));
+      await tester.tap(find.byKey(const Key('smart-import-action')));
       await tester.pump();
       expect(controller.busy, isTrue);
       await _preview(tester, 'Smart Import');

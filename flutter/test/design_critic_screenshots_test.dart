@@ -155,7 +155,9 @@ class _Platform extends ShellPlatform {
 }
 
 class _ImportPlatform extends ImportFakePlatform {
-  bool hasKey = true;
+  _ImportPlatform() {
+    hasKey = true;
+  }
   bool fail = false;
   Completer<SmartImportSettings>? pending;
   @override
@@ -407,7 +409,7 @@ class _Matrix {
             '2.0 linear system scaling is a largest-Android-font stress proxy, not an Android nonlinear-font emulator measurement.',
             'Focused Android editor suggestion screenshots simulate a 260dp IME inset; no operating-system keyboard pixels or physical keyboard behavior are rendered.',
             'Live native camera preview, platform file pickers/share chooser and physical devices are not launched; scanner unavailable state uses a denied-permission method-channel fake.',
-            'Cleanup and previous-save confirmations use the production confirmCookdex component with exact production text; native CoreSession callback flow is not invoked.',
+            'The previous-save confirmation uses the production confirmCookdex component with exact production text; native CoreSession callback flow is not invoked.',
           ],
           'screenshots': entries,
         }),
@@ -758,8 +760,12 @@ void main() {
           await m.shot('restore-preview');
           await m.tap(find.widgetWithText(TextButton, 'Restore'));
           expect(find.text('Recipes restored'), findsOneWidget);
+          final restoreDialog = tester.widget<AlertDialog>(
+            find.byType(AlertDialog),
+          );
+          expect(restoreDialog.actions, hasLength(1));
           await m.shot('restore-success');
-          await m.back();
+          await m.tap(find.widgetWithText(TextButton, 'Done'));
           repository.failRestore = true;
           await m.tap(find.text('Restore recipe ZIP'));
           await m.shot('restore-error');
@@ -778,7 +784,7 @@ void main() {
           for (final state in ['unavailable', 'busy']) {
             await m.mount(
               SettingsScreen(
-                hasPrevious: state != 'unavailable',
+                readHasPrevious: () => state != 'unavailable',
                 busy: state == 'busy',
                 syncSummary: '1 device · just now',
                 onSync: () {},
@@ -786,7 +792,6 @@ void main() {
                 onSaveReadableCookbook: () {},
                 onRestoreRecipeZip: () {},
                 onRecoverPreviousSave: () {},
-                onCleanUpRecipes: () {},
                 onSmartImportSettings: () {},
                 onHowCookdexWorks: () {},
                 shoppingKeepAwake: false,
@@ -1164,7 +1169,7 @@ void main() {
             import.text,
           );
           FocusManager.instance.primaryFocus?.unfocus();
-          await m.tap(find.widgetWithText(FilledButton, 'Smart Import'));
+          await m.tap(find.byKey(const Key('smart-import-action')));
           await m.pages('import-choose-candidate');
           await m.back();
           import.error = 'Google could not read this recipe page. Paste the text or try again.';
@@ -1172,7 +1177,7 @@ void main() {
           await m.pages('import-error');
           await m.tap(find.text('Smart Import settings'));
           await m.pages('import-smart-settings-dialog');
-          await m.tap(find.text('View prompt'));
+          await m.tap(find.text('View prompts'));
           await m.pages('import-view-prompt-dialog');
           await m.back();
           await m.tap(find.text('Last Smart Import'));
@@ -1348,6 +1353,11 @@ void main() {
           await m.tap(find.text('Join a device').last);
           await m.pages('pairing-join');
           if (android) {
+            const platform = MethodChannel('com.sylph.cookdex.dev/platform');
+            tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+              platform, (_) async => 'granted',
+            );
+            addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(platform, null));
             const method = MethodChannel(
               'dev.steenbakker.mobile_scanner/scanner/method',
             );
@@ -1471,46 +1481,30 @@ void main() {
           await tester.pumpWidget(const SizedBox.shrink());
           sync.dispose();
 
-          // Native-only actions share this exact production confirmation
-          // component. This covers their rendered dialogs while keeping Rust
-          // state and all device data out of a visual fixture.
-          for (final spec in [
-            (
-              'cleanup-preview',
-              'Clean up 12 recipes?',
-              'Clean up',
-              'Normalize units, times and lowercase tags.\n2 conflicted recipes will be skipped.',
+          late BuildContext context;
+          await m.mount(
+            Builder(
+              builder: (c) {
+                context = c;
+                return const Scaffold();
+              },
             ),
-            (
-              'recover-confirmation',
-              'Recover previous save?',
-              'Recover',
-              'Restore the previous Flutter recipe collection and shopping list.',
+          );
+          unawaited(
+            confirmCookdex(
+              context,
+              title: 'Recover previous save?',
+              action: 'Recover',
+              content: const Text(
+                'Restore the previous Flutter recipe collection and shopping list.',
+              ),
             ),
-          ]) {
-            late BuildContext context;
-            await m.mount(
-              Builder(
-                builder: (c) {
-                  context = c;
-                  return const Scaffold();
-                },
-              ),
-            );
-            unawaited(
-              confirmCookdex(
-                context,
-                title: spec.$2,
-                action: spec.$3,
-                content: Text(spec.$4),
-              ),
-            );
-            await m.shot(
-              spec.$1,
-              note: 'Production confirmation component and exact production text; native action callback not invoked.',
-            );
-            await m.back();
-          }
+          );
+          await m.shot(
+            'recover-confirmation',
+            note: 'Production confirmation component and exact production text; native action callback not invoked.',
+          );
+          await m.back();
           m.complete = true;
           await m.manifest();
         } finally {

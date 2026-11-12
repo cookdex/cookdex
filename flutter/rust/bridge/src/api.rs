@@ -156,6 +156,9 @@ pub enum ShoppingEdit {
     AddManual {
         text: String,
     },
+    AddManualItems {
+        names: Vec<String>,
+    },
     Edit {
         id: String,
         text: String,
@@ -240,10 +243,6 @@ pub enum ConflictChoice {
     KeepAll,
 }
 #[frb(opaque)]
-pub struct CleanupPreview {
-    inner: services::CleanupPreview,
-}
-#[frb(opaque)]
 pub struct LibraryUndo {
     inner: services::LibraryUndo,
 }
@@ -252,14 +251,6 @@ pub struct LibraryResult {
     pub snapshot: CollectionSnapshot,
     pub undo: LibraryUndo,
     pub count: u32,
-}
-impl CleanupPreview {
-    pub fn changed(&self) -> u32 {
-        self.inner.changed
-    }
-    pub fn skipped_conflicts(&self) -> u32 {
-        self.inner.skipped_conflicts
-    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
@@ -479,21 +470,6 @@ impl CoreSession {
             ConflictChoice::KeepAll => "keep-all".into(),
         };
         Ok(self.service()?.resolve(&id, &heads, &choice)?.into())
-    }
-    pub fn preview_cleanup(&self) -> Result<CleanupPreview, ServiceError> {
-        Ok(CleanupPreview {
-            inner: self.service()?.preview_cleanup()?,
-        })
-    }
-    pub fn cleanup(
-        &self,
-        preview: &CleanupPreview,
-        operation: &Operation,
-    ) -> Result<CollectionSnapshot, ServiceError> {
-        Ok(self
-            .service()?
-            .cleanup(&preview.inner, &operation.inner)?
-            .into())
     }
     pub fn editor_units(&self) -> Result<Vec<String>, ServiceError> {
         Ok(self.service()?.editor_units()?)
@@ -745,6 +721,9 @@ impl CoreSession {
     ) -> Result<ShoppingResult, ServiceError> {
         let edit = match edit {
             ShoppingEdit::AddManual { text } => services::ShoppingEdit::AddManual { text },
+            ShoppingEdit::AddManualItems { names } => {
+                services::ShoppingEdit::AddManualItems { names }
+            }
             ShoppingEdit::Edit { id, text } => services::ShoppingEdit::Edit { id, text },
             ShoppingEdit::Check { ids, checked } => services::ShoppingEdit::Check { ids, checked },
             ShoppingEdit::Remove { ids } => services::ShoppingEdit::Remove { ids },
@@ -1009,6 +988,21 @@ pub fn parse_text(text: String) -> Result<ImportCandidates, ServiceError> {
             message: e.to_string(),
         })?
         .into())
+}
+/// Apply Smart Import's written-recipe parser and canonical bounds before review.
+pub fn smart_create_candidate(written: String) -> Result<Candidate, ServiceError> {
+    if written.len() > core::provider::RESPONSE_LIMIT {
+        return Err(services::Error::Limit.into());
+    }
+    let value = serde_json::from_str(&written).map_err(|_| services::Error::InvalidData)?;
+    let (recipe, warnings) =
+        recipe::repair::written(&value, &services::now()).map_err(services::Error::from)?;
+    Ok(Candidate {
+        recipe: recipe.into(),
+        warnings,
+        ingredient_sources: vec![],
+        ai_review: None,
+    })
 }
 pub fn inspect_page(html: String, url: String) -> Result<ImportCandidates, ServiceError> {
     Ok(recipe::web::inspect_page(&html, &url, &services::now())
@@ -1448,7 +1442,12 @@ impl ProviderTask {
             }
             return Err(error);
         }
-        match core::provider::validated_response(&bytes) {
+        if let Err(error) = core::provider::verify_url_response(&bytes, &self.input) {
+            state.finished = true;
+            return Err(error.into());
+        }
+        match core::provider::validated_recipe_response(&bytes, !self.input.target_title.is_empty())
+        {
             Err(problem) => {
                 *self.problems.lock().unwrap() = Some(problem.message.clone());
                 if problem.retryable && !state.validation_retried && state.attempts < 4 {

@@ -1,4 +1,7 @@
+import 'app_navigation.dart';
 import 'backup_feedback.dart';
+import 'design_lab.dart';
+import 'facelift_motion.dart';
 import 'pixel_scroll.dart';
 import 'retained_screen.dart';
 
@@ -6,7 +9,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:material_symbols_icons/symbols.dart';
 
 import '../app_platform.dart';
 import '../app_identity.dart';
@@ -43,6 +45,10 @@ import 'how_cookdex_works_screen.dart';
 import '../sync_presentation.dart';
 import 'sync_screen.dart';
 import 'smart_settings_screen.dart';
+import '../smart_create_controller.dart';
+import 'smart_create_screen.dart';
+import 'smart_create_review.dart';
+import 'create_settings_screen.dart';
 import '../update_checker.dart';
 import 'update_controls.dart';
 
@@ -53,6 +59,7 @@ class CookdexApp extends StatefulWidget {
     required this.platform,
     this.drafts,
     this.importDrafts,
+    this.createDiagnostics,
     this.importService,
     this.exportService,
     this.updates,
@@ -61,6 +68,7 @@ class CookdexApp extends StatefulWidget {
   final AppPlatform platform;
   final DraftStorage? drafts;
   final DraftStorage? importDrafts;
+  final DraftStorage? createDiagnostics;
   final ImportService? importService;
   final ExportService? exportService;
   final UpdateController? updates;
@@ -70,6 +78,7 @@ class CookdexApp extends StatefulWidget {
 }
 
 class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
+  final _motion = isDevelopment ? MotionSettings() : null;
   final _navigator = GlobalKey<NavigatorState>();
   final _recipesNavigator = GlobalKey<NavigatorState>();
   final _recipesScreen = GlobalKey<RecipesScreenState>();
@@ -91,16 +100,27 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   late final ImportService _smart =
       widget.importService ??
       NativeImportService(
+        preferences: widget.store.preferences,
         existingTags: () =>
             widget.store.summaries.expand((r) => r.tags).toSet().toList(),
       );
+  SmartCreateController? _createSession;
+  SmartCreateController get _create => _createSession ??= SmartCreateController(
+    platform: _smart.platform,
+    local: widget.store.preferences,
+    diagnostics: widget.createDiagnostics,
+    existingTags: () => widget.store.summaries.expand((r) => r.tags).toSet(),
+  );
   CoreSession? get _session => widget.store.repository is RustRecipeRepository
       ? (widget.store.repository as RustRecipeRepository).session
       : null;
   late final ScrollController _recipesScroll;
+  final _shoppingScroll = PixelScrollController();
+  final _settingsScroll = PixelScrollController();
   late final CookController _cook;
   late final _OverlayObserver _observer;
-  int _tab = 0;
+  final _activeTab = ValueNotifier<int>(0);
+  int get _tab => _activeTab.value;
   String? _selected;
   Set<String>? _selection;
   bool _selectionBusy = false;
@@ -162,6 +182,22 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   bool _keyboardBack = false;
   int? _gestureTab;
   double _cookFooterHeight = 64;
+  final _cookInset = ValueNotifier<double?>(null);
+  final _themeCache = <(ColorScheme, bool), ThemeData>{};
+
+  ThemeData _theme(ColorScheme colors, {bool wide = false}) {
+    final key = (colors, wide);
+    final cached = _themeCache[key];
+    if (cached != null) return cached;
+    if (_themeCache.length >= 6) _themeCache.remove(_themeCache.keys.first);
+    return _themeCache[key] = cookdexTheme(colors: colors, largerBody: wide);
+  }
+
+  void _updateCookInset() {
+    _cookInset.value = _tab == 0 && _selected != null && _cook.active
+        ? _cookFooterHeight
+        : null;
+  }
 
   @override
   void initState() {
@@ -183,6 +219,8 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
       preferences: widget.store.preferences,
       setWake: widget.platform.setKeepScreenOn,
     );
+    _cook.addListener(_updateCookInset);
+    _activeTab.addListener(_updateCookInset);
     _observer = _OverlayObserver((obscured) {
       _obscured = obscured;
       _updateVisibility();
@@ -358,6 +396,86 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     );
   }
 
+  Widget _libraryRecipe(
+    BuildContext recipeContext,
+    String id, {
+    required bool fromIdeas,
+  }) => LibraryRecipePage(
+    store: widget.store,
+    recipeId: id,
+    backTooltip: fromIdeas ? 'Back to ideas' : 'Back to Library',
+    onDestinationSelected: fromIdeas ? _leaveIdeasForTab : null,
+    platform: widget.platform,
+    onActions: (scale) {
+      final recipe = widget.store.summaries
+          .where((r) => r.id == id)
+          .firstOrNull;
+      if (recipe != null) {
+        _recipeActions(
+          recipeContext,
+          recipe,
+          shoppingScale: scale,
+          onDeleted: fromIdeas
+              ? () {
+                  if (recipeContext.mounted &&
+                      ModalRoute.of(recipeContext)?.isCurrent == true) {
+                    Navigator.of(recipeContext).pop();
+                  }
+                }
+              : null,
+          onSelect: () {
+            Navigator.of(
+              recipeContext,
+              rootNavigator: true,
+            ).popUntil((route) => route.isFirst);
+            _recipeAction(recipeContext, id, 'select');
+          },
+        );
+      }
+    },
+    onEdit: () => _openEditor(recipeContext, recipeId: id),
+    onAddToShopping: (scale) =>
+        _recipeAction(recipeContext, id, 'shopping', shoppingScale: scale),
+  );
+
+  Future<void> _pushRecipe(
+    BuildContext context,
+    String id, {
+    bool fromIdeas = false,
+  }) async {
+    if (fromIdeas && !widget.store.summaries.any((recipe) => recipe.id == id)) {
+      _createSession?.forgetSavedRecipe(id);
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      cookdexRoute<void>(
+        context,
+        builder: (ctx) => _libraryRecipe(ctx, id, fromIdeas: fromIdeas),
+      ),
+    );
+  }
+
+  PageRoute<void> _savedRecipeRoute(
+    BuildContext context,
+    Recipe recipe,
+    double sheetProgress,
+  ) {
+    return savedSmartCreateRecipeRoute(
+      context,
+      builder: (ctx) => _libraryRecipe(ctx, recipe.id, fromIdeas: true),
+      recipe: recipe,
+      sheetProgress: sheetProgress,
+    );
+  }
+
+  void _leaveIdeasForTab(int index) {
+    // Reveal the retained Recipes list at its current position. Only a
+    // subsequent tap on that list is a request to scroll to the top.
+    _navigator.currentState!.popUntil((route) => route.isFirst);
+    if (_selected != null) _closeRecipe();
+    if (index != 0 || _tab != 0) _selectTab(index);
+  }
+
   void _openRecipe(String id) {
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _selected = id);
@@ -375,16 +493,19 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     _gestureTab = null;
     _tabBackProgress = null;
     FocusManager.instance.primaryFocus?.unfocus();
-    if (index == 0 && _tab == 0) {
+    if (index == 2 && _settingsScroll.hasClients) {
+      _settingsScroll.jumpTo(0);
+    } else if (index == 1 && _tab == 1 && _shoppingScroll.hasClients) {
+      _shoppingScroll.jumpTo(0);
+    } else if (index == 0 && _tab == 0) {
       if (_selected != null) {
         _closeRecipe();
       } else {
         _recipesScreen.currentState?.scrollToTop();
-        if (resetGesture) setState(() {});
-        return;
       }
     }
-    setState(() => _tab = index);
+    _activeTab.value = index;
+    if (resetGesture) setState(() {});
     _updateVisibility();
   }
 
@@ -411,27 +532,14 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   Future<void> _add(BuildContext context) async {
     final choice = await showCookdexSheet<String>(
       context,
-      child: Builder(
-        builder: (sheetContext) => Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Symbols.edit_note),
-              title: const Text('Write a recipe'),
-              onTap: () => Navigator.pop(sheetContext, 'Recipe editing'),
-            ),
-            ListTile(
-              leading: const Icon(Symbols.file_upload),
-              title: const Text('Smart Import'),
-              onTap: () => Navigator.pop(sheetContext, 'Recipe import'),
-            ),
-          ],
-        ),
-      ),
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+      child: const AddRecipeChoices(),
     );
     if (choice != null && context.mounted) {
       if (choice == 'Recipe editing') {
         await _openEditor(context);
+      } else if (choice == 'Smart Create') {
+        await _openCreate(context);
       } else {
         await _openImport(context);
       }
@@ -442,7 +550,11 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     BuildContext context, {
     String? recipeId,
     Candidate? imported,
+    String importSourceLine = '',
     bool exactTextImport = false,
+    bool smartCreated = false,
+    String? createWarning,
+    ValueChanged<Recipe>? markCreated,
   }) async {
     if (recipeId != null &&
         widget.store.conflicts.any((c) => c.recipeId == recipeId)) {
@@ -521,26 +633,39 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
         base: base,
         recovered: recovered,
         imported: recovered == null ? imported : null,
+        importSourceLine: importSourceLine,
         exactTextImport: exactTextImport,
+        smartCreated: smartCreated,
+        createWarning: createWarning,
       );
       if (!context.mounted) return null;
-      final saved = await Navigator.of(context, rootNavigator: true)
-          .push<Recipe>(
-            cookdexRoute<Recipe>(
+      Widget buildEditor(ValueChanged<Recipe>? onSaved) => RecipeEditor(
+        controller: controller!,
+        onSmartCreateSaved: onSaved,
+        tagSuggestions: widget.store.summaries
+            .expand((r) => r.tags)
+            .toSet()
+            .toList(),
+        ingredientSuggestions: widget.store.summaries
+            .expand((r) => r.ingredients)
+            .toSet()
+            .toList(),
+      );
+      final editorRoute = smartCreated && recovered == null
+          ? smartCreateReviewRoute(
               context,
-              builder: (_) => RecipeEditor(
-                controller: controller!,
-                tagSuggestions: widget.store.summaries
-                    .expand((r) => r.tags)
-                    .toSet()
-                    .toList(),
-                ingredientSuggestions: widget.store.summaries
-                    .expand((r) => r.ingredients)
-                    .toSet()
-                    .toList(),
-              ),
-            ),
-          );
+              buildEditor: buildEditor,
+              onLeave: (recipe) => markCreated?.call(recipe),
+              buildRecipeRoute: _savedRecipeRoute,
+            )
+          : cookdexRoute<Recipe>(context, builder: (_) => buildEditor(null));
+      final saved = await Navigator.of(
+        context,
+        rootNavigator: true,
+      ).push<Recipe>(editorRoute);
+      if (smartCreated) {
+        await editorRoute.completed;
+      }
       if (saved != null && mounted) {
         if (imported == null) _openRecipe(saved.id);
       }
@@ -573,6 +698,59 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     return null;
   }
 
+  Future<void> _createSettings(BuildContext context) => openCreateSettings(
+    context,
+    preferences: widget.store.preferences,
+    service: _smart,
+    lastDiagnostic: _create.lastDiagnostic,
+    clearDiagnostic: _create.clearDiagnostic,
+  );
+
+  Future<void> _openKey(BuildContext context) => openGeminiKey(
+    context,
+    service: _smart,
+    openUrl: widget.platform.openSource,
+  );
+
+  Future<void> _openCreate(BuildContext context) async {
+    if (_importOpen) return;
+    _importOpen = true;
+    try {
+      await Navigator.of(context, rootNavigator: true).push<void>(
+        cookdexRoute<void>(
+          context,
+          builder: (routeContext) => SmartCreateScreen(
+            controller: _create,
+            onKey: _openKey,
+            onSettings: _createSettings,
+            onStaples: (c) =>
+                openCreateStaples(c, preferences: widget.store.preferences),
+            onViewRecipe: (id) =>
+                _pushRecipe(routeContext, id, fromIdeas: true),
+            onReview: (c, candidate) async {
+              final idea = _create.reviewIdeaTitle;
+              await _openEditor(
+                c,
+                imported: candidate,
+                smartCreated: true,
+                createWarning: _create.recipeWarning,
+                markCreated: (recipe) {
+                  if (idea != null) _create.markSaved(idea, recipe.id);
+                },
+              );
+            },
+            onShop: (names) => widget.store.editShopping(
+              ShoppingEdit.addManualItems(names: names),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _importOpen = false;
+      _drainShares();
+    }
+  }
+
   Future<void> _openImport(
     BuildContext context, {
     IncomingShare? incoming,
@@ -584,6 +762,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
       service:
           widget.importService ??
           NativeImportService(
+            preferences: widget.store.preferences,
             existingTags: () =>
                 widget.store.summaries.expand((r) => r.tags).toSet().toList(),
           ),
@@ -597,11 +776,15 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
               context,
               builder: (_) => ImportScreen(
                 controller: controller,
+                openUrl: widget.platform.openSource,
                 initialInput: incoming == null
                     ? null
                     : (c) => incoming.apply(c),
-                onReview: (context, candidate) =>
-                    _openEditor(context, imported: candidate),
+                onReview: (context, candidate) => _openEditor(
+                  context,
+                  imported: candidate,
+                  importSourceLine: controller.reviewSourceLine,
+                ),
                 onTextReview: (context, candidate) => _openEditor(
                   context,
                   imported: candidate,
@@ -808,11 +991,17 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     RecipeSummary recipe, {
     int? shoppingScale,
     VoidCallback? onSelect,
+    VoidCallback? onDeleted,
   }) => showRecipeActions(
     context: context,
     store: widget.store,
     recipe: recipe,
-    onDeleted: _selected == recipe.id ? _closeRecipe : null,
+    onDeleted: () {
+      if (!mounted) return;
+      _createSession?.forgetSavedRecipe(recipe.id);
+      if (_selected == recipe.id) _closeRecipe();
+      onDeleted?.call();
+    },
     onEdit: () => _openEditor(context, recipeId: recipe.id),
     onAction: (action) async {
       if (action == 'select' && onSelect != null) {
@@ -837,7 +1026,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     if (action == 'select') {
       _closeRecipe();
       setState(() {
-        _tab = 0;
+        _activeTab.value = 0;
         _selection = {id};
       });
       return;
@@ -1008,44 +1197,6 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
         if (!saved || !context.mounted) return;
         await showBackupSaved(context, report.omitted);
       });
-  Future<void> _cleanup(
-    BuildContext context,
-  ) => _settingsAction(context, () async {
-    final preview = await _session!.previewCleanup();
-    final changed = await preview.changed();
-    final skipped = await preview.skippedConflicts();
-    if (!context.mounted) return;
-    if (changed == 0) {
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Clean up recipes'),
-          content: Text(
-            'No recipes need cleanup.\n$skipped conflicted recipes skipped.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Done'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-    if (!await confirmCookdex(
-      context,
-      title: 'Clean up $changed recipes?',
-      action: 'Clean up',
-      content: Text(
-        'Normalize units, times and lowercase tags.\n$skipped conflicted recipes will be skipped.',
-      ),
-    )) {
-      return;
-    }
-    await _session!.cleanup(preview: preview, operation: Operation());
-    if (context.mounted) showFeedback(context, '$changed recipes cleaned up');
-  });
   Future<void> _recover(BuildContext context) =>
       _settingsAction(context, () async {
         final generation = widget.store.generation;
@@ -1076,7 +1227,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
       if (!await confirmRestore(context, report)) return;
       final restored = await widget.store.restoreBackup(preview);
       if (!context.mounted) return;
-      final clean = await showDialog<bool>(
+      await showDialog<void>(
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Recipes restored'),
@@ -1085,11 +1236,6 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
             '${restored.conflicts.isEmpty ? '' : '\n${restored.conflicts.length} ${restored.conflicts.length == 1 ? 'conflict' : 'conflicts'} kept unchanged.'}',
           ),
           actions: [
-            if (_session != null)
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Clean up recipes'),
-              ),
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Done'),
@@ -1097,7 +1243,6 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
           ],
         ),
       );
-      if (clean == true && context.mounted) await _cleanup(context);
     } catch (error) {
       if (context.mounted) {
         await showDialog<void>(
@@ -1125,6 +1270,11 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _cook.removeListener(_updateCookInset);
+    _activeTab.removeListener(_updateCookInset);
+    _cookInset.dispose();
+    _activeTab.dispose();
+    _motion?.dispose();
     _updates.dispose();
     _incoming.dispose();
     _snapshotTimer?.cancel();
@@ -1132,29 +1282,34 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     widget.store.preferences.removeListener(_preferencesChanged);
     _recipesScroll.dispose();
+    _shoppingScroll.dispose();
+    _settingsScroll.dispose();
     _cook.dispose();
+    _createSession?.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context) => isDevelopment
+      ? FaceliftMotion(settings: _motion!, child: _app())
+      : _app();
+
+  Widget _app() => MaterialApp(
     scrollBehavior: const CookdexScrollBehavior(),
     title: appName,
     debugShowCheckedModeBanner: false,
     navigatorKey: _navigator,
     navigatorObservers: [_observer],
     themeMode: widget.store.preferences.themeMode,
-    theme: cookdexTheme(
-      colors:
-          widget.platform.isAndroid && widget.store.preferences.wallpaperColors
+    theme: _theme(
+      widget.platform.isAndroid && widget.store.preferences.wallpaperColors
           ? _lightWallpaper ?? cookdexLightColors
           : cookdexLightColors,
     ),
-    darkTheme: cookdexTheme(
-      colors:
-          widget.platform.isAndroid && widget.store.preferences.wallpaperColors
-          ? _wallpaper
-          : null,
+    darkTheme: _theme(
+      widget.platform.isAndroid && widget.store.preferences.wallpaperColors
+          ? _wallpaper ?? cookdexColors
+          : cookdexColors,
     ),
     themeAnimationDuration:
         WidgetsBinding
@@ -1163,511 +1318,304 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
             .accessibilityFeatures
             .disableAnimations
         ? Duration.zero
-        : const Duration(milliseconds: 150),
-    builder: (context, child) => ListenableBuilder(
-      listenable: _cook,
-      child: child,
-      builder: (context, child) => Theme(
-        data: cookdexTheme(
-          largerBody: WindowSizeClass.of(context) != WindowSizeClass.compact,
-          snackBarBottomInset:
-              WindowSizeClass.of(context) == WindowSizeClass.expanded &&
-                  _tab == 0 &&
-                  _selected != null &&
-                  _cook.active
-              ? _cookFooterHeight + 16
-              : null,
-          colors: Theme.of(context).colorScheme,
-        ),
-        child: Actions(
-          actions: {
-            EditableTextTapOutsideIntent:
-                CallbackAction<EditableTextTapOutsideIntent>(
-                  onInvoke: (intent) {
-                    intent.focusNode.unfocus();
-                    return null;
-                  },
-                ),
-          },
-          child: child!,
-        ),
+        : FaceliftMotion.themeFade,
+    builder: (context, child) => Theme(
+      data: _theme(
+        Theme.of(context).colorScheme,
+        wide: WindowSizeClass.of(context) != WindowSizeClass.compact,
+      ),
+      child: Actions(
+        actions: {
+          EditableTextTapOutsideIntent:
+              CallbackAction<EditableTextTapOutsideIntent>(
+                onInvoke: (intent) {
+                  intent.focusNode.unfocus();
+                  return null;
+                },
+              ),
+        },
+        child: child!,
       ),
     ),
     home: RetainedScreen(
       child: Builder(
-        builder: (context) => PopScope(
-          canPop:
-              _tab == 0 &&
-              _selected == null &&
-              _selection == null &&
-              widget.store.preferences.query.isEmpty &&
-              !_keyboardVisible,
-          onPopInvokedWithResult: (didPop, result) {
-            if (!didPop) unawaited(_back());
-          },
-          child: Shortcuts(
-            shortcuts: const {
-              SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
-            },
-            child: Actions(
-              actions: {
-                DismissIntent: CallbackAction<DismissIntent>(
-                  onInvoke: (_) {
-                    unawaited(_navigator.currentState!.maybePop());
-                    return null;
-                  },
-                ),
+        builder: (context) {
+          final pages = _buildTabPages(context);
+          return ValueListenableBuilder<int>(
+            valueListenable: _activeTab,
+            builder: (context, index, _) => PopScope(
+              canPop:
+                  _tab == 0 &&
+                  _selected == null &&
+                  _selection == null &&
+                  widget.store.preferences.query.isEmpty &&
+                  !_keyboardVisible,
+              onPopInvokedWithResult: (didPop, result) {
+                if (!didPop) unawaited(_back());
               },
-              child: Scaffold(
-                body: Row(
-                  children: [
-                    if (WindowSizeClass.of(context) ==
-                            WindowSizeClass.expanded &&
-                        MediaQuery.viewInsetsOf(context).bottom == 0)
-                      ListenableBuilder(
-                        listenable: widget.store,
-                        builder: (context, _) => NavigationRail(
-                          selectedIndex: _tab,
-                          groupAlignment: 0.0,
-                          onDestinationSelected: _selectTab,
-                          labelType: NavigationRailLabelType.all,
-                          destinations: [
-                            NavigationRailDestination(
-                              icon: const Icon(Symbols.menu_book),
-                              selectedIcon: const Icon(
-                                Symbols.menu_book,
-                                fill: 1,
-                              ),
-                              label: ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 120,
-                                ),
-                                child: const Text(
-                                  'Recipes',
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                            NavigationRailDestination(
-                              icon: Badge(
-                                isLabelVisible:
-                                    widget.store.uncheckedShoppingCount > 0,
-                                label: Text(
-                                  '${widget.store.uncheckedShoppingCount}',
-                                ),
-                                child: const Icon(Symbols.shopping_cart),
-                              ),
-                              selectedIcon: Badge(
-                                isLabelVisible:
-                                    widget.store.uncheckedShoppingCount > 0,
-                                label: Text(
-                                  '${widget.store.uncheckedShoppingCount}',
-                                ),
-                                child: const Icon(
-                                  Symbols.shopping_cart,
-                                  fill: 1,
-                                ),
-                              ),
-                              label: ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 120,
-                                ),
-                                child: const Text(
-                                  'Shopping list',
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                            NavigationRailDestination(
-                              icon: const Icon(Symbols.settings),
-                              selectedIcon: const Icon(
-                                Symbols.settings,
-                                fill: 1,
-                              ),
-                              label: ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 120,
-                                ),
-                                child: const Text(
-                                  'Settings',
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    Expanded(
-                      child: RetainedTabTransition(
-                        index: _tab,
-                        backProgress: _tabBackProgress,
-                        backFromRight: _backFromRight,
-                        children: [
-                          Navigator(
-                            key: _recipesNavigator,
-                            onDidRemovePage: (page) {
-                              if (page.name == _selected) _closeRecipe();
-                            },
-                            pages: [
-                              OpaqueMaterialPage<void>(
-                                key: const ValueKey('recipes-root'),
-                                child: SafeArea(
-                                  bottom: false,
-                                  child: RecipesScreen(
-                                    key: _recipesScreen,
-                                    selectedIds: _selection,
-                                    onToggleSelection: _selectionBusy
-                                        ? null
-                                        : (id) => setState(() {
-                                            if (!_selection!.remove(id)) {
-                                              _selection!.add(id);
-                                            }
-                                          }),
-                                    onCloseSelection: _selectionBusy
-                                        ? null
-                                        : () =>
-                                              setState(() => _selection = null),
-                                    onSelectAll: _selectionBusy
-                                        ? null
-                                        : () => setState(
-                                            () => _selection = widget
-                                                .store
-                                                .visibleRecipes
-                                                .map((r) => r.id)
-                                                .toSet(),
-                                          ),
-                                    onShareSelection: _selectionBusy
-                                        ? null
-                                        : () => _selectionAction(context),
-                                    onShoppingSelection: _selectionBusy
-                                        ? null
-                                        : () => _selectionAction(
-                                            context,
-                                            shopping: true,
-                                          ),
-                                    onTagSelection: _selectionBusy
-                                        ? null
-                                        : () => _tagSelection(context),
-                                    onDeleteSelection: _selectionBusy
-                                        ? null
-                                        : () => _deleteSelection(context),
-                                    store: widget.store,
-                                    preferences: widget.store.preferences,
-                                    controller: _recipesScroll,
-                                    onOpenRecipe: _openRecipe,
-                                    onAdd: () => _add(context),
-                                    onWrite: () => _openEditor(context),
-                                    onImport: () => _openImport(context),
-                                    onSync: () => _manualSync(context),
-                                    syncController: _sync,
-                                    onSyncStatus: () =>
-                                        _openSyncIndicator(context),
-                                    onHelp: () => _openHelp(context),
-                                    onRestore: () => _restore(context),
-                                    onActions: (recipe) =>
-                                        _recipeActions(context, recipe),
-                                  ),
-                                ),
-                              ),
-                              if (_selected != null)
-                                OpaqueMaterialPage<void>(
-                                  key: ValueKey(_selected),
-                                  name: _selected,
-                                  child: PopScope(
-                                    canPop: _tab == 0,
-                                    child: SafeArea(
-                                      bottom: false,
-                                      child: RecipeTextScale(
-                                        factor: widget
-                                            .store
-                                            .preferences
-                                            .recipeTextSize
-                                            .factor,
-                                        child: RecipeDetail(
-                                          key: ValueKey(_selected),
-                                          store: widget.store,
-                                          recipeId: _selected!,
-                                          cook: _cook,
-                                          onControlsHeight: (height) {
-                                            if (mounted &&
-                                                _cookFooterHeight != height) {
-                                              setState(
-                                                () =>
-                                                    _cookFooterHeight = height,
-                                              );
-                                            }
-                                          },
-                                          showControls:
-                                              WindowSizeClass.of(context) ==
-                                              WindowSizeClass.expanded,
-                                          onBack: () => _recipesNavigator
-                                              .currentState
-                                              ?.maybePop(),
-                                          onActions: () {
-                                            final recipe = widget
-                                                .store
-                                                .summaries
-                                                .where((r) => r.id == _selected)
-                                                .firstOrNull;
-                                            if (recipe != null) {
-                                              _recipeActions(context, recipe);
-                                            }
-                                          },
-                                          onEdit: () => _openEditor(
-                                            context,
-                                            recipeId: _selected,
-                                          ),
-                                          onSource: widget.platform.openSource,
-                                          onAddToShopping: () => _recipeAction(
-                                            context,
-                                            _selected!,
-                                            'shopping',
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          ShoppingScreen(
+              child: Shortcuts(
+                shortcuts: const {
+                  SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+                },
+                child: Actions(
+                  actions: {
+                    DismissIntent: CallbackAction<DismissIntent>(
+                      onInvoke: (_) {
+                        unawaited(_navigator.currentState!.maybePop());
+                        return null;
+                      },
+                    ),
+                  },
+                  child: Scaffold(
+                    // Scaffold positions floating snackbars above this slot.
+                    // Reserving the pill's height here avoids broadcasting a
+                    // new Theme to every retained page on cook entry and exit.
+                    floatingActionButton: ValueListenableBuilder<double?>(
+                      valueListenable: _cookInset,
+                      builder: (_, height, _) =>
+                          SizedBox(width: 0, height: height ?? 0),
+                    ),
+                    body: Row(
+                      children: [
+                        if (WindowSizeClass.of(context) !=
+                            WindowSizeClass.compact)
+                          AppNavigation(
                             store: widget.store,
-                            onSaveText: (shoppingContext) => _export(
-                              shoppingContext,
-                              () => _exports.shopping(
-                                widget.store.shopping,
-                                widget.store.summaries,
-                              ),
-                            ),
+                            selected: _tab,
+                            onSelect: _selectTab,
+                            rail: true,
                           ),
-                          SettingsScreen(
-                            onLibrary: () =>
-                                Navigator.of(
-                                  context,
-                                  rootNavigator: true,
-                                ).push<void>(
-                                  cookdexRoute<void>(
-                                    context,
-                                    builder: (_) => LibraryScreen(
-                                      store: widget.store,
-                                      onOpenRecipe: (libraryContext, id) =>
-                                          Navigator.of(
-                                            libraryContext,
-                                          ).push<void>(
-                                            cookdexRoute<void>(
-                                              libraryContext,
-                                              builder: (recipeContext) =>
-                                                  LibraryRecipePage(
-                                                    store: widget.store,
-                                                    recipeId: id,
-                                                    platform: widget.platform,
-                                                    onActions: (scale) {
-                                                      final recipe = widget
-                                                          .store
-                                                          .summaries
-                                                          .where(
-                                                            (r) => r.id == id,
-                                                          )
-                                                          .firstOrNull;
-                                                      if (recipe != null) {
-                                                        _recipeActions(
-                                                          recipeContext,
-                                                          recipe,
-                                                          shoppingScale: scale,
-                                                          onSelect: () {
-                                                            Navigator.of(
-                                                              recipeContext,
-                                                              rootNavigator:
-                                                                  true,
-                                                            ).popUntil(
-                                                              (route) =>
-                                                                  route.isFirst,
-                                                            );
-                                                            _recipeAction(
-                                                              context,
-                                                              id,
-                                                              'select',
-                                                            );
-                                                          },
-                                                        );
-                                                      }
-                                                    },
-                                                    onEdit: () => _openEditor(
-                                                      recipeContext,
-                                                      recipeId: id,
-                                                    ),
-                                                    onAddToShopping: (scale) =>
-                                                        _recipeAction(
-                                                          recipeContext,
-                                                          id,
-                                                          'shopping',
-                                                          shoppingScale: scale,
-                                                        ),
-                                                  ),
-                                            ),
-                                          ),
-                                    ),
-                                  ),
-                                ),
-                            onGitHub: () => _openGitHub(context),
-                            onShareCookdex: () => _shareCookdex(context),
-                            hasPrevious: widget.store.hasPrevious,
-                            busy: _restoring,
-                            syncSummary:
-                                '${_sync?.summary ?? 'Off'}${widget.store.conflicts.isEmpty ? '' : ' · ${widget.store.conflicts.length} conflicts'}',
-                            syncChanges: _sync,
-                            readSyncSummary: () =>
-                                '${_sync?.summary ?? 'Off'}${widget.store.conflicts.isEmpty ? '' : ' · ${widget.store.conflicts.length} conflicts'}',
-                            onSync: _sync == null
-                                ? null
-                                : () => _openSync(context),
-                            onDownloadRecipeZip: _session == null
-                                ? null
-                                : () => _backup(context),
-                            onRestoreRecipeZip: () => _restore(context),
-                            onSnapshots: _session == null
-                                ? null
-                                : () => _openSnapshots(context),
-                            snapshotsFailing: _snapshotsFailing,
-                            onRecoverPreviousSave: _session == null
-                                ? null
-                                : () => _recover(context),
-                            onCleanUpRecipes: _session == null
-                                ? null
-                                : () => _cleanup(context),
-                            onSaveReadableCookbook: () =>
-                                _saveCookbook(context),
-                            onSmartImportSettings: () =>
-                                Navigator.of(
-                                  context,
-                                  rootNavigator: true,
-                                ).push<void>(
-                                  cookdexRoute<void>(
-                                    context,
-                                    builder: (_) => SmartSettingsScreen(
-                                      service: _smart,
-                                      testKey: () => _settingsPlatform.testKey(
-                                        _smart.platform,
-                                      ),
-                                      openUrl: widget.platform.openSource,
-                                    ),
-                                  ),
-                                ),
-                            shoppingKeepAwake:
-                                widget.store.preferences.shoppingKeepAwake,
-                            onShoppingKeepAwake:
-                                widget.store.preferences.setShoppingKeepAwake,
-                            recipeTextScale:
-                                widget.store.preferences.recipeTextSize.factor,
-                            onRecipeTextScale: (factor) =>
-                                widget.store.preferences.setRecipeTextSize(
-                                  RecipeTextSize.values.firstWhere(
-                                    (s) => s.factor == factor,
-                                  ),
-                                ),
-                            isAndroid: widget.platform.isAndroid,
-                            themeMode: widget.store.preferences.themeMode,
-                            onThemeMode: widget.store.preferences.setThemeMode,
-                            wallpaperColors:
-                                widget.store.preferences.wallpaperColors,
-                            onWallpaperColors:
-                                widget.store.preferences.setWallpaperColors,
-                            version: 'Version unavailable',
-                            installedVersion: _installedVersion,
-                            updateSettings: UpdateSettingsPanel(
+                        Expanded(
+                          child: RetainedTabTransition(
+                            index: _tab,
+                            readyToWarm: !widget.store.loading,
+                            backProgress: _tabBackProgress,
+                            backFromRight: _backFromRight,
+                            children: pages,
+                          ),
+                        ),
+                      ],
+                    ),
+                    bottomNavigationBar: ListenableBuilder(
+                      listenable: Listenable.merge([_cook, widget.store]),
+                      builder: (context, _) => Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_tab == 0 &&
+                              _selected == null &&
+                              _selection == null &&
+                              !_obscured &&
+                              !_keyboardVisible)
+                            UpdateNotice(
                               controller: _updates,
                               openPage: widget.platform.openSource,
                             ),
-                            onHowCookdexWorks: () => _openHelp(context),
-                          ),
+                          if (WindowSizeClass.of(context) ==
+                                  WindowSizeClass.compact &&
+                              MediaQuery.viewInsetsOf(context).bottom == 0)
+                            AppNavigation(
+                              store: widget.store,
+                              selected: _tab,
+                              onSelect: _selectTab,
+                              cooking: _tab == 0 && _selected != null && _cook.active,
+                            ),
                         ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
-                bottomNavigationBar: ListenableBuilder(
-                  listenable: Listenable.merge([_cook, widget.store]),
-                  builder: (context, _) => Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_tab == 0 &&
-                          _selected == null &&
-                          _selection == null &&
-                          !_obscured &&
-                          !_keyboardVisible)
-                        UpdateNotice(
-                          controller: _updates,
-                          openPage: widget.platform.openSource,
-                        ),
-                      if (WindowSizeClass.of(context) !=
-                              WindowSizeClass.expanded &&
-                          _tab == 0 &&
-                          _selected != null &&
-                          _cook.active)
-                        RecipeTextScale(
-                          factor:
-                              widget.store.preferences.recipeTextSize.factor,
-                          child: CookNavigation(
-                            cook: _cook,
-                            includeBottomInset: false,
-                          ),
-                        ),
-                      if (WindowSizeClass.of(context) !=
-                              WindowSizeClass.expanded &&
-                          MediaQuery.viewInsetsOf(context).bottom == 0)
-                        NavigationBar(
-                          selectedIndex: _tab,
-                          onDestinationSelected: _selectTab,
-                          destinations: [
-                            NavigationDestination(
-                              icon: const Icon(Symbols.menu_book),
-                              selectedIcon: const Icon(
-                                Symbols.menu_book,
-                                fill: 1,
-                              ),
-                              label: 'Recipes',
-                            ),
-                            NavigationDestination(
-                              icon: Badge(
-                                isLabelVisible:
-                                    widget.store.uncheckedShoppingCount > 0,
-                                label: Text(
-                                  '${widget.store.uncheckedShoppingCount}',
-                                ),
-                                child: const Icon(Symbols.shopping_cart),
-                              ),
-                              selectedIcon: Badge(
-                                isLabelVisible:
-                                    widget.store.uncheckedShoppingCount > 0,
-                                label: Text(
-                                  '${widget.store.uncheckedShoppingCount}',
-                                ),
-                                child: const Icon(
-                                  Symbols.shopping_cart,
-                                  fill: 1,
-                                ),
-                              ),
-                              label: 'Shopping list',
-                            ),
-                            NavigationDestination(
-                              icon: const Icon(Symbols.settings),
-                              selectedIcon: const Icon(
-                                Symbols.settings,
-                                fill: 1,
-                              ),
-                              label: 'Settings',
-                            ),
-                          ],
-                        ),
-                    ],
+              ),
+            ),
+          );
+        },
+      ),
+    ),
+  );
+
+  List<Widget> _buildTabPages(BuildContext context) => [
+    Navigator(
+      key: _recipesNavigator,
+      onDidRemovePage: (page) {
+        if (page.name == _selected) _closeRecipe();
+      },
+      pages: [
+        OpaqueMaterialPage<void>(
+          key: const ValueKey('recipes-root'),
+          child: SafeArea(
+            bottom: false,
+            child: RecipesScreen(
+              key: _recipesScreen,
+              selectedIds: _selection,
+              onToggleSelection: _selectionBusy
+                  ? null
+                  : (id) => setState(() {
+                      if (!_selection!.remove(id)) {
+                        _selection!.add(id);
+                      }
+                    }),
+              onCloseSelection: _selectionBusy
+                  ? null
+                  : () => setState(() => _selection = null),
+              onSelectAll: _selectionBusy
+                  ? null
+                  : () => setState(
+                      () => _selection = widget.store.visibleRecipes
+                          .map((r) => r.id)
+                          .toSet(),
+                    ),
+              onShareSelection: _selectionBusy
+                  ? null
+                  : () => _selectionAction(context),
+              onShoppingSelection: _selectionBusy
+                  ? null
+                  : () => _selectionAction(context, shopping: true),
+              onTagSelection: _selectionBusy
+                  ? null
+                  : () => _tagSelection(context),
+              onDeleteSelection: _selectionBusy
+                  ? null
+                  : () => _deleteSelection(context),
+              store: widget.store,
+              preferences: widget.store.preferences,
+              controller: _recipesScroll,
+              onOpenRecipe: _openRecipe,
+              onAdd: () => _add(context),
+              keyboardVisible: _keyboardVisible,
+              onDesignLab: isDevelopment ? () => showDesignLab(context) : null,
+              onWrite: () => _openEditor(context),
+              onImport: () => _openImport(context),
+              onCreate: () => _openCreate(context),
+              onSync: () => _manualSync(context),
+              syncController: _sync,
+              onSyncStatus: () => _openSyncIndicator(context),
+              onHelp: () => _openHelp(context),
+              onRestore: () => _restore(context),
+              onActions: (recipe) => _recipeActions(context, recipe),
+            ),
+          ),
+        ),
+        if (_selected != null)
+          OpaqueMaterialPage<void>(
+            key: ValueKey(_selected),
+            recipeOpening: true,
+            name: _selected,
+            child: _RecipeBackScope(
+              tab: _activeTab,
+              child: SafeArea(
+                bottom: false,
+                child: RecipeTextScale(
+                  factor: widget.store.preferences.recipeTextSize.factor,
+                  child: RecipeDetail(
+                    key: ValueKey(_selected),
+                    store: widget.store,
+                    recipeId: _selected!,
+                    cook: _cook,
+                    onControlsHeight: (height) {
+                      if (mounted && _cookFooterHeight != height) {
+                        _cookFooterHeight = height;
+                        _updateCookInset();
+                      }
+                    },
+                    showControls: true,
+                    systemBottomInset: MediaQuery.viewPaddingOf(context).bottom,
+                    onBack: () => _recipesNavigator.currentState?.maybePop(),
+                    onActions: () {
+                      final recipe = widget.store.summaries
+                          .where((r) => r.id == _selected)
+                          .firstOrNull;
+                      if (recipe != null) {
+                        _recipeActions(context, recipe);
+                      }
+                    },
+                    onEdit: () => _openEditor(context, recipeId: _selected),
+                    onSource: widget.platform.openSource,
+                    onAddToShopping: () =>
+                        _recipeAction(context, _selected!, 'shopping'),
                   ),
                 ),
               ),
             ),
           ),
-        ),
+      ],
+    ),
+    ShoppingScreen(
+      controller: _shoppingScroll,
+      store: widget.store,
+      onSaveText: (shoppingContext) => _export(
+        shoppingContext,
+        () => _exports.shopping(widget.store.shopping, widget.store.summaries),
       ),
     ),
+    SettingsScreen(
+      controller: _settingsScroll,
+      onLibrary: () => Navigator.of(context, rootNavigator: true).push<void>(
+        cookdexRoute<void>(
+          context,
+          builder: (_) => LibraryScreen(
+            store: widget.store,
+            onOpenRecipe: (libraryContext, id) =>
+                _pushRecipe(libraryContext, id),
+          ),
+        ),
+      ),
+      onGitHub: () => _openGitHub(context),
+      onShareCookdex: () => _shareCookdex(context),
+      readHasPrevious: () => widget.store.hasPrevious,
+      recoveryChanges: widget.store,
+      busy: _restoring,
+      syncSummary:
+          '${_sync?.summary ?? 'Off'}${widget.store.conflicts.isEmpty ? '' : ' · ${widget.store.conflicts.length} conflicts'}',
+      syncChanges: _sync,
+      readSyncSummary: () =>
+          '${_sync?.summary ?? 'Off'}${widget.store.conflicts.isEmpty ? '' : ' · ${widget.store.conflicts.length} conflicts'}',
+      onSync: _sync == null ? null : () => _openSync(context),
+      onDownloadRecipeZip: _session == null ? null : () => _backup(context),
+      onRestoreRecipeZip: () => _restore(context),
+      onSnapshots: _session == null ? null : () => _openSnapshots(context),
+      snapshotsFailing: _snapshotsFailing,
+      onRecoverPreviousSave: _session == null ? null : () => _recover(context),
+      onSaveReadableCookbook: () => _saveCookbook(context),
+      onSmartImportSettings: () => openSmartSettings(
+        context,
+        service: _smart,
+        preferences: widget.store.preferences,
+        openUrl: widget.platform.openSource,
+      ),
+      onGeminiKey: () => _openKey(context),
+      onSmartCreateSettings: () => _createSettings(context),
+      shoppingKeepAwake: widget.store.preferences.shoppingKeepAwake,
+      onShoppingKeepAwake: widget.store.preferences.setShoppingKeepAwake,
+      recipeTextScale: widget.store.preferences.recipeTextSize.factor,
+      onRecipeTextScale: (factor) => widget.store.preferences.setRecipeTextSize(
+        RecipeTextSize.values.firstWhere((s) => s.factor == factor),
+      ),
+      isAndroid: widget.platform.isAndroid,
+      themeMode: widget.store.preferences.themeMode,
+      onThemeMode: widget.store.preferences.setThemeMode,
+      wallpaperColors: widget.store.preferences.wallpaperColors,
+      onWallpaperColors: widget.store.preferences.setWallpaperColors,
+      version: 'Version unavailable',
+      installedVersion: _installedVersion,
+      updateSettings: UpdateSettingsPanel(
+        controller: _updates,
+        openPage: widget.platform.openSource,
+      ),
+      onHowCookdexWorks: () => _openHelp(context),
+    ),
+  ];
+}
+
+class _RecipeBackScope extends StatelessWidget {
+  const _RecipeBackScope({required this.tab, required this.child});
+  final ValueNotifier<int> tab;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<int>(
+    valueListenable: tab,
+    child: child,
+    builder: (context, index, child) =>
+        PopScope(canPop: index == 0, child: child!),
   );
 }
 

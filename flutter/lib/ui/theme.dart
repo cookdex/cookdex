@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 
 import 'navigation_feedback.dart';
+import 'facelift_tokens.dart';
 
 /// Colors carried from the established cookdex recipe page.
 const cookdexColors = ColorScheme.dark(
@@ -9,8 +10,12 @@ const cookdexColors = ColorScheme.dark(
   onPrimary: Color(0xff172018),
   primaryContainer: Color(0xff29382c),
   onPrimaryContainer: Color(0xffe5e8e1),
-  secondary: Color(0xffd3c48b),
-  onSecondary: Color(0xff242315),
+  tertiary: Color(0xffe5cb79),
+  onTertiary: Color(0xff382b00),
+  tertiaryContainer: Color(0xff50431f),
+  onTertiaryContainer: Color(0xffffe59b),
+  secondary: Color(0xffbfceb7),
+  onSecondary: Color(0xff293425),
   secondaryContainer: Color(0xff202923),
   onSecondaryContainer: Color(0xffb7d0ac),
   surface: Color(0xff151918),
@@ -33,10 +38,14 @@ const cookdexLightColors = ColorScheme.light(
   onPrimary: Color(0xffffffff),
   primaryContainer: Color(0xffd4e9c9),
   onPrimaryContainer: Color(0xff23351d),
-  secondary: Color(0xff6b5d2f),
+  tertiary: Color(0xff766019),
+  onTertiary: Color(0xffffffff),
+  tertiaryContainer: Color(0xfff5e6ad),
+  onTertiaryContainer: Color(0xff483900),
+  secondary: Color(0xff52664b),
   onSecondary: Color(0xffffffff),
-  secondaryContainer: Color(0xffeee3b8),
-  onSecondaryContainer: Color(0xff30290f),
+  secondaryContainer: Color(0xffdce7d4),
+  onSecondaryContainer: Color(0xff293625),
   surface: Color(0xfffafaf4),
   surfaceContainerLowest: Color(0xffffffff),
   surfaceContainerLow: Color(0xfff3f5ed),
@@ -164,7 +173,9 @@ ThemeData cookdexTheme({
       surfaceTintColor: Colors.transparent,
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(FaceliftTokens.sheetRadius),
+        ),
       ),
       constraints: const BoxConstraints(maxWidth: 560),
     ),

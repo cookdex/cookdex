@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 
 import 'draft_storage.dart';
 import 'editor_model.dart';
+import 'social_import_page.dart' show canonicalYouTubeVideo;
+import 'smart_review_values.dart';
 import 'name_matching.dart';
 import 'recipe_store.dart';
 import 'src/rust/api.dart' as core;
@@ -39,7 +41,10 @@ class EditorController extends ChangeNotifier {
     required DraftStorage storage,
     core.Recipe? base,
     core.Candidate? imported,
+    String importSourceLine = '',
     bool exactTextImport = false,
+    bool smartCreated = false,
+    String? createWarning,
     Map<String, dynamic>? recovered,
   }) async {
     final EditorDraft draft;
@@ -82,14 +87,40 @@ class EditorController extends ChangeNotifier {
         }
       }
     } else if (imported != null) {
+      final amounts = await store.repository.ingredientAmounts(
+        imported.recipe.fields.ingredients,
+      );
+      final smart =
+          !exactTextImport && (smartCreated || imported.aiReview != null);
       draft = EditorDraft.fromRecipe(
         imported.recipe,
-        await store.repository.ingredientAmounts(
-          imported.recipe.fields.ingredients,
-        ),
+        smart ? amounts.map(reviewAmount).toList() : amounts,
+        originalAmounts: amounts,
       );
+      if (smart) {
+        final fields = imported.recipe.fields;
+        final source = Uri.tryParse(fields.source);
+        final youtube =
+            importSourceLine.isNotEmpty &&
+            source != null &&
+            canonicalYouTubeVideo(source) != null;
+        final tags = reviewTags(fields, store.summaries, youtube: youtube);
+        draft.tags
+          ..clear()
+          ..addAll(tags);
+      } else {
+        final tags = sourceTagSpelling(store.summaries)(
+          imported.recipe.fields.tags,
+        );
+        draft.tags
+          ..clear()
+          ..addAll(tags);
+      }
+      draft.createWarning = createWarning;
       draft.base = null;
       draft.imported = true;
+      draft.importSourceLine = importSourceLine;
+      draft.smartCreated = smartCreated;
       draft.exactTextImport = exactTextImport;
       if (exactTextImport && imported.recipe.fields.steps.isEmpty) {
         draft.steps.clear();
@@ -97,7 +128,12 @@ class EditorController extends ChangeNotifier {
       draft.importWarnings.addAll(imported.warnings);
       final review = imported.aiReview;
       if (review != null) {
-        draft.aiGuessedFields.addAll(review.guessedFields);
+        final guessed = review.guessedFields.toSet();
+        final rows = draft.sections.expand((section) => section.rows);
+        for (final (index, row) in rows.indexed) {
+          row.aiGuessedAmount = guessed.remove('ingredientAmount:$index');
+        }
+        draft.aiGuessedFields.addAll(guessed);
         draft.aiRewrittenSteps = review.rewrittenSteps;
         for (final index in review.guessedSteps) {
           if (index < draft.steps.length) draft.steps[index].aiGuess = true;
@@ -307,6 +343,7 @@ class EditorController extends ChangeNotifier {
   }
 
   Future<core.Recipe?> save({
+    Future<void> Function()? showSaving,
     Future<Set<int>?> Function(List<NameMatch>)? reviewNames,
     Future<core.DuplicateChoice?> Function(List<core.RecipeSummary>)?
     chooseDuplicate,
@@ -325,6 +362,8 @@ class EditorController extends ChangeNotifier {
     try {
       final saveVersion = version;
       final generation = store.generation;
+      // Let the pressed button paint before normalization and spelling review.
+      if (showSaving != null) await showSaving();
       var fields = await _repository.normalizeEditorFields(
         draft.fields(),
         draft.amountInputs(),
@@ -389,6 +428,10 @@ class EditorController extends ChangeNotifier {
       dirty = false;
       draft.aiGuessedFields.clear();
       draft.aiRewrittenSteps = false;
+      draft.importSourceLine = '';
+      for (final row in draft.sections.expand((section) => section.rows)) {
+        row.aiGuessedAmount = false;
+      }
       for (final step in draft.steps) {
         step.aiGuess = false;
       }
@@ -470,16 +513,8 @@ class EditorController extends ChangeNotifier {
 
   List<NameMatch> nameMatches() {
     Map<String, String> preferred(bool tags) => {
-      for (final suggestion in groupNameSuggestions([
-        for (final recipe in store.summaries)
-          for (final name in tags ? recipe.tags : recipe.ingredients)
-            NameObservation(
-              name: name,
-              recipeId: recipe.id,
-              updatedAt: recipe.updatedAt,
-            ),
-      ]))
-        suggestion.key: suggestion.name,
+      for (final name in tags ? store.editorTags : store.editorIngredientNames)
+        sameNameKey(name): name,
     };
     final ingredients = preferred(false);
     final tags = preferred(true);

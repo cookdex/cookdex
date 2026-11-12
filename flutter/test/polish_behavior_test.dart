@@ -84,7 +84,9 @@ void main() {
       );
       await tester.tap(find.text('Family pork supper').first);
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Edit recipe'));
+      await tester.tap(find.byTooltip('Recipe actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Edit'));
       await tester.pumpAndSettle();
       final tag = find.byKey(const ValueKey('tag-input'));
       await reveal(tester, tag);
@@ -100,7 +102,8 @@ void main() {
       // A unit strip always has options, regardless of which tags are already used.
       final unit = find
           .byWidgetPredicate(
-            (w) => w.key is ValueKey<String> &&
+            (w) =>
+                w.key is ValueKey<String> &&
                 (w.key as ValueKey<String>).value.endsWith('-unit'),
           )
           .first;
@@ -145,12 +148,20 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Family pork supper').first);
     await tester.pumpAndSettle();
+    final detailContext = tester.element(find.byType(RecipeDetail));
+    final readingTheme = Theme.of(detailContext);
     await tester.tap(find.text('Cook'));
     await tester.pumpAndSettle();
-    ScaffoldMessenger.of(tester.element(find.byType(RecipeDetail)))
-        .showSnackBar(
-          const SnackBar(content: Text('Generic shopping / export feedback')),
-        );
+    expect(
+      Theme.of(detailContext),
+      readingTheme,
+      reason:
+          'Pill clearance belongs to the scaffold layout. Changing the '
+          'shared theme here rebuilds retained tabs.',
+    );
+    ScaffoldMessenger.of(detailContext).showSnackBar(
+      const SnackBar(content: Text('Generic shopping / export feedback')),
+    );
     await tester.pumpAndSettle();
     expect(
       tester
@@ -251,7 +262,8 @@ void main() {
       });
       expect(
         pixel,
-        Theme.of(tester.element(find.byType(RecipeDetail))).scaffoldBackgroundColor,
+        Theme.of(tester.element(find.byType(RecipeDetail)))
+            .scaffoldBackgroundColor,
       );
       await gesture('cancelBackGesture', 0);
       await tester.pumpAndSettle();

@@ -49,8 +49,10 @@ void main() {
     final paragraphs = helpSections
         .singleWhere((s) => s.id == 'adding')
         .paragraphs;
-    final paragraph = paragraphs[ranges ? 1 : 0];
-    expect(paragraph, contains(ranges ? 'ranges' : 'Choose Write a recipe'));
+    final paragraph = ranges
+        ? paragraphs.singleWhere((text) => text.contains('ranges like'))
+        : paragraphs.first;
+    expect(paragraph, contains(ranges ? 'ranges' : 'choose Edit'));
     for (final config in [
       ('small', const Size(360, 800), 1.0),
       ('normal', const Size(412, 892), 1.0),

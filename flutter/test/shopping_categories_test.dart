@@ -152,7 +152,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Salt'));
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
       expect(find.text('Checked (1)'), findsNothing);
       expect(

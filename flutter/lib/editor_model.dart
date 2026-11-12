@@ -18,10 +18,11 @@ class EditableIngredient {
     this.originalUnit,
     this.originalName,
     this.showNote = false,
+    this.aiGuessedAmount = false,
   }) : id = id ?? editorId();
   final String id;
   String amount, unit, name, prepNote;
-  bool optional, showNote;
+  bool optional, showNote, aiGuessedAmount;
   final core.Amount? originalAmount;
   final String? originalText;
   final String? originalUnit;
@@ -56,6 +57,7 @@ class EditableIngredient {
     'originalUnit': originalUnit,
     'originalName': originalName,
     'showNote': showNote,
+    if (aiGuessedAmount) 'aiGuessedAmount': true,
   };
   factory EditableIngredient.fromJson(Map<String, dynamic> j) =>
       EditableIngredient(
@@ -66,6 +68,7 @@ class EditableIngredient {
         prepNote: j['prepNote'] as String,
         optional: j['optional'] as bool,
         showNote: j['showNote'] == true,
+        aiGuessedAmount: j['aiGuessedAmount'] == true,
         originalText: j['originalText'] as String?,
         originalName: j['originalName'] as String?,
         originalUnit:
@@ -128,6 +131,8 @@ class EditorDraft {
     this.pasteKind,
     this.stale = false,
     this.imported = false,
+    this.importSourceLine = '',
+    this.smartCreated = false,
     this.exactTextImport = false,
     this.aiRewrittenSteps = false,
     List<String>? importWarnings,
@@ -160,6 +165,9 @@ class EditorDraft {
   String pasteText;
   bool stale;
   bool imported;
+  String importSourceLine;
+  bool smartCreated;
+  String? createWarning;
   final List<String> importWarnings;
   final Set<String> aiGuessedFields;
   bool get unappliedPaste => pasteKind != null && pasteText.trim().isNotEmpty;
@@ -207,6 +215,9 @@ class EditorDraft {
     'pasteKind': pasteKind,
     'stale': stale,
     'imported': imported,
+    if (importSourceLine.isNotEmpty) 'importSourceLine': importSourceLine,
+    if (smartCreated) 'smartCreated': true,
+    if (createWarning != null) 'createWarning': createWarning,
     'exactTextImport': exactTextImport,
     'importWarnings': importWarnings,
     'aiGuessedFields': aiGuessedFields.toList(),
@@ -248,15 +259,21 @@ class EditorDraft {
       pasteText: j['pasteText'] as String,
       stale: j['stale'] == true,
       imported: j['imported'] == true,
+      importSourceLine: j['importSourceLine'] as String? ?? '',
+      smartCreated: j['smartCreated'] == true,
       exactTextImport: j['exactTextImport'] == true,
       aiRewrittenSteps: j['aiRewrittenSteps'] == true,
       importWarnings: (j['importWarnings'] as List? ?? []).cast<String>(),
       aiGuessedFields: (j['aiGuessedFields'] as List? ?? [])
           .cast<String>()
           .toSet(),
-    );
+    )..createWarning = j['createWarning'] as String?;
   }
-  factory EditorDraft.fromRecipe(core.Recipe recipe, List<String> amounts) {
+  factory EditorDraft.fromRecipe(
+    core.Recipe recipe,
+    List<String> amounts, {
+    List<String>? originalAmounts,
+  }) {
     final f = recipe.fields;
     final sections = <EditableSection>[];
     for (var i = 0; i < f.ingredients.length; i++) {
@@ -272,7 +289,7 @@ class EditorDraft {
           prepNote: ingredient.prepNote,
           optional: ingredient.optional,
           originalAmount: ingredient.amount,
-          originalText: amounts[i],
+          originalText: originalAmounts?[i] ?? amounts[i],
           originalUnit: ingredient.unit,
           originalName: ingredient.name,
           showNote: ingredient.prepNote.isNotEmpty,
@@ -339,30 +356,32 @@ Map<String, dynamic> recipeToJson(core.Recipe r) => {
   'createdAt': r.createdAt,
   'updatedAt': r.updatedAt,
   'revision': r.revision,
-  'fields': {
-    'title': r.fields.title,
-    'description': r.fields.description,
-    'servings': r.fields.servings,
-    'prepTime': r.fields.prepTime,
-    'cookTime': r.fields.cookTime,
-    'totalTime': r.fields.totalTime,
-    'source': r.fields.source,
-    'tags': r.fields.tags,
-    'notes': r.fields.notes,
-    'steps': r.fields.steps,
-    'ingredients': r.fields.ingredients
-        .map(
-          (i) => {
-            'amount': amountToJson(i.amount),
-            'unit': i.unit,
-            'name': i.name,
-            'prepNote': i.prepNote,
-            'optional': i.optional,
-            'section': i.section,
-          },
-        )
-        .toList(),
-  },
+  'fields': recipeFieldsToJson(r.fields),
+};
+
+Map<String, dynamic> recipeFieldsToJson(core.RecipeFields fields) => {
+  'title': fields.title,
+  'description': fields.description,
+  'servings': fields.servings,
+  'prepTime': fields.prepTime,
+  'cookTime': fields.cookTime,
+  'totalTime': fields.totalTime,
+  'source': fields.source,
+  'tags': fields.tags,
+  'notes': fields.notes,
+  'steps': fields.steps,
+  'ingredients': fields.ingredients
+      .map(
+        (i) => {
+          'amount': amountToJson(i.amount),
+          'unit': i.unit,
+          'name': i.name,
+          'prepNote': i.prepNote,
+          'optional': i.optional,
+          'section': i.section,
+        },
+      )
+      .toList(),
 };
 core.Recipe recipeFromJson(Map<String, dynamic> j) {
   final f = j['fields'] as Map<String, dynamic>;

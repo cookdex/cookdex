@@ -157,7 +157,7 @@ fn favorite_sync_preserves_content_edit_time_in_both_directions() {
 }
 
 #[test]
-fn three_live_peers_direct_and_relay_conflicts_cleanup_and_revocation() {
+fn three_live_peers_direct_and_relay_conflicts_and_revocation() {
     let phone = Peer::new("Phone");
     let tablet = Peer::new("Tablet");
     let pc = Peer::new("PC");
@@ -191,11 +191,6 @@ fn three_live_peers_direct_and_relay_conflicts_cleanup_and_revocation() {
         .map(|v| v.id.clone())
         .collect::<Vec<_>>();
     assert!(tablet.service.backup(&op()).is_err());
-    let preview = tablet.service.preview_cleanup().unwrap();
-    assert_eq!(preview.skipped_conflicts, 1);
-    let before = tablet.recipe(&id);
-    tablet.service.cleanup(&preview, &op()).unwrap();
-    assert_eq!(tablet.recipe(&id), before);
     tablet
         .service
         .resolve(&id.0, &stale_heads, "keep-all")
@@ -351,43 +346,9 @@ fn clock_skew_hours_cannot_choose_a_sync_winner_and_deleted_ancestry_survives() 
 }
 
 #[test]
-fn cleanup_preserves_exact_quantities_favorites_ids_and_rejects_changed_preview() {
-    let p = Peer::new("Cleanup");
-    let id = p.seed();
-    let original = p.recipe(&id);
-    let preview = p.service.preview_cleanup().unwrap();
-    p.edit(&id, "Changed after preview");
-    assert_eq!(
-        p.service.cleanup(&preview, &op()).unwrap_err(),
-        Error::StaleWrite
-    );
-    let preview = p.service.preview_cleanup().unwrap();
-    p.service.cleanup(&preview, &op()).unwrap();
-    let after = p.recipe(&id);
-    assert_eq!(after.id, original.id);
-    assert_eq!(after.created_at, original.created_at);
-    assert_eq!(after.favorite, original.favorite);
-    assert_eq!(
-        after
-            .content
-            .ingredients
-            .iter()
-            .map(|i| &i.amount)
-            .collect::<Vec<_>>(),
-        original
-            .content
-            .ingredients
-            .iter()
-            .map(|i| &i.amount)
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(p.service.preview_cleanup().unwrap().changed, 0);
-}
-
-#[test]
-fn explicit_cleanup_is_a_normal_successor_and_reaches_another_peer() {
-    let a = Peer::new("Cleanup source");
-    let b = Peer::new("Cleanup receiver");
+fn restore_and_sync_preserve_original_recipe_values() {
+    let a = Peer::new("Restore source");
+    let b = Peer::new("Restore receiver");
     let mut recipes = fixture();
     let id = recipes[0].id.clone();
     recipes[0].content.tags = vec!["Dinner".into(), "DINNER".into()];
@@ -398,21 +359,10 @@ fn explicit_cleanup_is_a_normal_successor_and_reaches_another_peer() {
         .restore(&a.service.preview_restore(&archive, &op()).unwrap(), &op())
         .unwrap();
     b.pair(&a);
-    let original = a.recipe(&id);
-    a.service
-        .cleanup(&a.service.preview_cleanup().unwrap(), &op())
-        .unwrap();
-    let cleaned = a.recipe(&id);
-    assert_eq!(cleaned.revision, original.revision + 1);
-    assert_eq!(cleaned.content.tags, vec!["Dinner", "DINNER"]);
-    assert_eq!(cleaned.content.total_time, "1 hr 30 min");
-    assert_eq!(cleaned.content.ingredients[0].unit, "tbsp");
-    assert_eq!(
-        cleaned.content.ingredients[0].amount,
-        original.content.ingredients[0].amount
-    );
-    a.service.sync_now().unwrap();
-    assert_eq!(b.recipe(&id), cleaned);
+    let mut expected = recipes.remove(0);
+    expected.schema_version = 2;
+    assert_eq!(a.recipe(&id), expected);
+    assert_eq!(b.recipe(&id), expected);
 }
 
 #[test]

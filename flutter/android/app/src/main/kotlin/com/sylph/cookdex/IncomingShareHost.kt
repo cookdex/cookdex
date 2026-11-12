@@ -3,12 +3,13 @@ package com.sylph.cookdex
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Process
 import android.provider.OpenableColumns
 import android.widget.Toast
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
 
-/** Bounded, read-only intake. No file paths or recipes are logged or trusted. */
+/** Read-only intake. The provider enforces the sender's temporary URI grant. */
 class IncomingShareHost(
     private val activity: Activity,
     private val importer: ImportHost,
@@ -31,55 +32,90 @@ class IncomingShareHost(
             }
         }
     }
-    @Suppress("DEPRECATION")
+
     fun accept(intent: Intent?, coldStart: Boolean): Boolean {
-        if (intent?.action !in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE, Intent.ACTION_VIEW)) return false
+        if (intent == null || intent.action !in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE, Intent.ACTION_VIEW)) return false
         if (outstanding >= 4) {
             Toast.makeText(activity, "Finish an import before sharing more recipes.", Toast.LENGTH_LONG).show()
             return true
         }
         outstanding++
-        try {
-            val type = intent!!.type.orEmpty()
-            val images = type.startsWith("image/")
-            require(images || type in listOf("text/plain", "application/octet-stream"))
-            val uris = mutableListOf<Uri>()
-            if (intent.action == Intent.ACTION_VIEW) intent.data?.let { uris.add(it) }
-            else if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
-                intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.take(9)?.let { uris.addAll(it) }
-            } else intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let { uris.add(it) }
-            if (uris.isEmpty()) intent.clipData?.let { clip ->
-                for (i in 0 until minOf(clip.itemCount, 9)) clip.getItemAt(i).uri?.let { uris.add(it) }
+        worker.execute {
+            val type = IncomingShareTypes.normalize(intent.type)
+            val result = try {
+                read(intent, type)
+            } catch (_: Exception) {
+                failure(type.startsWith("image/"))
+            } catch (_: OutOfMemoryError) {
+                failure(type.startsWith("image/"))
             }
-            require(uris.size <= if (images) 8 else 1)
-            uris.forEach {
-                require(it.scheme == "content" && !it.authority.orEmpty().startsWith(activity.packageName))
-            }
-            val text = if (!images && uris.isEmpty()) intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() else null
-            require(text == null || text.toByteArray(Charsets.UTF_8).size <= 5 * 1024 * 1024)
-            worker.execute {
-                val result: Map<String, Any> = try {
-                    when {
-                        images -> importer.prepareSharedPhotos(uris)
-                        uris.isNotEmpty() -> {
-                            if (type == "application/octet-stream") {
-                                val filename = activity.contentResolver.query(uris.single(), arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                                    if (it.moveToFirst()) it.getString(0) else ""
-                                }.orEmpty()
-                                require(filename.endsWith(".txt", ignoreCase = true))
-                            }
-                            mapOf("text" to importer.readSharedText(uris.single()))
-                        }
-                        text != null -> mapOf("text" to text)
-                        else -> throw IllegalArgumentException()
-                    }
-                } catch (_: Exception) { failure(images) }
-                  catch (_: OutOfMemoryError) { failure(images) }
-                activity.runOnUiThread { deliver(result + ("coldStart" to coldStart)) }
-            }
-        } catch (_: Exception) { deliver(failure(false) + ("coldStart" to coldStart)) }
+            activity.runOnUiThread { deliver(result + ("coldStart" to coldStart)) }
+        }
         return true
     }
+
+    @Suppress("DEPRECATION")
+    private fun read(intent: Intent, type: String): Map<String, Any> {
+        // Senders may duplicate the same stream in ClipData to carry the grant.
+        val uris = linkedSetOf<Uri>()
+        val multiple = intent.action == Intent.ACTION_SEND_MULTIPLE
+        if (multiple) {
+            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let {
+                require(it.size in 1..8)
+                uris.addAll(it)
+            }
+        } else {
+            intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)?.let(uris::add)
+        }
+        intent.data?.let(uris::add)
+        val clip = intent.clipData
+        // A browser's text share can attach a content URI for its preview.
+        // Use the explicit shared page address without opening the thumbnail.
+        val extraText = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)
+        if (intent.action == Intent.ACTION_SEND && IncomingShareTypes.allowsMessage(type) &&
+            !extraText.isNullOrBlank() && (uris.isEmpty() || IncomingShareTypes.isWebLink(extraText))) {
+            return mapOf("text" to IncomingShareTypes.sharedMessage(extraText, null, null))
+        }
+        if (clip != null) {
+            require(clip.itemCount in 1..8)
+            for (i in 0 until clip.itemCount) clip.getItemAt(i).uri?.let(uris::add)
+        }
+        require(uris.size <= 8)
+        if (uris.all { it.scheme == "https" || it.scheme == "http" }) {
+            require(!multiple && IncomingShareTypes.allowsMessage(type))
+            val message = IncomingShareTypes.sharedMessage(
+                intent.getCharSequenceExtra(Intent.EXTRA_TEXT),
+                clip?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.text,
+                uris.singleOrNull()?.toString(),
+            )
+            return mapOf("text" to message)
+        }
+
+        val resolver = activity.contentResolver
+        val resolved = uris.map { uri ->
+            require(uri.scheme == "content" && !uri.authority.isNullOrBlank())
+            val authority = uri.authority!!.substringAfterLast('@')
+            val provider = activity.packageManager.resolveContentProvider(authority, 0)
+            require(provider?.applicationInfo?.uid != Process.myUid())
+            IncomingShareTypes.normalize(resolver.getType(uri))
+        }
+        if (resolved.all { IncomingShareTypes.isPhoto(type, it) }) {
+            return importer.prepareSharedPhotos(uris.toList())
+        }
+        require(!multiple && uris.size == 1)
+        val uri = uris.single()
+        val name = try {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                val index = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && it.moveToFirst()) it.getString(index) else null
+            }
+        } catch (_: UnsupportedOperationException) { null }
+          catch (_: IllegalArgumentException) { null }
+        val namedPath = uri.lastPathSegment?.takeIf { it.endsWith(".txt", ignoreCase = true) }
+        require(IncomingShareTypes.isTextFile(type, resolved.single(), name?.takeIf { it.isNotBlank() } ?: namedPath))
+        return mapOf("text" to importer.readSharedText(uri))
+    }
+
     private fun failure(images: Boolean): Map<String, Any> = mapOf("error" to if (images)
         "Could not read the shared photos. Choose up to 8 images (25 MB / 80 MP each, 12 MB prepared total)."
         else "Could not read the shared text. Choose a UTF-8 .txt file of 5 MB or less.")

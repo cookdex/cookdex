@@ -5,6 +5,26 @@ import 'app_identity.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+final _invalidWebSourceCharacter = RegExp(
+  r'[\s\\<>"`{|}^\x00-\x1f\x7f]|%(?![0-9a-fA-F]{2})',
+);
+
+Uri? webSourceUri(String source) {
+  if (_invalidWebSourceCharacter.hasMatch(source)) return null;
+  try {
+    final uri = Uri.parse(source);
+    if ((uri.scheme == 'http' || uri.scheme == 'https') &&
+        uri.host.isNotEmpty &&
+        uri.port <= 65535) {
+      return uri;
+    }
+  } on FormatException {
+    // The URI parser can also reject an out-of-range integer when reading port.
+    return null;
+  }
+  return null;
+}
+
 abstract class AppPlatform {
   bool get isAndroid;
   Future<String> privateRoot();
@@ -58,10 +78,8 @@ class NativeAppPlatform implements AppPlatform {
 
   @override
   Future<void> openSource(String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null ||
-        !['https', 'http'].contains(uri.scheme) ||
-        uri.host.isEmpty) {
+    final uri = webSourceUri(url);
+    if (uri == null) {
       throw const FormatException(
         'Only HTTP and HTTPS source links can be opened.',
       );

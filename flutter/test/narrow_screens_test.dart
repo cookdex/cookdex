@@ -126,7 +126,7 @@ void main() {
             debugShowCheckedModeBanner: false,
             theme: cookdexTheme().copyWith(platform: TargetPlatform.android),
             home: SettingsScreen(
-              hasPrevious: false,
+              readHasPrevious: () => false,
               syncSummary: 'Not synced',
               shoppingKeepAwake: false,
               onShoppingKeepAwake: (value) => awake = value,
@@ -237,7 +237,7 @@ void main() {
           for (final target in [
             find.byTooltip('Back to recipes'),
             find.byKey(const Key('cook-toggle')),
-            find.byTooltip('Edit recipe'),
+            if (profile.$2.width >= 600) find.byTooltip('Edit recipe'),
             find.byTooltip('Unfavorite recipe'),
             find.byTooltip('Recipe actions'),
           ]) {
@@ -248,28 +248,28 @@ void main() {
             expect(rect.height, greaterThanOrEqualTo(48));
             expect(target.hitTestable(), findsOneWidget);
           }
-          await tester.tap(find.byTooltip('Edit recipe'));
+          if (profile.$2.width >= 600) {
+            await tester.tap(find.byTooltip('Edit recipe'));
+          } else {
+            expect(find.byTooltip('Edit recipe'), findsNothing);
+          }
           await tester.tap(find.byTooltip('Recipe actions'));
         }
-        expect(edits, 2);
+        expect(edits, profile.$2.width >= 600 ? 2 : 0);
         expect(menus, 2);
         if (profile.$1 == 'narrow-largest') {
           // Exercise the second-row fallback below the supported 320dp floor;
           // at 320dp these real-font controls still fit in a single row.
-          tester.view.physicalSize = const Size(280, 780);
+          tester.view.physicalSize = const Size(210, 780);
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           expect(
             tester.getSize(find.byKey(const Key('recipe-toolbar'))).height,
             greaterThan(48),
           );
-          for (final tooltip in [
-            'Edit recipe',
-            'Unfavorite recipe',
-            'Recipe actions',
-          ]) {
+          for (final tooltip in ['Unfavorite recipe', 'Recipe actions']) {
             final target = find.byTooltip(tooltip);
-            expect(tester.getRect(target).right, lessThanOrEqualTo(280));
+            expect(tester.getRect(target).right, lessThanOrEqualTo(210));
             expect(target.hitTestable(), findsOneWidget);
           }
         }
@@ -475,6 +475,7 @@ void main() {
           'Recipe actions must be visible without horizontal toolbar scrolling',
         );
       }
+      await tap(find.byKey(const Key('cook-toggle')));
       await tap(find.text('Shopping list').last);
       await shot('shopping');
       await tap(find.byTooltip('Shopping list options'));

@@ -50,6 +50,10 @@ Future<ScaledRecipeView> scaleRecipeView({
 Future<ImportCandidates> parseText({required String text}) =>
     RustLib.instance.api.crateApiParseText(text: text);
 
+/// Apply Smart Import's written-recipe parser and canonical bounds before review.
+Future<Candidate> smartCreateCandidate({required String written}) =>
+    RustLib.instance.api.crateApiSmartCreateCandidate(written: written);
+
 Future<ImportCandidates> inspectPage({
   required String html,
   required String url,
@@ -90,13 +94,6 @@ Stream<CollectionEvent> subscribe({
   operation: operation,
 );
 
-// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<CleanupPreview>>
-abstract class CleanupPreview implements RustOpaqueInterface {
-  Future<int> changed();
-
-  Future<int> skippedConflicts();
-}
-
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<CoreSession>>
 abstract class CoreSession implements RustOpaqueInterface {
   Future<LibraryResult> addLibraryTag({
@@ -130,11 +127,6 @@ abstract class CoreSession implements RustOpaqueInterface {
     required bool tags,
     required List<String> sources,
     String? target,
-    required Operation operation,
-  });
-
-  Future<CollectionSnapshot> cleanup({
-    required CleanupPreview preview,
     required Operation operation,
   });
 
@@ -191,8 +183,6 @@ abstract class CoreSession implements RustOpaqueInterface {
     privateRoot: privateRoot,
     port: port,
   );
-
-  Future<CleanupPreview> previewCleanup();
 
   Future<RestorePreview> previewRestore({
     required List<int> bytes,
@@ -1088,6 +1078,8 @@ sealed class ShoppingEdit with _$ShoppingEdit {
 
   const factory ShoppingEdit.addManual({required String text}) =
       ShoppingEdit_AddManual;
+  const factory ShoppingEdit.addManualItems({required List<String> names}) =
+      ShoppingEdit_AddManualItems;
   const factory ShoppingEdit.edit({required String id, required String text}) =
       ShoppingEdit_Edit;
   const factory ShoppingEdit.check({

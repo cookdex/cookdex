@@ -14,6 +14,7 @@ class CookController extends ChangeNotifier {
   int scale = 2;
   bool active = false;
   int step = 0;
+  bool resumedStepOnEntry = false;
   Set<int> checkedIngredients = {};
   bool _visible = false, _resumed = true, _obscured = false;
   bool _shoppingVisible = false;
@@ -52,13 +53,17 @@ class CookController extends ChangeNotifier {
       (i) => i < 0 || i >= (recipe?.fields.ingredients.length ?? 0),
     );
     if (!canCook) active = false;
-    _save();
+    if (recipe != null && preferences.hasCookStep(recipe.id)) _save();
     _changed();
   }
 
   void toggle() {
     if (!canCook) return;
     active = !active;
+    if (active) {
+      resumedStepOnEntry = preferences.hasCookStep(_recipe!.id);
+      _save();
+    }
     _changed();
   }
 

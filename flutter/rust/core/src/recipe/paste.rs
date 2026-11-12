@@ -275,11 +275,6 @@ pub fn parse_recipe_input(text: &str, now: &str) -> Result<ImportCandidates> {
         warnings.push("Unclassified text was retained in Notes.".into());
         notes.extend(extra);
     }
-    if !content.source.is_empty() && !super::model::safe_source(&content.source) {
-        notes.push(format!("Source: {}", content.source));
-        content.source.clear();
-        warnings.push("A non-link source was retained in Notes.".into());
-    }
     content.notes = notes.join("\n");
     super::duration::normalize(&mut content);
     content.validate()?;

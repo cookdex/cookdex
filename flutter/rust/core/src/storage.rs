@@ -25,6 +25,50 @@ impl Default for Book {
         }
     }
 }
+// Borrow the unchanged recipe bodies when checking the byte limit and encoding
+// previous-save recovery. Keep the same JSON keys and their stored order.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BookFields<'a> {
+    deleted_recipes: &'a [Value],
+    recipes: &'a [Value],
+    schema_version: u32,
+    shopping: &'a [Value],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shopping_setup: Option<&'a crate::shopping_categories::Setup>,
+}
+
+impl<'a> BookFields<'a> {
+    pub(crate) fn with_shopping(
+        mut self,
+        rows: &'a [Value],
+        setup: &'a crate::shopping_categories::Setup,
+    ) -> Self {
+        self.shopping = rows;
+        self.shopping_setup = Some(setup);
+        self
+    }
+}
+
+impl Book {
+    pub(crate) fn fields(&self) -> BookFields<'_> {
+        BookFields {
+            deleted_recipes: &self.deleted_recipes,
+            recipes: &self.recipes,
+            schema_version: self.schema_version,
+            shopping: &self.shopping,
+            shopping_setup: Some(&self.shopping_setup),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviousSave<'a> {
+    book: BookFields<'a>,
+    saved_at: &'a str,
+}
+
 #[derive(Clone, Serialize)]
 pub struct Snapshot {
     pub generation: i64,
@@ -87,10 +131,14 @@ pub(crate) fn local(db: &Connection, key: &str) -> Result<Option<Value>, String>
         .map(|s| serde_json::from_str(&s).map_err(err))
         .transpose()
 }
-pub(crate) fn put_local(db: &Connection, key: &str, value: &Value) -> Result<(), String> {
+pub(crate) fn put_local<T: Serialize + ?Sized>(
+    db: &Connection,
+    key: &str,
+    value: &T,
+) -> Result<(), String> {
     db.execute(
         "INSERT INTO local VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET body=excluded.body",
-        params![key, value.to_string()],
+        params![key, serde_json::to_string(value).map_err(err)?],
     )
     .map_err(err)?;
     Ok(())
@@ -354,11 +402,11 @@ pub(crate) fn version(db: &Connection) -> Result<(i64, i64), String> {
 
 /// Only Service's validated, version-bound cache may use this path. Unchanged
 /// bodies retain their validation; canonical validation applies to every input.
-pub(crate) fn save_recipe_changes(
+pub(crate) fn save_validated_changes(
     db: &mut Connection,
     token: (i64, i64),
     old: &Snapshot,
-    book: &Book,
+    book: BookFields<'_>,
     changed: &[crate::recipe::Recipe],
     deleted: &[crate::recipe::RecipeId],
     saved_at: &str,
@@ -369,12 +417,12 @@ pub(crate) fn save_recipe_changes(
     }
     // Keep the existing whole-book byte bound and previous-save recovery. This
     // serialization is necessary; reparsing/validating every recipe is not.
-    let mut value = serde_json::to_value(book).map_err(err)?;
-    value
-        .as_object_mut()
-        .ok_or("Invalid collection")?
-        .remove("shoppingSetup");
-    if serde_json::to_vec(&value).map_err(err)?.len() > crate::recipe::MAX_COLLECTION_BYTES {
+    let setup = book.shopping_setup.ok_or("Missing shopping setup")?;
+    let bounded = BookFields {
+        shopping_setup: None,
+        ..book
+    };
+    if serde_json::to_vec(&bounded).map_err(err)?.len() > crate::recipe::MAX_COLLECTION_BYTES {
         return Err("Collection exceeds 32 MB native save limit.".into());
     }
     let tx = db
@@ -405,7 +453,10 @@ pub(crate) fn save_recipe_changes(
         put_local(
             &tx,
             "previous",
-            &json!({"savedAt":saved_at,"book":old.book}),
+            &PreviousSave {
+                book: old.book.fields(),
+                saved_at,
+            },
         )?;
     }
     for recipe in changed {
@@ -418,7 +469,13 @@ pub(crate) fn save_recipe_changes(
         tx.execute("DELETE FROM recipes WHERE id=?1", [&id.0])
             .map_err(err)?;
     }
-    put_local(&tx, "deletedRecipes", &json!(book.deleted_recipes))?;
+    if old.book.shopping != book.shopping {
+        put_local(&tx, "shopping", book.shopping)?;
+    }
+    if &old.book.shopping_setup != setup {
+        put_local(&tx, "shoppingSetup", setup)?;
+    }
+    put_local(&tx, "deletedRecipes", book.deleted_recipes)?;
     let generation = token.0.checked_add(1).ok_or("Generation overflow")?;
     tx.execute("UPDATE state SET generation=?1 WHERE id=1", [generation])
         .map_err(err)?;
@@ -586,6 +643,34 @@ mod tests {
     use super::*;
     fn fixture() -> Book {
         serde_json::from_str(include_str!("../tests/native-fixture.json")).unwrap()
+    }
+    #[test]
+    fn borrowed_book_matches_previous_recovery_and_size_limit_bytes() {
+        let mut book = fixture();
+        book.shopping
+            .push(json!({"name": "Lemon \"zest\"", "checked": false}));
+        book.shopping_setup
+            .placements
+            .insert("zest".into(), "produce".into());
+        let saved_at = "2026-01-02T03:04:05Z";
+        let previous = PreviousSave {
+            book: book.fields(),
+            saved_at,
+        };
+        assert_eq!(
+            serde_json::to_vec(&previous).unwrap(),
+            serde_json::to_vec(&json!({"savedAt": saved_at, "book": book})).unwrap()
+        );
+        let mut old_limit = serde_json::to_value(&book).unwrap();
+        old_limit.as_object_mut().unwrap().remove("shoppingSetup");
+        let bounded = BookFields {
+            shopping_setup: None,
+            ..book.fields()
+        };
+        assert_eq!(
+            serde_json::to_vec(&bounded).unwrap(),
+            serde_json::to_vec(&old_limit).unwrap()
+        );
     }
     #[test]
     fn future_version_and_missing_marker_fail_closed() {

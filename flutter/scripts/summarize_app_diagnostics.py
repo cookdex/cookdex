@@ -21,7 +21,11 @@ def summarize(folder):
         if not sample['diagnostic'] or sample['warmup']:
             continue
         name, run = sample['interaction'], sample['run']
-        trace = json.loads((folder / f'trace-{name}-{run}.json').read_text())
+        slug = re.sub(r'[^a-z0-9-]+', '-', name.lower())
+        trace_path = folder / f'trace-{slug}-{run}.json'
+        if not trace_path.exists() and Path(name).name == name:
+            trace_path = folder / f'trace-{name}-{run}.json'
+        trace = json.loads(trace_path.read_text(encoding='utf-8-sig'))
         # Build profiling names are widget runtime types. Layout profiling names
         # start Render; scheduler phases are uppercase. Count only build spans.
         builds = [e for e in trace['traceEvents']
@@ -37,7 +41,8 @@ def summarize(folder):
         frames = sample['offsets']
         no_new = []
         for previous, frame in zip(frames, frames[1:]):
-            if frame['newElements'] == 0:
+            if (frame.get('newElements') == 0 and
+                    'wallUs' in frame and 'wallUs' in previous):
                 no_new.append(sum(previous['wallUs'] < e['ts'] <= frame['wallUs']
                                   for e in builds))
         if no_new:

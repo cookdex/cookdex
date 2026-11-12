@@ -1,3 +1,4 @@
+import 'page_headings.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart' show availableCameras;
 import 'package:flutter_zxing/flutter_zxing.dart';
@@ -67,7 +68,7 @@ class _ScanInvitationScreenState extends State<ScanInvitationScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Scan invitation')),
+    appBar: pageHeadingBar(context, title: 'Scan invitation'),
     body: SafeArea(
       top: false,
       child: _cameraUnavailable
@@ -78,7 +79,7 @@ class _ScanInvitationScreenState extends State<ScanInvitationScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Text(
-                      'Camera access is unavailable. Allow Camera in Android app settings, or go back and paste the invitation.',
+                      'Camera access is unavailable. Go back and paste the invitation.',
                     ),
                     TextButton(
                       onPressed: () => Navigator.pop(context),

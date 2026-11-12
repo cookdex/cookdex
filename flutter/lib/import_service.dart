@@ -5,7 +5,10 @@ import 'dart:typed_data';
 import 'draft_storage.dart';
 import 'import_diagnostics.dart';
 import 'import_platform.dart';
+import 'local_preferences.dart';
 import 'import_page_fetcher.dart';
+import 'social_import_page.dart';
+import 'youtube_import.dart';
 import 'src/rust/api.dart';
 export 'import_platform.dart';
 
@@ -25,15 +28,27 @@ class ImportDiscovery {
     this.warnings = const [],
     this.pageText = '',
     this.source = '',
-    this.canTryWithAi = false,
+    this.websiteAiHint = false,
     this.textBlocks = const [],
+    this.sourceLine = '',
+    this.fallback = false,
+    this.canRetryWatch = false,
+    this.canWatchAnyway = false,
+    this.needsYoutubeKey = false,
+    this.blockedSite,
   });
   final List<Candidate> candidates;
   final List<String> warnings;
   final String pageText;
   final String source;
-  final bool canTryWithAi;
+  final bool websiteAiHint;
   final List<TextImportBlock> textBlocks;
+  final String sourceLine;
+  final bool fallback;
+  final bool canRetryWatch;
+  final bool canWatchAnyway;
+  final bool needsYoutubeKey;
+  final SocialSite? blockedSite;
 }
 
 class ImportCancelled implements Exception {
@@ -42,14 +57,45 @@ class ImportCancelled implements Exception {
   String toString() => 'Import cancelled.';
 }
 
+enum ImportPhase {
+  readingText('Reading the text…'),
+  readingPage('Reading the page…'),
+  readingDescription('Reading the description…'),
+  openingRecipePage('Opening the recipe page…'),
+  watchingVideo('Watching the video…'),
+  readingPhotos('Reading your photos…'),
+  writing('Writing the recipe…'),
+  checking('Double-checking…'),
+  retrying('Trying again…');
+
+  const ImportPhase(this.label);
+  final String label;
+}
+
+typedef ImportPhaseCallback = void Function(ImportPhase phase);
+
 abstract class ImportService {
   ImportPlatform get platform;
-  Future<ImportDiscovery> text(String text);
-  Future<ImportDiscovery> link(String url, {bool useAi = false});
-  Future<ImportDiscovery> photos(List<ImportPhoto> photos);
+  Future<ImportDiscovery> text(String text, {ImportPhaseCallback? onPhase});
+  Future<ImportDiscovery> link(
+    String url, {
+    bool useAi = false,
+    ImportPhaseCallback? onPhase,
+  });
+  Future<ImportDiscovery> photos(
+    List<ImportPhoto> photos, {
+    ImportPhaseCallback? onPhase,
+  });
   Future<Candidate> select(ImportDiscovery discovery, int index);
   Future<String> prompt();
   void cancel();
+}
+
+abstract interface class YoutubeWatchImport {
+  Future<ImportDiscovery> watchAnyway(
+    String url, {
+    ImportPhaseCallback? onPhase,
+  });
 }
 
 abstract interface class ImportServiceToolsProvider {
@@ -92,21 +138,25 @@ class NativeImportService
     implements
         ImportService,
         ImportServiceToolsProvider,
-        SmartTextImportService {
+        SmartTextImportService,
+        YoutubeWatchImport {
   NativeImportService({
     ImportPlatform? platform,
     this.existingTags,
+    this.preferences,
     DraftStorage? diagnosticsStorage,
   }) : platform = platform ?? NativeImportPlatform(),
        _diagnostics = ImportDiagnosticsStore(diagnosticsStorage);
   @override
   final ImportPlatform platform;
   final List<String> Function()? existingTags;
+  final LocalPreferences? preferences;
   final ImportDiagnosticsStore _diagnostics;
   final Map<String, AiReview> _reviews = {};
   final Map<String, List<String>> _warnings = {};
   int _epoch = 0;
   Operation? _operation;
+  ({SocialImportPage page, List<String> ingredients})? _pendingWatch;
   void _check(int epoch) {
     if (_epoch != epoch) throw const ImportCancelled();
   }
@@ -114,6 +164,7 @@ class NativeImportService
   @override
   void cancel() {
     _epoch++;
+    _pendingWatch = null;
     _operation?.cancel();
     _operation = null;
     unawaited(platform.cancel().catchError((Object _) {}));
@@ -137,8 +188,9 @@ class NativeImportService
   Future<ProviderOutput> _extract(
     ProviderInput input,
     SmartImportSettings settings,
-    int epoch,
-  ) async {
+    int epoch, {
+    ImportPhaseCallback? onPhase,
+  }) async {
     _check(epoch);
     if (!settings.hasKey) {
       throw StateError('Add a Gemini key to use AI import.');
@@ -160,6 +212,7 @@ class NativeImportService
         operation: operation,
       );
       await task.setEffort(effort: settings.effort);
+      var retry = false;
       while (true) {
         _check(epoch);
         final body = await task.request();
@@ -167,8 +220,11 @@ class NativeImportService
         diagnostic.request(body);
         await _record(diagnostic, epoch);
         _check(epoch);
+        if (!retry) onPhase?.call(ImportPhase.writing);
+        _check(epoch);
         final reply = await platform.providerRequest(Uint8List.fromList(body));
         _check(epoch);
+        onPhase?.call(ImportPhase.checking);
         diagnostic.reply(reply.status, reply.bytes);
         await _record(diagnostic, epoch);
         _check(epoch);
@@ -178,6 +234,8 @@ class NativeImportService
         );
         _check(epoch);
         if (output is ProviderOutput_Retry) {
+          retry = true;
+          onPhase?.call(ImportPhase.retrying);
           final problem = await task.validationProblem();
           _check(epoch);
           diagnostic.validation(
@@ -215,10 +273,11 @@ class NativeImportService
     String source = '',
     List<ImportPhoto> photos = const [],
     ProviderMode mode = ProviderMode.recipe,
+    String targetTitle = '',
   }) => ProviderInput(
     text: text,
     source: source,
-    targetTitle: '',
+    targetTitle: targetTitle,
     photos: photos.map((photo) => photo.toPreparedPhoto()).toList(),
     mode: mode,
     existingTags: existingTags?.call() ?? const [],
@@ -230,7 +289,7 @@ class NativeImportService
         ingredientSources: const [],
         aiReview: _reviews.remove(recipe.id),
       );
-  Recipe _source(Recipe recipe, String source) {
+  Recipe _source(Recipe recipe, String source, {String? sharedLink}) {
     final f = recipe.fields;
     return Recipe(
       id: recipe.id,
@@ -247,7 +306,10 @@ class NativeImportService
         totalTime: f.totalTime,
         source: source,
         tags: f.tags,
-        notes: f.notes,
+        notes: [
+          if (f.notes.isNotEmpty) f.notes,
+          if (sharedLink != null && sharedLink != source) sharedLink,
+        ].join('\n'),
         ingredients: f.ingredients,
         steps: f.steps,
       ),
@@ -276,11 +338,15 @@ class NativeImportService
   }
 
   @override
-  Future<ImportDiscovery> text(String text) async {
+  Future<ImportDiscovery> text(
+    String text, {
+    ImportPhaseCallback? onPhase,
+  }) async {
     final epoch = ++_epoch;
     if (utf8.encode(text).length > 5 * 1024 * 1024) {
       throw StateError('This file exceeds the 5 MB text import limit.');
     }
+    onPhase?.call(ImportPhase.readingText);
     // Each complete block is independently validated by the canonical Rust parser.
     // Malformed blocks are retained for explicit review, never sent to AI here.
     if (isCookdexText(text)) {
@@ -320,18 +386,23 @@ class NativeImportService
     }
     final settings = await platform.settings();
     _check(epoch);
-    if (!settings.hasKey) return _basicText(text, epoch);
+    if (!settings.hasKey) {
+      onPhase?.call(ImportPhase.readingText);
+      return _basicText(text, epoch);
+    }
     try {
       final output = await _extract(
         _input(text: text),
         settings,
         epoch,
+        onPhase: onPhase,
       ) as ProviderOutput_Recipe;
       return ImportDiscovery(candidates: [_candidate(output.field0)]);
     } on ImportCancelled {
       rethrow;
     } catch (error) {
       _check(epoch);
+      onPhase?.call(ImportPhase.readingText);
       final aiReason = redactImportDiagnostic(_reason(error));
       try {
         return await _basicText(
@@ -367,36 +438,394 @@ class NativeImportService
     return ImportDiscovery(candidates: [_candidate(output.field0)]);
   }
 
+  ImportDiscovery _blocked(SocialSite site) => ImportDiscovery(
+    candidates: const [],
+    fallback: true,
+    blockedSite: site,
+    warnings: [blockedLinkMessage(site)],
+  );
+
+  Future<T> _youtubeRequest<T>(
+    String mode,
+    SmartImportSettings settings,
+    Uint8List body,
+    int epoch,
+    FutureOr<T> Function(ProviderReply) read,
+  ) async {
+    _check(epoch);
+    final diagnostic = AiImportDiagnostic(mode: mode, model: settings.model)
+      ..request(body);
+    try {
+      await _record(diagnostic, epoch);
+      _check(epoch);
+      final reply = await platform.providerRequest(body);
+      _check(epoch);
+      diagnostic.reply(reply.status, reply.bytes);
+      final result = await read(reply);
+      _check(epoch);
+      diagnostic.validation('Accepted');
+      return result;
+    } catch (error) {
+      diagnostic.validation(
+        error is VideoImportProblem ? error.message : _reason(error),
+      );
+      rethrow;
+    } finally {
+      await _record(diagnostic, epoch);
+    }
+  }
+
+  Future<ImportDiscovery?> _descriptionRecipe(
+    SocialImportPage post,
+    YoutubeDescription decision,
+    SmartImportSettings settings,
+    int epoch,
+    ImportPhaseCallback? onPhase,
+  ) async {
+    final video = post.videoUrl!;
+    try {
+      if (decision.kind == 'recipe') {
+        final source = video.toString();
+        final output = await _extract(
+          _input(text: post.text, source: source, targetTitle: post.title),
+          settings,
+          epoch,
+          onPhase: onPhase,
+        ) as ProviderOutput_Recipe;
+        final candidate = _candidate(_source(output.field0, source));
+        if (candidate.recipe.fields.ingredients.isNotEmpty &&
+            candidate.recipe.fields.steps.isNotEmpty) {
+          return ImportDiscovery(
+            candidates: [candidate],
+            source: source,
+            sourceLine: 'From the video description',
+          );
+        }
+      } else if (decision.recipeLink case final target?
+          when post.title.trim().isNotEmpty) {
+        final result = await _website(
+          target.toString(),
+          true,
+          epoch,
+          onPhase,
+          targetTitle: post.title,
+          sharedVideo: video,
+          settings: settings,
+        );
+        if (result.candidates.isNotEmpty) return result;
+      }
+    } on ImportCancelled {
+      rethrow;
+    } on Exception {
+      _check(epoch);
+    } on StateError {
+      _check(epoch);
+    }
+    return null;
+  }
+
+  Future<ImportDiscovery> _youtube(
+    Uri original,
+    int epoch,
+    ImportPhaseCallback? onPhase, {
+    ImportPage? fetched,
+    bool allowUnknownLength = false,
+  }) async {
+    ImportDiscovery problem(String message, {bool retry = false}) =>
+        ImportDiscovery(
+          candidates: const [],
+          fallback: true,
+          source: original.toString(),
+          warnings: [message],
+          needsYoutubeKey: message == youtubeKeyNeeded,
+          canWatchAnyway:
+              message == youtubeUnknownLength ||
+              message == youtubeUnconfirmedVisibility,
+          canRetryWatch: retry,
+        );
+    final settings = await platform.settings();
+    _check(epoch);
+    if (!settings.hasKey) return problem(youtubeKeyNeeded);
+    const unavailable = 'cookdex couldn’t read this YouTube link.';
+    if (canonicalYouTubeVideo(original) == null) return problem(unavailable);
+    var watching = false;
+    try {
+      final pending = _pendingWatch;
+      _pendingWatch = null;
+      final SocialImportPage post;
+      List<String> writtenIngredients = const [];
+      if (allowUnknownLength &&
+          pending != null &&
+          pending.page.videoUrl == canonicalYouTubeVideo(original)) {
+        post = pending.page;
+        writtenIngredients = pending.ingredients;
+      } else {
+        onPhase?.call(ImportPhase.readingDescription);
+        _check(epoch);
+        final page = fetched ?? await platform.fetchPage(original.toString());
+        _check(epoch);
+        final uri = checkedImportUrl(page.url);
+        if (!matchesSocialPostRedirect(original, uri)) {
+          return problem(unavailable);
+        }
+        post = SocialImportPage.parse(SocialSite.youtube, uri, page.html);
+        if (post.nonPublic) return problem(youtubeNotPublic);
+        final video = post.videoUrl;
+        if (post.blocked ||
+            video == null ||
+            canonicalYouTubeVideo(original) != video) {
+          return problem(unavailable);
+        }
+        if (!post.unconfirmedVisibility) {
+          final decision = await _youtubeRequest(
+            'YouTube description',
+            settings,
+            youtubeDescriptionRequest(post.title, post.text, settings),
+            epoch,
+            (reply) {
+              if (reply.status != 200) {
+                throw VideoImportProblem(
+                  reply.status == 401 || reply.status == 403
+                      ? 'Gemini couldn’t authorize this request. Check your Gemini key.'
+                      : 'Gemini couldn’t read the video description. Try again.',
+                  retryable: true,
+                );
+              }
+              return YoutubeDescription.read(reply, post.text);
+            },
+          );
+          _check(epoch);
+          writtenIngredients = decision.writtenIngredients;
+          final result = await _descriptionRecipe(
+            post,
+            decision,
+            settings,
+            epoch,
+            onPhase,
+          );
+          if (result != null) return result;
+        }
+      }
+      _check(epoch);
+      final video = post.videoUrl!;
+      final source = video.toString();
+      final seconds = post.seconds;
+      if (seconds != null && seconds > youtubeWatchLimitMinutes * 60) {
+        if (writtenIngredients.isNotEmpty && post.title.trim().isNotEmpty) {
+          onPhase?.call(ImportPhase.writing);
+          final candidate = await _youtubeRequest(
+            'YouTube partial description',
+            settings,
+            youtubePartialRequest(
+              post.title,
+              post.text,
+              writtenIngredients,
+              settings,
+            ),
+            epoch,
+            (reply) =>
+                readPartialRecipe(reply, video, post.text, writtenIngredients),
+          );
+          if (candidate != null) {
+            return ImportDiscovery(
+              candidates: [candidate],
+              warnings: candidate.warnings,
+              source: source,
+              sourceLine: 'From the video description',
+            );
+          }
+        }
+        return problem(youtubeTooLong);
+      }
+      if ((seconds == null || seconds <= 0 || post.unconfirmedVisibility) &&
+          !allowUnknownLength) {
+        _pendingWatch = (page: post, ingredients: writtenIngredients);
+        return problem(
+          seconds != null && seconds > 0
+              ? youtubeUnconfirmedVisibility
+              : youtubeUnknownLength,
+        );
+      }
+      watching = true;
+      onPhase?.call(ImportPhase.watchingVideo);
+      _check(epoch);
+      final watchChoice =
+          preferences?.youtubeWatchModel ?? YoutubeWatchModel.flash;
+      final watchSettings = SmartImportSettings(
+        hasKey: settings.hasKey,
+        model: watchChoice.modelId ?? settings.model,
+        effort: settings.effort,
+      );
+      final body = youtubeWatchRequest(
+        video,
+        watchSettings,
+        writtenIngredients,
+        title: post.title,
+        description: post.text,
+      );
+      final candidate = await _youtubeRequest(
+        'YouTube video',
+        watchSettings,
+        body,
+        epoch,
+        (reply) {
+          onPhase?.call(ImportPhase.writing);
+          _check(epoch);
+          return readWatchedRecipe(
+            reply,
+            video,
+            seconds != null && seconds > 0
+                ? seconds
+                : youtubeWatchLimitMinutes * 60,
+            writtenIngredients,
+            description: post.text,
+          );
+        },
+      );
+      _check(epoch);
+      return ImportDiscovery(
+        candidates: [candidate],
+        source: source,
+        sourceLine: 'From watching the video',
+        warnings: candidate.warnings,
+      );
+    } on ImportCancelled {
+      rethrow;
+    } on VideoImportProblem catch (error) {
+      _check(epoch);
+      return problem(error.message, retry: error.retryable);
+    } on Exception {
+      _check(epoch);
+      return problem(watching ? youtubeUnclear : unavailable, retry: true);
+    } on StateError {
+      _check(epoch);
+      return problem(watching ? youtubeUnclear : unavailable, retry: true);
+    }
+  }
+
   @override
-  Future<ImportDiscovery> link(String url, {bool useAi = false}) async {
+  Future<ImportDiscovery> watchAnyway(
+    String url, {
+    ImportPhaseCallback? onPhase,
+  }) {
+    final uri = checkedImportUrl(url);
+    if (canonicalYouTubeVideo(uri) == null) {
+      throw const FormatException('Use a YouTube video link.');
+    }
+    return _youtube(uri, ++_epoch, onPhase, allowUnknownLength: true);
+  }
+
+  @override
+  Future<ImportDiscovery> link(
+    String url, {
+    bool useAi = false,
+    ImportPhaseCallback? onPhase,
+  }) async {
     final epoch = ++_epoch;
-    final checkedUrl = checkedImportUrl(url).toString();
+    _pendingWatch = null;
+    final original = checkedImportUrl(url);
+    final checkedUrl = original.toString();
+    final site = socialSite(original);
+    if (site == SocialSite.youtube) return _youtube(original, epoch, onPhase);
+    if (site != null) return _blocked(site);
+    try {
+      return await _website(checkedUrl, useAi, epoch, onPhase);
+    } on YouTubeImportRedirect catch (redirect) {
+      _check(epoch);
+      return _youtube(redirect.url, epoch, onPhase);
+    } on BlockedSocialImportUrl catch (error) {
+      _check(epoch);
+      return _blocked(error.site);
+    }
+  }
+
+  Future<ImportDiscovery> _website(
+    String checkedUrl,
+    bool useAi,
+    int epoch,
+    ImportPhaseCallback? onPhase, {
+    String targetTitle = '',
+    Uri? sharedVideo,
+    SmartImportSettings? settings,
+  }) async {
     if (useAi) {
-      final settings = await platform.settings();
+      settings ??= await platform.settings();
       _check(epoch);
       if (!settings.hasKey) {
         throw StateError('Add a Gemini key to use AI import.');
       }
-      final page = await platform.fetchPage(checkedUrl);
+    }
+    onPhase?.call(
+      sharedVideo == null
+          ? ImportPhase.readingPage
+          : ImportPhase.openingRecipePage,
+    );
+    ImportPage? page;
+    var source = checkedUrl;
+    try {
+      final fetched = await platform.fetchPage(checkedUrl);
       _check(epoch);
-      final source = checkedImportUrl(page.url).toString();
-      final context = await pageAiContext(html: page.html);
+      final uri = checkedImportUrl(fetched.url);
+      final redirectedSite = socialSite(uri);
+      if (sharedVideo != null && redirectedSite != null) {
+        return const ImportDiscovery(candidates: []);
+      }
+      if (redirectedSite == SocialSite.youtube) {
+        // A refusal from the subsequent video route belongs to that route.
+        // ignore: unawaited_return_in_try_block
+        return _youtube(uri, epoch, onPhase, fetched: fetched);
+      }
+      if (redirectedSite != null) return _blocked(redirectedSite);
+      if (!isImportAccessWall(uri, fetched.html)) {
+        page = fetched;
+        source = uri.toString();
+      }
+    } on ImportPageRefused {
       _check(epoch);
-      // Only locally downloaded HTTPS content reaches AI. Remote URL context
-      // cannot enforce our policy for every redirect hop.
-      final output = await _extract(
-        _input(text: context, source: source),
-        settings,
-        epoch,
-      ) as ProviderOutput_Recipe;
+    }
+    if (page == null && !useAi) {
+      final hasKey = (await platform.settings()).hasKey;
+      _check(epoch);
       return ImportDiscovery(
-        candidates: [_candidate(_source(output.field0, source))],
+        candidates: const [],
+        fallback: true,
+        websiteAiHint: hasKey,
+        warnings: const ['This site didn’t share its recipe.'],
       );
     }
-    final page = await platform.fetchPage(checkedUrl);
-    _check(epoch);
-    final source = checkedImportUrl(page.url).toString();
-    final parsed = await inspectPage(html: page.html, url: source);
+    if (settings != null) {
+      final context = page == null ? '' : await pageAiContext(html: page.html);
+      _check(epoch);
+      final output = await _extract(
+        _input(
+          text: context,
+          source: source,
+          targetTitle: targetTitle,
+          mode: page == null ? ProviderMode.urlRecipe : ProviderMode.recipe,
+        ),
+        settings,
+        epoch,
+        onPhase: onPhase,
+      ) as ProviderOutput_Recipe;
+      final candidate = _candidate(
+        _source(output.field0, source, sharedLink: sharedVideo?.toString()),
+      );
+      if ((sharedVideo != null || page == null) &&
+          (candidate.recipe.fields.ingredients.isEmpty ||
+              candidate.recipe.fields.steps.isEmpty)) {
+        return const ImportDiscovery(
+          candidates: [],
+          fallback: true,
+          warnings: ['The recipe couldn’t be read from this page.'],
+        );
+      }
+      return ImportDiscovery(
+        candidates: [candidate],
+        source: source,
+        sourceLine: sharedVideo == null ? '' : 'From the creator’s recipe page',
+      );
+    }
+    final parsed = await inspectPage(html: page!.html, url: source);
     _check(epoch);
     final incomplete = parsed.candidates.any(
       (candidate) =>
@@ -407,17 +836,22 @@ class NativeImportService
       candidates: parsed.candidates,
       warnings: [
         ...parsed.warnings,
-        if (parsed.candidates.isEmpty) 'No embedded recipe data was found. Try with AI, or paste recipe text/use a photo.',
-        if (incomplete) 'Embedded recipe data is missing ingredients or directions. Try with AI, or review and complete the recipe.',
+        if (parsed.candidates.isEmpty) 'No embedded recipe data was found.',
+        if (incomplete)
+          'Embedded recipe data is missing ingredients or directions.',
       ],
-      source: page.url,
-      canTryWithAi: parsed.candidates.isEmpty || incomplete,
+      source: source,
+      websiteAiHint: parsed.candidates.isEmpty || incomplete,
     );
   }
 
   @override
-  Future<ImportDiscovery> photos(List<ImportPhoto> photos) async {
+  Future<ImportDiscovery> photos(
+    List<ImportPhoto> photos, {
+    ImportPhaseCallback? onPhase,
+  }) async {
     final epoch = ++_epoch;
+    onPhase?.call(ImportPhase.readingPhotos);
     if (photos.isEmpty || photos.length > 8) {
       throw StateError('Choose between 1 and 8 photos.');
     }
@@ -433,6 +867,7 @@ class NativeImportService
       _input(photos: photos),
       settings,
       epoch,
+      onPhase: onPhase,
     ) as ProviderOutput_Recipe;
     return ImportDiscovery(candidates: [_candidate(output.field0)]);
   }

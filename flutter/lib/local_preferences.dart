@@ -5,11 +5,22 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show ThemeMode;
 
+import 'create_preferences.dart';
+
 enum SearchField { title, ingredients, tags, notes, description }
 
 enum RecipeSort { edited, added, title }
 
 enum RecipeView { cards, compact }
+
+enum YoutubeWatchModel {
+  flash('gemini-3.8-flash'),
+  followImport(null),
+  lite('gemini-3.5-flash-lite');
+
+  const YoutubeWatchModel(this.modelId);
+  final String? modelId;
+}
 
 enum RecipeTextSize {
   normal('Default', 1),
@@ -36,11 +47,22 @@ class LocalPreferences extends ChangeNotifier {
   RecipeView view = RecipeView.cards;
   bool favoritesOnly = false;
   double scrollOffset = 0;
+  double _beforeSearch = 0;
+  final _recentRecipeOffsets = <String, Map<String, double>>{};
   ThemeMode themeMode = ThemeMode.system;
   bool wallpaperColors = false;
   bool shoppingKeepAwake = false;
   bool useAiForLink = false;
+  YoutubeWatchModel youtubeWatchModel = YoutubeWatchModel.flash;
   bool saveImportPhotos = false;
+  CreatePreferences _createPreferences = const CreatePreferences.defaults();
+  CreatePreferences get createPreferences => _createPreferences;
+
+  void setCreatePreferences(CreatePreferences value) {
+    _createPreferences = value;
+    _changed();
+  }
+
   bool checkUpdatesAutomatically = false;
   String? dismissedUpdateVersion;
   int? lastUpdateCheckMs;
@@ -69,8 +91,11 @@ class LocalPreferences extends ChangeNotifier {
   bool isKeptSeparate(String kind, Iterable<String> spellings) =>
       (_keptSeparate[kind] ?? []).any((g) => spellings.every(g.contains));
 
-  final Map<String, int> _steps = {};
-  final Map<String, Set<int>> _checks = {};
+  // Earlier versions can still read their saved progress after a downgrade.
+  final Map<String, int> _legacySteps = {};
+  final Map<String, Set<int>> _legacyChecks = {};
+  final Map<String, int> _sessionSteps = {};
+  final Map<String, Set<int>> _sessionChecks = {};
 
   static const defaultSearchFields = {
     SearchField.title,
@@ -121,6 +146,13 @@ class LocalPreferences extends ChangeNotifier {
       result.wallpaperColors = map['wallpaperColors'] == true;
       result.shoppingKeepAwake = map['shoppingKeepAwake'] == true;
       result.useAiForLink = map['useAiForLink'] == true;
+      result.youtubeWatchModel = YoutubeWatchModel.values.firstWhere(
+        (choice) => choice.name == map['youtubeWatchModel'],
+        orElse: () => YoutubeWatchModel.flash,
+      );
+      result._createPreferences = CreatePreferences.fromJson(
+        map['smartCreate'],
+      );
       result.saveImportPhotos = map['saveImportPhotos'] == true;
       result.checkUpdatesAutomatically =
           map['checkUpdatesAutomatically'] == true;
@@ -140,17 +172,34 @@ class LocalPreferences extends ChangeNotifier {
       if (offset is num && offset.isFinite && offset >= 0) {
         result.scrollOffset = offset.toDouble();
       }
+      final beforeSearch = map['beforeSearch'];
+      if (beforeSearch is num && beforeSearch.isFinite && beforeSearch >= 0) {
+        result._beforeSearch = beforeSearch.toDouble();
+      }
+      final recent = map['recentRecipeOffsets'];
+      if (recent is List) {
+        for (final panes in recent.take(2)) {
+          if (panes is Map && panes['id'] is String) {
+            result._recentRecipeOffsets[panes['id'] as String] = {
+              for (final pane in ['recipe', 'overview', 'directions'])
+                if (panes[pane] case final num value
+                    when value.isFinite && value >= 0)
+                  pane: value.toDouble(),
+            };
+          }
+        }
+      }
       if (map['steps'] is Map) {
         for (final entry in (map['steps'] as Map).entries) {
           if (entry.key is String && entry.value is int && entry.value >= 0) {
-            result._steps[entry.key] = entry.value;
+            result._legacySteps[entry.key] = entry.value;
           }
         }
       }
       if (map['checks'] is Map) {
         for (final entry in (map['checks'] as Map).entries) {
           if (entry.key is String && entry.value is List) {
-            result._checks[entry.key] = (entry.value as List)
+            result._legacyChecks[entry.key] = (entry.value as List)
                 .whereType<int>()
                 .where((v) => v >= 0)
                 .toSet();
@@ -165,6 +214,11 @@ class LocalPreferences extends ChangeNotifier {
   }
 
   void setQuery(String value) {
+    if (query == value) return;
+    if (query.trim() != value.trim()) {
+      if (query.trim().isEmpty) _beforeSearch = scrollOffset;
+      scrollOffset = value.trim().isEmpty ? _beforeSearch : 0;
+    }
     query = value;
     _changed();
   }
@@ -224,6 +278,11 @@ class LocalPreferences extends ChangeNotifier {
     _scheduleWrite();
   }
 
+  void setYoutubeWatchModel(YoutubeWatchModel choice) {
+    youtubeWatchModel = choice;
+    _changed();
+  }
+
   void setUseAiForLink(bool value) {
     useAiForLink = value;
     _changed();
@@ -247,15 +306,40 @@ class LocalPreferences extends ChangeNotifier {
     sort = RecipeSort.edited;
     view = RecipeView.cards;
     scrollOffset = 0;
+    _beforeSearch = 0;
     _changed();
   }
 
-  int cookStep(String id) => _steps[id] ?? 0;
-  Set<int> cookChecks(String id) => Set.of(_checks[id] ?? {});
-  void saveCook(String id, int step, Set<int> checks) {
-    _steps[id] = step;
-    _checks[id] = Set.of(checks);
+  Map<String, double> openRecipeReadingOffsets(String id) {
+    final offsets = _recentRecipeOffsets.remove(id) ?? <String, double>{};
+    _recentRecipeOffsets[id] = offsets;
+    if (_recentRecipeOffsets.length > 2) {
+      _recentRecipeOffsets.remove(_recentRecipeOffsets.keys.first);
+    }
     _scheduleWrite();
+    return Map.of(offsets);
+  }
+
+  void saveRecipeReadingOffsets(String id, Map<String, double> panes) {
+    final offsets = _recentRecipeOffsets[id];
+    if (offsets == null ||
+        panes.entries.every((p) => (offsets[p.key] ?? 0) == p.value)) {
+      return;
+    }
+    for (final entry in panes.entries) {
+      if (entry.value.isFinite) {
+        offsets[entry.key] = entry.value.clamp(0, double.infinity);
+      }
+    }
+    _scheduleWrite();
+  }
+
+  bool hasCookStep(String id) => _sessionSteps.containsKey(id);
+  int cookStep(String id) => _sessionSteps[id] ?? 0;
+  Set<int> cookChecks(String id) => Set.of(_sessionChecks[id] ?? {});
+  void saveCook(String id, int step, Set<int> checks) {
+    _sessionSteps[id] = step;
+    _sessionChecks[id] = Set.of(checks);
   }
 
   void _changed() {
@@ -264,6 +348,7 @@ class LocalPreferences extends ChangeNotifier {
   }
 
   void _scheduleWrite() {
+    if (_path == null) return;
     _timer?.cancel();
     _timer = Timer(const Duration(milliseconds: 180), flush);
   }
@@ -279,17 +364,26 @@ class LocalPreferences extends ChangeNotifier {
       'view': view.name,
       'favoritesOnly': favoritesOnly,
       'scrollOffset': scrollOffset,
+      if (query.trim().isNotEmpty) 'beforeSearch': _beforeSearch,
+      'recentRecipeOffsets': [
+        for (final entry in _recentRecipeOffsets.entries)
+          {'id': entry.key, ...entry.value},
+      ],
       'themeMode': themeMode.name,
       'wallpaperColors': wallpaperColors,
       'shoppingKeepAwake': shoppingKeepAwake,
       'useAiForLink': useAiForLink,
+      'youtubeWatchModel': youtubeWatchModel.name,
       'saveImportPhotos': saveImportPhotos,
+      'smartCreate': createPreferences.toJson(),
       'checkUpdatesAutomatically': checkUpdatesAutomatically,
       'dismissedUpdateVersion': dismissedUpdateVersion,
       'lastUpdateCheckMs': lastUpdateCheckMs,
       'recipeTextSize': recipeTextSize.name,
-      'steps': _steps,
-      'checks': _checks.map((key, value) => MapEntry(key, value.toList())),
+      'steps': _legacySteps,
+      'checks': _legacyChecks.map(
+        (key, value) => MapEntry(key, value.toList()),
+      ),
     });
     _writes = _writes.then((_) async {
       try {

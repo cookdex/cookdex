@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:cookdex/help_content.dart';
 import 'package:cookdex/import_service.dart';
 import 'package:cookdex/src/rust/api.dart' show ProviderMode;
+import 'package:cookdex/local_preferences.dart';
 import 'package:cookdex/ui/smart_settings_screen.dart';
 import 'package:cookdex/ui/theme.dart';
 import 'package:flutter/material.dart';
@@ -94,6 +96,8 @@ Future<void> _pump(
   _Service service, {
   Future<void> Function()? testKey,
   Future<void> Function(String)? openUrl,
+  bool keyPage = false,
+  LocalPreferences? preferences,
   double textScale = 1,
   double width = 400,
 }) async {
@@ -110,6 +114,8 @@ Future<void> _pump(
         child: child!,
       ),
       home: SmartSettingsScreen(
+        keyPage: keyPage,
+        preferences: preferences,
         service: service,
         testKey: testKey ?? () async {},
         openUrl: openUrl ?? (_) async {},
@@ -142,6 +148,34 @@ bool _testEnabled(WidgetTester tester) =>
     null;
 
 void main() {
+  testWidgets(
+    'YouTube watching model applies on Save independently of the page model',
+    (tester) async {
+      final prefs = LocalPreferences.memory();
+      addTearDown(prefs.dispose);
+      final service = _Service()..platform.model = 'custom-page-model';
+      await _pump(tester, service, preferences: prefs);
+      await _tap(tester, 'Advanced');
+      await _tap(tester, 'Gemini 3.8 Flash');
+      await _tap(tester, 'Follow Smart Import');
+      expect(prefs.youtubeWatchModel, YoutubeWatchModel.flash);
+      await _tap(tester, 'Save');
+      expect(prefs.youtubeWatchModel, YoutubeWatchModel.followImport);
+      expect(service.platform.receivedModel, 'custom-page-model');
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _pump(tester, service, preferences: prefs);
+      await _tap(tester, 'Advanced');
+      await _tap(tester, 'Follow Smart Import');
+      await _tap(tester, 'Gemini 3.5 Flash-Lite');
+      await _tap(tester, 'Save');
+      expect(prefs.youtubeWatchModel, YoutubeWatchModel.lite);
+      await _tap(tester, 'Reset to recommended');
+      expect(prefs.youtubeWatchModel, YoutubeWatchModel.lite);
+      await _tap(tester, 'Save');
+      expect(prefs.youtubeWatchModel, YoutubeWatchModel.flash);
+    },
+  );
+
   testWidgets('Advanced starts collapsed and effort saves without testing', (
     tester,
   ) async {
@@ -149,35 +183,36 @@ void main() {
     var tests = 0;
     await _pump(tester, service, testKey: () async => tests++);
     expect(find.text('Effort'), findsNothing);
+    expect(find.text('Save'), findsNothing);
     await _tap(tester, 'Advanced');
     expect(find.text('Standard'), findsOneWidget);
     await _tap(tester, 'Standard');
     await _tap(tester, 'Thorough');
-    expect(_testEnabled(tester), isFalse);
+    expect(find.text('Test key'), findsNothing);
     await _tap(tester, 'Save');
     expect(service.platform.receivedEffort, 'thorough');
     expect(service.platform.receivedModel, 'gemini-3.5-flash-lite');
     expect(service.platform.receivedKey, isEmpty);
-    expect(_testEnabled(tester), isTrue);
+    expect(find.text('Test key'), findsNothing);
     expect(tests, 0);
   });
 
   testWidgets(
-    'reset restores recommended model and effort but keeps entered key',
+    'reset restores recommended model and effort and leaves the saved key intact',
     (tester) async {
       final service = _Service()..platform.effort = 'thorough';
       await _pump(tester, service);
-      await tester.enterText(_field('Gemini key'), 'synthetic-new-key');
+      expect(_field('Gemini key'), findsNothing);
       await _tap(tester, 'Advanced');
       expect(find.text('Thorough'), findsOneWidget);
       await _tap(tester, 'Reset to recommended');
       expect(find.text('Standard'), findsOneWidget);
-      expect(find.text('Recommended'), findsOneWidget);
+      expect(find.text('Gemini 3.5 Flash-Lite (recommended)'), findsOneWidget);
       expect(_field('Custom model ID'), findsNothing);
       expect(service.platform.saves, 0);
       expect(service.platform.removes, 0);
       await _tap(tester, 'Save');
-      expect(service.platform.receivedKey, 'synthetic-new-key');
+      expect(service.platform.receivedKey, '');
       expect(service.platform.receivedModel, 'gemini-3.5-flash-lite');
       expect(service.platform.receivedEffort, 'standard');
     },
@@ -191,7 +226,7 @@ void main() {
       ..platform.effort = 'thorough';
     await _pump(tester, service);
     await _tap(tester, 'Advanced');
-    await _tap(tester, 'Recommended');
+    await _tap(tester, 'Gemini 3.5 Flash-Lite (recommended)');
     await _tap(tester, 'Custom model ID');
     final save = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Save'),
@@ -212,9 +247,9 @@ void main() {
   ) async {
     final service = _Service();
     var tests = 0;
-    await _pump(tester, service, testKey: () async => tests++);
+    await _pump(tester, service, keyPage: true, testKey: () async => tests++);
     expect(tests, 0);
-    expect(find.text('Key saved. Leave blank to keep it.'), findsOneWidget);
+    expect(find.text('Key saved on this device'), findsOneWidget);
     final key = tester.widget<TextField>(_field('Gemini key'));
     expect(key.autocorrect, isFalse);
     expect(key.enableSuggestions, isFalse);
@@ -232,10 +267,9 @@ void main() {
     await tester.pump();
     expect(_testEnabled(tester), isFalse);
     await tester.enterText(_field('Gemini key'), '');
-    await _tap(tester, 'Advanced');
-    await tester.enterText(_field('Custom model ID'), 'unsaved-model');
     await tester.pump();
-    expect(_testEnabled(tester), isFalse);
+    expect(find.text('Advanced'), findsNothing);
+    expect(_testEnabled(tester), isTrue);
     expect(tests, 1);
   });
 
@@ -244,7 +278,7 @@ void main() {
   ) async {
     final service = _Service()..platform.hasKey = false;
     var tests = 0;
-    await _pump(tester, service, testKey: () async => tests++);
+    await _pump(tester, service, keyPage: true, testKey: () async => tests++);
     expect(find.text('No key saved'), findsOneWidget);
     expect(_testEnabled(tester), isFalse);
     final remove = tester.widget<TextButton>(
@@ -260,38 +294,43 @@ void main() {
     expect(tests, 0);
   });
 
-  testWidgets('save keeps a blank key and clears a successfully replaced key', (
-    tester,
-  ) async {
-    final service = _Service();
-    var tests = 0;
-    await _pump(tester, service, testKey: () async => tests++);
-    await _tap(tester, 'Advanced');
-    await tester.enterText(_field('Custom model ID'), ' another-model ');
-    await _tap(tester, 'Save');
-    expect(service.platform.receivedKey, '');
-    expect(service.platform.receivedModel, 'another-model');
-    expect(_testEnabled(tester), isTrue);
-    await tester.enterText(_field('Gemini key'), 'synthetic-new-key');
-    await _tap(tester, 'Save');
-    expect(service.platform.receivedKey, 'synthetic-new-key');
-    expect(tester.widget<TextField>(_field('Gemini key')).controller!.text, '');
-    expect(tests, 0);
-    service.platform.failSave = true;
-    await tester.enterText(_field('Gemini key'), 'retry-secret');
-    await _tap(tester, 'Save');
-    expect(find.text('Could not save Smart Import settings.'), findsOneWidget);
-    expect(
-      tester.widget<TextField>(_field('Gemini key')).controller!.text,
-      'retry-secret',
-    );
-  });
+  testWidgets(
+    'key save requires a value and clears a successfully replaced key',
+    (tester) async {
+      final service = _Service();
+      var tests = 0;
+      await _pump(tester, service, keyPage: true, testKey: () async => tests++);
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Save'))
+            .onPressed,
+        isNull,
+      );
+      await tester.enterText(_field('Gemini key'), 'synthetic-new-key');
+      await _tap(tester, 'Save');
+      expect(service.platform.receivedKey, 'synthetic-new-key');
+      expect(service.platform.receivedModel, 'chosen-model');
+      expect(
+        tester.widget<TextField>(_field('Gemini key')).controller!.text,
+        '',
+      );
+      expect(tests, 0);
+      service.platform.failSave = true;
+      await tester.enterText(_field('Gemini key'), 'retry-secret');
+      await _tap(tester, 'Save');
+      expect(find.text('Could not save the Gemini key.'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(_field('Gemini key')).controller!.text,
+        'retry-secret',
+      );
+    },
+  );
 
   testWidgets('remove is red, confirms, and preserves state after failure', (
     tester,
   ) async {
     final service = _Service();
-    await _pump(tester, service);
+    await _pump(tester, service, keyPage: true);
     final remove = tester.widget<TextButton>(
       find.ancestor(
         of: find.text('Remove key'),
@@ -320,10 +359,15 @@ void main() {
     tester,
   ) async {
     final opened = <String>[];
-    await _pump(tester, _Service(), openUrl: (url) async => opened.add(url));
+    await _pump(
+      tester,
+      _Service(),
+      keyPage: true,
+      openUrl: (url) async => opened.add(url),
+    );
     expect(
       find.text(
-        'AI imports send selected inputs to Google. Keys stay on this device.',
+        'When you use Smart Import or Smart Create, Google receives what you send, like a link, text or the photos you pick, plus your library’s tag names.',
       ),
       findsOneWidget,
     );
@@ -334,6 +378,42 @@ void main() {
       'https://aistudio.google.com/apikey',
       'https://ai.google.dev/gemini-api/docs/pricing',
     ]);
+  });
+
+  testWidgets('data link opens the help section and preserves key edits', (
+    tester,
+  ) async {
+    final service = _Service();
+    final opened = <String>[];
+    var tests = 0;
+    await _pump(
+      tester,
+      service,
+      keyPage: true,
+      width: 320,
+      textScale: 1.5,
+      openUrl: (url) async => opened.add(url),
+      testKey: () async => tests++,
+    );
+    await tester.enterText(_field('Gemini key'), 'synthetic-unsaved');
+    await tester.pumpAndSettle();
+    await _tap(tester, dataHelpTitle);
+    expect(find.text(dataHelpTitle).hitTestable(), findsOneWidget);
+    expect(find.text(dataHelp.paragraphs.first).hitTestable(), findsOneWidget);
+    expect(opened, isEmpty);
+    expect(tests, 0);
+    final terms = find.text(googleDataTerms.label);
+    await tester.ensureVisible(terms);
+    await tester.pumpAndSettle();
+    await tester.tap(terms);
+    expect(opened, [googleDataTerms.url]);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(_field('Gemini key')).controller!.text,
+      'synthetic-unsaved',
+    );
+    expect(service.platform.saves, 0);
   });
 
   testWidgets('prompts are local and include JSON variants plus Copy Text v1', (
@@ -387,14 +467,12 @@ void main() {
       await _pump(
         tester,
         service,
+        keyPage: true,
         testKey: () async => throw StateError('Invalid AIzaSyntheticSecret'),
       );
-      expect(
-        find.text('Could not load Smart Import settings.'),
-        findsOneWidget,
-      );
+      expect(find.text('Could not load Gemini key settings.'), findsOneWidget);
       final loadError = tester.getRect(
-        find.text('Could not load Smart Import settings.'),
+        find.text('Could not load Gemini key settings.'),
       );
       final retry = tester.getRect(find.text('Retry'));
       expect(retry.top, greaterThan(loadError.bottom));
@@ -415,7 +493,9 @@ void main() {
     tester,
   ) async {
     final service = _Service()..platform.saveGate = Completer<void>();
-    await _pump(tester, service);
+    await _pump(tester, service, keyPage: true);
+    await tester.enterText(_field('Gemini key'), 'synthetic-new-key');
+    await tester.pump();
     await tester.tap(find.text('Save'));
     await tester.pump();
     expect(service.platform.saves, 1);
@@ -433,15 +513,7 @@ void main() {
     await _pump(tester, _Service(), width: 320, textScale: 2);
     await _tap(tester, 'Advanced');
     await _tap(tester, 'Reset to recommended');
-    for (final label in [
-      'Save',
-      'Test key',
-      'Remove key',
-      'Get a Gemini key',
-      'Pricing and data use',
-      'View prompts',
-      'Last Smart Import',
-    ]) {
+    for (final label in ['Save', 'View prompts', 'Last Smart Import']) {
       await tester.ensureVisible(find.text(label));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: label);
@@ -452,6 +524,16 @@ void main() {
     await _tap(tester, 'View prompts');
     expect(tester.takeException(), isNull);
     await _tap(tester, 'Close');
-    expect(tester.takeException(), isNull);
+    await _tap(tester, 'Gemini key');
+    for (final label in [
+      'Test key',
+      'Remove key',
+      'Get a Gemini key',
+      'Pricing and data use',
+    ]) {
+      await tester.ensureVisible(find.text(label));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: label);
+    }
   });
 }

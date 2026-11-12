@@ -67,11 +67,12 @@ Future<void> main(List<String> args) async {
       );
     }
     final store = RecipeStore(RustRecipeRepository(session), preferences);
-    await store.initialize();
+    await store.initialize(prepareSearchAfterPaint: true);
     final app = CookdexApp(
       store: store,
       platform: platform,
       drafts: FileDraftStorage('$root/editor-draft.json'),
+      createDiagnostics: FileDraftStorage('$root/last-smart-create.json', limitBytes: 16 * 1024 * 1024),
       importDrafts: FileDraftStorage(
         '$root/import-draft.json',
         limitBytes: 16 * 1024 * 1024,

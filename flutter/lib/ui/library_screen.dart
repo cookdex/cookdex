@@ -1,4 +1,9 @@
+import 'page_headings.dart';
+
 import 'package:flutter/material.dart';
+
+import 'facelift_motion.dart';
+
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../library_catalog.dart';
@@ -28,13 +33,12 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   LibraryKind _kind = LibraryKind.ingredients;
   final _search = TextEditingController();
-  final _scroll = PixelScrollController();
+  PageStorageBucket _namesPositions = PageStorageBucket();
   late final _LibraryActions _actions = _LibraryActions(widget.store);
   String? _selected;
   @override
   void dispose() {
     _search.dispose();
-    _scroll.dispose();
     _actions.dispose();
     super.dispose();
   }
@@ -99,7 +103,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           _kind = values.single;
                           _selected = null;
                           _search.clear();
-                          if (_scroll.hasClients) _scroll.jumpTo(0);
+                          _namesPositions = PageStorageBucket();
                         }),
                 ),
               ),
@@ -137,8 +141,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ),
                       ),
                     )
-                  : CustomScrollView(
-                      controller: _scroll,
+                  : PixelCustomScrollView(
+                      key: searchResultsKey('library-names', query),
                       keyboardDismissBehavior:
                           ScrollViewKeyboardDismissBehavior.onDrag,
                       slivers: [
@@ -186,9 +190,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ],
         );
         final selected = _selected == null ? null : catalog.named(_selected!);
+        final namesPane = PageStorage(
+          key: ValueKey(_kind),
+          bucket: _namesPositions,
+          child: list,
+        );
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('Library'),
+          appBar: pageHeadingBar(
+            context,
+            title: 'Library',
             actions: [
               if (_kind == LibraryKind.tags)
                 Padding(
@@ -218,7 +228,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     children: [
                       SizedBox(
                         width: (constraints.maxWidth * .38).clamp(280, 400),
-                        child: list,
+                        child: namesPane,
                       ),
                       const VerticalDivider(width: 1),
                       Expanded(
@@ -241,7 +251,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       ),
                     ],
                   )
-                : list,
+                : namesPane,
           ),
         );
       },
@@ -375,7 +385,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             final groups = _actions.duplicates(_kind);
             final kept = _actions.kept(_kind);
             return Scaffold(
-              appBar: AppBar(title: const Text('Possible duplicates')),
+              appBar: pageHeadingBar(context, title: 'Possible duplicates'),
               body: PixelListView.builder(
                 padding: const EdgeInsets.all(16),
                 itemCount: groups.length + kept.length + 1,
@@ -593,14 +603,19 @@ class _NamePageState extends State<_NamePage> {
     builder: (context, _) {
       final name = widget.actions.catalog(widget.kind).named(_name);
       return Scaffold(
-        appBar: AppBar(
-          title: Text(widget.kind == LibraryKind.tags ? 'Tag' : 'Ingredient'),
+        appBar: pageHeadingBar(
+          context,
+          title: name?.name ?? _name,
+          subtitle: name == null
+              ? null
+              : _nameMetadata(widget.kind, name.count),
         ),
         body: SafeArea(
           top: false,
           child: name == null
               ? const Center(child: Text('This name is no longer used.'))
               : _NameDetails(
+                  showHeading: false,
                   actions: widget.actions,
                   kind: widget.kind,
                   name: name,
@@ -619,15 +634,20 @@ class _NamePageState extends State<_NamePage> {
   );
 }
 
+String _nameMetadata(LibraryKind kind, int count) =>
+    "${kind == LibraryKind.tags ? 'Tag' : 'Ingredient'} · ${recipeCount(count)}";
+
 class _NameDetails extends StatelessWidget {
   const _NameDetails({
     super.key,
+    this.showHeading = true,
     required this.actions,
     required this.kind,
     required this.name,
     required this.onOpenRecipe,
     required this.onChanged,
   });
+  final bool showHeading;
   final _LibraryActions actions;
   final LibraryKind kind;
   final LibraryName name;
@@ -637,14 +657,16 @@ class _NameDetails extends StatelessWidget {
   Widget build(BuildContext context) => PixelListView(
     padding: const EdgeInsets.all(16),
     children: [
-      Text(name.name, style: Theme.of(context).textTheme.headlineMedium),
-      const SizedBox(height: 8),
-      Text(
-        recipeCount(name.count),
-        style: Theme.of(context).textTheme.bodyMedium
-            ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-      ),
-      const SizedBox(height: 24),
+      if (showHeading) ...[
+        Text(name.name, style: PageHeadings.style(context)),
+        const SizedBox(height: 8),
+        Text(
+          _nameMetadata(kind, name.count),
+          style: Theme.of(context).textTheme.bodyMedium
+              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 24),
+      ],
       Card(
         child: Column(
           children: [
@@ -734,7 +756,10 @@ class _NameDetails extends StatelessWidget {
                       'Remove tag',
                       onChanged: onChanged,
                     ),
-              icon: const Icon(Symbols.delete),
+              icon: Icon(
+                Symbols.delete,
+                color: mutedDeleteColor(Theme.of(context).colorScheme),
+              ),
               label: const Text('Remove tag'),
             ),
           ),
@@ -761,7 +786,7 @@ class _AllRecipes extends StatelessWidget {
       final recipes =
           actions.catalog(kind).named(name)?.recipes ?? <core.RecipeSummary>[];
       return Scaffold(
-        appBar: AppBar(title: Text(name)),
+        appBar: pageHeadingBar(context, title: name),
         body: SafeArea(
           top: false,
           child: Column(
@@ -1385,7 +1410,7 @@ class _MergePickerState extends State<_MergePicker> {
         .toList();
     final rest = available.where((n) => !similar.contains(n)).toList();
     return Scaffold(
-      appBar: AppBar(title: const Text('Merge into…')),
+      appBar: pageHeadingBar(context, title: 'Merge into…'),
       body: SafeArea(
         top: false,
         child: Column(
@@ -1413,7 +1438,8 @@ class _MergePickerState extends State<_MergePicker> {
             Expanded(
               child: available.isEmpty
                   ? const Center(child: Text('No matching names'))
-                  : CustomScrollView(
+                  : PixelCustomScrollView(
+                      key: searchResultsKey('merge-names', _query.text.trim()),
                       slivers: [
                         for (final (title, names) in [
                           ('Similar names', similar),

@@ -1,3 +1,5 @@
+import 'page_headings.dart';
+
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -180,6 +182,7 @@ class _TagNameDialogState extends State<_TagNameDialog> {
                 SizedBox(
                   height: (suggestions.length * 56.0).clamp(56, 224),
                   child: PixelListView.builder(
+                    key: searchResultsKey('existing-tags', value),
                     itemCount: suggestions.length,
                     itemBuilder: (context, i) => ListTile(
                       contentPadding: EdgeInsets.zero,
@@ -278,7 +281,7 @@ class _TagRecipePickerState extends State<_TagRecipePicker> {
       return PopScope(
         canPop: !_busy,
         child: Scaffold(
-          appBar: AppBar(title: const Text('Choose recipes')),
+          appBar: pageHeadingBar(context, title: 'Choose recipes'),
           body: SafeArea(
             top: false,
             child: Column(
@@ -320,12 +323,13 @@ class _TagRecipePickerState extends State<_TagRecipePicker> {
                           Symbols.star,
                           size: 18,
                           fill: _filters.favoritesOnly ? 1 : 0,
+                          color: Theme.of(context).colorScheme.tertiary,
                         ),
                         selected: _filters.favoritesOnly,
                         showCheckmark: false,
                         selectedColor: Theme.of(context)
                             .colorScheme
-                            .secondaryContainer,
+                            .tertiaryContainer,
                         onSelected: _filters.setFavoritesOnly,
                       ),
                     ],
@@ -369,6 +373,10 @@ class _TagRecipePickerState extends State<_TagRecipePicker> {
                   child: matches.isEmpty
                       ? const Center(child: Text('No matching recipes'))
                       : PixelListView.builder(
+                          key: searchResultsKey(
+                            'choose-recipes',
+                            _filters.query.trim(),
+                          ),
                           itemCount: matches.length,
                           itemBuilder: (context, i) {
                             final recipe = matches[i];
@@ -393,7 +401,14 @@ class _TagRecipePickerState extends State<_TagRecipePicker> {
                               secondary: hasTag
                                   ? const Icon(Symbols.lock, size: 20)
                                   : recipe.favorite
-                                  ? const Icon(Symbols.star, fill: 1, size: 20)
+                                  ? Icon(
+                                      Symbols.star,
+                                      fill: 1,
+                                      size: 20,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .tertiary,
+                                    )
                                   : null,
                             );
                           },

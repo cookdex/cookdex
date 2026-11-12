@@ -1,3 +1,5 @@
+import 'page_headings.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -6,7 +8,8 @@ import 'idle_build_ahead.dart';
 import 'progressive_cards.dart';
 import 'prepared_card_title.dart';
 import 'recipe_top_button.dart';
-import 'recipe_action_motion.dart';
+import 'facelift_motion.dart';
+import 'facelift_tokens.dart';
 import 'top_return_sliver.dart';
 import 'retained_screen.dart';
 import '../sync_controller.dart';
@@ -38,8 +41,11 @@ class RecipesScreen extends StatefulWidget {
     required this.onAdd,
     required this.onActions,
     this.controller,
+    this.onDesignLab,
+    this.keyboardVisible = false,
     this.onWrite,
     this.onImport,
+    this.onCreate,
     this.onSync,
     this.syncStatus,
     this.syncController,
@@ -75,7 +81,9 @@ class RecipesScreen extends StatefulWidget {
   final ValueChanged<RecipeSummary> onActions;
   final ScrollController? controller;
   final VoidCallback? onWrite;
-  final VoidCallback? onImport;
+  final VoidCallback? onImport, onDesignLab;
+  final VoidCallback? onCreate;
+  final bool keyboardVisible;
   final Future<void> Function()? onSync;
 
   @override
@@ -89,6 +97,7 @@ class RecipesScreenState extends State<RecipesScreen> {
     child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: scrollToTop,
+      onLongPress: widget.onDesignLab,
       child: ExcludeSemantics(
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 48),
@@ -98,16 +107,19 @@ class RecipesScreenState extends State<RecipesScreen> {
     ),
   );
   late final TextEditingController _query;
+  late String _resultsQuery;
+  int _queryChange = 0;
+  bool _positioningResults = false;
   late final ScrollController _scroll;
-  final _showAdd = ValueNotifier(true);
+  bool _topAllowed = true;
   final _showTop = ValueNotifier(false);
   final _topSliver = GlobalKey();
   ScrollPosition? _topPosition;
   double _topOffset = 0;
   int _topJump = 0;
-  bool _returningTop = false, _actionsMoving = false;
-  double _addLow = 0, _addHigh = 0;
-  Timer? _addIdle;
+  bool _returningTop = false, _listMoving = false;
+  double _topLow = 0, _topHigh = 0;
+  Timer? _topIdle;
   final Map<String, _RecipeRow> _rows = {};
   final _builtCards = BuiltRowBudget(32);
   final _cardPreparation = CardPreparation();
@@ -194,9 +206,12 @@ class RecipesScreenState extends State<RecipesScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 20, bottom: 8),
                   child: Semantics(
+                    container: true,
                     header: true,
                     child: Text(
-                      'Partial matches',
+                      _listPartialStart == 0
+                          ? 'No recipes match every word.\nThese match some of them.'
+                          : 'Partial matches',
                       key: const Key('partial-matches'),
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         color: Theme.of(context).colorScheme.primary,
@@ -257,7 +272,11 @@ class RecipesScreenState extends State<RecipesScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.waitUntilFirstFrameRasterized.then((_) {
+      if (mounted) widget.store.prepareRecipeSearch();
+    });
     _query = TextEditingController(text: widget.preferences.query);
+    _resultsQuery = widget.preferences.query.trim();
     _scroll =
         widget.controller ??
         PixelScrollController(
@@ -271,7 +290,11 @@ class RecipesScreenState extends State<RecipesScreen> {
     widget.preferences.addListener(_syncQuery);
   }
 
-  void _saveScroll() => widget.preferences.setScrollOffset(_scroll.offset);
+  void _saveScroll() {
+    if (!_positioningResults) {
+      widget.preferences.setScrollOffset(_scroll.offset);
+    }
+  }
 
   void _updateTop() {
     if (!_scroll.hasClients) return;
@@ -284,40 +307,40 @@ class RecipesScreenState extends State<RecipesScreen> {
     }
     final offset = position.pixels;
     final moving = position.isScrollingNotifier.value;
-    if (moving && !_actionsMoving) _addLow = _addHigh = _topOffset;
+    if (moving && !_listMoving) _topLow = _topHigh = _topOffset;
     _topOffset = offset;
-    _actionsMoving = moving;
+    _listMoving = moving;
     if (moving) {
-      _addIdle?.cancel();
-      _addIdle = null;
-      _addLow = math.min(_addLow, offset);
-      _addHigh = math.max(_addHigh, offset);
-      // A card-sized downward excursion hides Add. A small, intentional upward
+      _topIdle?.cancel();
+      _topIdle = null;
+      _topLow = math.min(_topLow, offset);
+      _topHigh = math.max(_topHigh, offset);
+      // A card-sized downward excursion hides Top. A small, intentional upward
       // movement restores it; jitter cannot flip it repeatedly.
-      if (_showAdd.value && offset - _addLow >= 200) {
-        _showAdd.value = false;
-        _addHigh = offset;
-      } else if (!_showAdd.value && _addHigh - offset >= 24) {
-        _showAdd.value = true;
-        _addLow = offset;
+      if (_topAllowed && offset - _topLow >= 200) {
+        _topAllowed = false;
+        _topHigh = offset;
+      } else if (!_topAllowed && _topHigh - offset >= 24) {
+        _topAllowed = true;
+        _topLow = offset;
       }
     } else {
-      _addIdle ??= Timer(const Duration(milliseconds: 500), () {
-        _addIdle = null;
+      _topIdle ??= Timer(const Duration(milliseconds: 500), () {
+        _topIdle = null;
         if (!mounted || !_scroll.hasClients) return;
-        _addLow = _addHigh = _scroll.offset;
-        _showAdd.value = true;
+        _topLow = _topHigh = _scroll.offset;
+        _topAllowed = true;
         _syncTopVisibility();
       });
     }
-    if (offset <= 24) _showAdd.value = true;
+    if (offset <= 24) _topAllowed = true;
     _syncTopVisibility();
   }
 
   void _syncTopVisibility() {
     _showTop.value =
         !_returningTop &&
-        _showAdd.value &&
+        _topAllowed &&
         _scroll.hasClients &&
         _scroll.offset > _scroll.position.viewportDimension * 2;
   }
@@ -340,7 +363,7 @@ class RecipesScreenState extends State<RecipesScreen> {
         _cardPreparation.prepareTopReturn(viewport + landing);
         await _scroll.animateTo(
           start - departure,
-          duration: const Duration(milliseconds: 220),
+          duration: FaceliftMotion.topDeparture,
           curve: Easing.emphasizedAccelerate,
         );
         if (!mounted ||
@@ -356,7 +379,7 @@ class RecipesScreenState extends State<RecipesScreen> {
         }
         await _scroll.animateTo(
           0,
-          duration: const Duration(milliseconds: 500),
+          duration: FaceliftMotion.topLanding,
           curve: Easing.emphasizedDecelerate,
         );
       }
@@ -403,7 +426,28 @@ class RecipesScreenState extends State<RecipesScreen> {
         ),
       );
     }
-    if (widget.preferences.scrollOffset == 0 &&
+    final query = widget.preferences.query.trim();
+    if (query != _resultsQuery) {
+      _resultsQuery = query;
+      final change = ++_queryChange;
+      _positioningResults = true;
+      _interruptTop();
+      final offset = widget.preferences.scrollOffset;
+      if (offset == 0 && _scroll.hasClients && _scroll.offset != 0) {
+        _restartTopSliver();
+        _scroll.jumpTo(0);
+      }
+      // Clearing a short or empty result must wait for the full list's extent.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || change != _queryChange) return;
+        _positioningResults = false;
+        if (!_scroll.hasClients) return;
+        final target = offset.clamp(0.0, _scroll.position.maxScrollExtent);
+        if (_scroll.offset != target) _scroll.jumpTo(target);
+        _saveScroll();
+      });
+    } else if (!_positioningResults &&
+        widget.preferences.scrollOffset == 0 &&
         _scroll.hasClients &&
         _scroll.offset != 0) {
       _scroll.jumpTo(0);
@@ -412,7 +456,7 @@ class RecipesScreenState extends State<RecipesScreen> {
 
   @override
   void dispose() {
-    _addIdle?.cancel();
+    _topIdle?.cancel();
     _topJump++;
     widget.preferences.removeListener(_syncQuery);
     _scroll.removeListener(_saveScroll);
@@ -420,7 +464,6 @@ class RecipesScreenState extends State<RecipesScreen> {
     _topPosition?.isScrollingNotifier.removeListener(_updateTop);
     if (widget.controller == null) _scroll.dispose();
     _query.dispose();
-    _showAdd.dispose();
     _showTop.dispose();
     _cardPreparation.dispose();
     super.dispose();
@@ -447,6 +490,9 @@ class RecipesScreenState extends State<RecipesScreen> {
         ),
     ],
     builder: (context, controller, child) => ActionChip(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(FaceliftTokens.filterRadius),
+      ),
       tooltip: tooltip,
       onPressed: () =>
           controller.isOpen ? controller.close() : controller.open(),
@@ -465,73 +511,94 @@ class RecipesScreenState extends State<RecipesScreen> {
 
   Widget _selectionBar() => LayoutBuilder(
     builder: (context, constraints) {
-      final label = Text(
-        '${widget.selectedIds!.length} selected',
-        style: Theme.of(context).textTheme.titleMedium,
-      );
-      final close = IconButton(
-        tooltip: 'Close selection',
-        onPressed: widget.onCloseSelection,
-        icon: const Icon(Symbols.close),
-      );
+      final count = '${widget.selectedIds!.length} selected';
+      final style = Theme.of(context).textTheme.titleMedium!;
+      final measure = TextPainter(
+        text: TextSpan(text: count, style: style),
+        textScaler: MediaQuery.textScalerOf(context),
+        textDirection: Directionality.of(context),
+      )..layout();
+      final labelWidth = measure.width.ceilToDouble();
+      measure.dispose();
+      final empty = widget.selectedIds!.isEmpty;
+      // First entries move into the menu first. Each action retains 48dp.
       final actions = [
-        IconButton(
-          tooltip: 'Select all',
-          onPressed: widget.onSelectAll,
-          icon: const Icon(Symbols.select_all),
+        ('Select all', Symbols.select_all, widget.onSelectAll),
+        (
+          'Share selected recipes',
+          Symbols.share,
+          empty ? null : widget.onShareSelection,
         ),
-        IconButton(
-          tooltip: 'Add tag',
-          onPressed: widget.selectedIds!.isEmpty ? null : widget.onTagSelection,
-          icon: const Icon(Symbols.label),
+        ('Add tag', Symbols.label, empty ? null : widget.onTagSelection),
+        (
+          'Add selected recipes to shopping list',
+          Symbols.shopping_cart,
+          empty ? null : widget.onShoppingSelection,
         ),
-        IconButton(
-          tooltip: 'Share selected recipes',
-          onPressed: widget.selectedIds!.isEmpty
-              ? null
-              : widget.onShareSelection,
-          icon: const Icon(Symbols.share),
-        ),
-        IconButton(
-          tooltip: 'Add selected recipes to shopping list',
-          onPressed: widget.selectedIds!.isEmpty
-              ? null
-              : widget.onShoppingSelection,
-          icon: const Icon(Symbols.shopping_cart),
-        ),
-        IconButton(
-          tooltip: 'Delete selected recipes',
-          onPressed: widget.selectedIds!.isEmpty
-              ? null
-              : widget.onDeleteSelection,
-          icon: const Icon(Symbols.delete),
+        (
+          'Delete selected recipes',
+          Symbols.delete,
+          empty ? null : widget.onDeleteSelection,
         ),
       ];
-      final split =
-          constraints.maxWidth < 440 ||
-          MediaQuery.textScalerOf(context).scale(14) > 20;
-      return split
-          ? Column(
-              children: [
-                Row(
-                  children: [
-                    close,
-                    Expanded(child: label),
-                  ],
+      final slots = ((constraints.maxWidth - labelWidth - 48 - 8) / 48).floor();
+      final visible = slots >= actions.length
+          ? actions.length
+          : (slots - 1).clamp(0, actions.length);
+      final hidden = actions.length - visible;
+      Icon symbol(IconData icon) => Icon(
+        icon,
+        color: icon == Symbols.delete
+            ? mutedDeleteColor(Theme.of(context).colorScheme)
+            : null,
+      );
+      return Row(
+        children: [
+          IconButton(
+            tooltip: 'Close selection',
+            onPressed: widget.onCloseSelection,
+            icon: const Icon(Symbols.close),
+          ),
+          Expanded(
+            child: Text(
+              count,
+              style: style,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          for (final (name, icon, callback) in actions.skip(hidden))
+            IconButton(tooltip: name, onPressed: callback, icon: symbol(icon)),
+          if (hidden > 0)
+            MenuAnchor(
+              style: MenuStyle(
+                alignment: AlignmentDirectional.bottomEnd,
+                maximumSize: WidgetStatePropertyAll(
+                  Size(constraints.maxWidth, double.infinity),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: actions,
-                ),
+              ),
+              menuChildren: [
+                for (final (name, icon, callback) in actions.take(hidden))
+                  MenuItemButton(
+                    leadingIcon: symbol(icon),
+                    onPressed: callback,
+                    child: Text(switch (icon) {
+                      Symbols.share => 'Share',
+                      Symbols.shopping_cart => 'Add to list',
+                      Symbols.delete => 'Delete',
+                      _ => name,
+                    }),
+                  ),
               ],
-            )
-          : Row(
-              children: [
-                close,
-                Expanded(child: label),
-                ...actions,
-              ],
-            );
+              builder: (_, controller, _) => IconButton(
+                tooltip: 'More selection actions',
+                onPressed: () =>
+                    controller.isOpen ? controller.close() : controller.open(),
+                icon: const Icon(Symbols.more_vert),
+              ),
+            ),
+        ],
+      );
     },
   );
 
@@ -552,13 +619,17 @@ class RecipesScreenState extends State<RecipesScreen> {
     }
     final controls = <Widget>[
       FilterChip(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(FaceliftTokens.filterRadius),
+        ),
         label: const Text('Favorites'),
         avatar: Icon(
           Symbols.star,
           fill: widget.preferences.favoritesOnly ? 1 : 0,
+          color: theme.colorScheme.tertiary,
           size: 18,
         ),
-        selectedColor: theme.colorScheme.secondaryContainer,
+        selectedColor: theme.colorScheme.tertiaryContainer,
         selected: widget.preferences.favoritesOnly,
         showCheckmark: false,
         onSelected: widget.preferences.setFavoritesOnly,
@@ -639,6 +710,10 @@ class RecipesScreenState extends State<RecipesScreen> {
     label.dispose();
     final import = FilledButton(
       key: const Key('empty-smart-import'),
+      style: FilledButton.styleFrom(
+        backgroundColor: theme.colorScheme.tertiary,
+        foregroundColor: theme.colorScheme.onTertiary,
+      ),
       onPressed: widget.onImport ?? widget.onAdd,
       child: const Text('Smart Import'),
     );
@@ -690,6 +765,12 @@ class RecipesScreenState extends State<RecipesScreen> {
                 alignment: WrapAlignment.center,
                 spacing: 8,
                 children: [
+                  if (widget.onCreate != null)
+                    TextButton.icon(
+                      onPressed: widget.onCreate,
+                      icon: const Icon(Symbols.lightbulb),
+                      label: const Text('Smart Create'),
+                    ),
                   if (widget.onRestore != null)
                     TextButton(
                       onPressed: widget.onRestore,
@@ -819,7 +900,7 @@ class RecipesScreenState extends State<RecipesScreen> {
           );
         }
         final scale = MediaQuery.textScalerOf(context).scale(1);
-        final searchHeight = 72.0 + (scale - 1).clamp(0, 3) * 24;
+        final searchHeight = 64.0 + (scale - 1).clamp(0, 3) * 24;
         final wide = MediaQuery.sizeOf(context).width >= 600;
         return Stack(
           children: [
@@ -848,45 +929,38 @@ class RecipesScreenState extends State<RecipesScreen> {
                             widget.syncController != null,
                         delegate: _PinnedSearch(
                           height:
-                              56 +
-                              (scale - 1).clamp(0, 3) * 24 +
-                              (widget.selectedIds != null &&
-                                      (constraints.maxWidth - 32 < 440 ||
-                                          MediaQuery.textScalerOf(context)
-                                                  .scale(14) >
-                                              20)
-                                  ? 48
-                                  : 0),
+                              PageHeadings.tabRowHeight(context) +
+                              PageHeadings.gap,
                           child: ColoredBox(
                             color: Theme.of(context).scaffoldBackgroundColor,
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                              child: widget.selectedIds != null
-                                  ? _selectionBar()
-                                  : Row(
-                                      children: [
-                                        if (wide || scale < 1.6) ...[
+                            child: widget.selectedIds != null
+                                ? Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    child: _selectionBar(),
+                                  )
+                                : TabHeading(
+                                    title: _heading(
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
                                           const Icon(Symbols.skillet, size: 28),
-                                          const SizedBox(width: 10),
-                                        ],
-                                        Expanded(
-                                          child: _heading(
-                                            Text(
+                                          const SizedBox(width: 8),
+                                          const Flexible(
+                                            child: Text(
                                               'cookdex',
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .headlineSmall
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w800,
-                                                  ),
                                             ),
                                           ),
-                                        ),
-                                        if (widget.syncStatus != null ||
-                                            widget.syncController != null)
-                                          VisibleListenableBuilder(
+                                        ],
+                                      ),
+                                    ),
+                                    action:
+                                        widget.syncStatus != null ||
+                                            widget.syncController != null
+                                        ? VisibleListenableBuilder(
                                             listenable: widget.syncController,
                                             builder: (_) => SyncIndicator(
                                               status:
@@ -902,10 +976,9 @@ class RecipesScreenState extends State<RecipesScreen> {
                                               onTap:
                                                   widget.onSyncStatus ?? () {},
                                             ),
-                                          ),
-                                      ],
-                                    ),
-                            ),
+                                          )
+                                        : null,
+                                  ),
                           ),
                         ),
                       ),
@@ -917,9 +990,11 @@ class RecipesScreenState extends State<RecipesScreen> {
                             child: ColoredBox(
                               color: Theme.of(context).scaffoldBackgroundColor,
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 8,
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  0,
+                                  16,
+                                  8,
                                 ),
                                 child: wide ? _wideToolbar() : _search(),
                               ),
@@ -972,6 +1047,11 @@ class RecipesScreenState extends State<RecipesScreen> {
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
+                                        const FaceliftIconTile(
+                                          Symbols.search_off,
+                                          size: 56,
+                                        ),
+                                        const SizedBox(height: 12),
                                         Text(
                                           'No matching recipes',
                                           textAlign: TextAlign.center,
@@ -992,6 +1072,12 @@ class RecipesScreenState extends State<RecipesScreen> {
                         ),
                       if (recipes.isNotEmpty)
                         _recipeList(recipes, columns, cardHeight),
+                      if (MediaQuery.paddingOf(context).bottom > 0)
+                        SliverToBoxAdapter(
+                          child: SizedBox(
+                            height: MediaQuery.paddingOf(context).bottom,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -1001,7 +1087,7 @@ class RecipesScreenState extends State<RecipesScreen> {
               Positioned(
                 left: 0,
                 right: 0,
-                bottom: 20,
+                bottom: MediaQuery.paddingOf(context).bottom + 20,
                 child: Center(
                   child: RecipeTopButton(
                     visible: _showTop,
@@ -1009,15 +1095,22 @@ class RecipesScreenState extends State<RecipesScreen> {
                   ),
                 ),
               ),
-            if (widget.store.summaries.isNotEmpty && widget.selectedIds == null)
+            if (widget.store.summaries.isNotEmpty &&
+                widget.selectedIds == null &&
+                !widget.keyboardVisible)
               Positioned(
                 right: 16,
-                bottom: 16,
-                child: ValueListenableBuilder(
-                  valueListenable: _showAdd,
-                  builder: (_, visible, child) =>
-                      RecipeActionMotion(visible: visible, child: child!),
+                bottom: MediaQuery.paddingOf(context).bottom + 16,
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: feedbackVisibilityOf(context),
+                  builder: (context, feedback, child) =>
+                      feedback ? const SizedBox.shrink() : child!,
                   child: FloatingActionButton(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(
+                        FaceliftTokens.addRadius,
+                      ),
+                    ),
                     key: const Key('add-recipe'),
                     tooltip: 'Add recipe',
                     hoverColor:
@@ -1041,6 +1134,7 @@ class RecipesScreenState extends State<RecipesScreen> {
 
   Future<void> _favorite(RecipeSummary recipe) async {
     try {
+      unawaited(HapticFeedback.selectionClick());
       await widget.store.toggleFavorite(recipe.id);
     } catch (_) {
       if (mounted) {
@@ -1135,12 +1229,15 @@ class _RecipeRow extends StatelessWidget {
             tooltip: recipe.favorite
                 ? 'Unfavorite ${recipe.title}'
                 : 'Favorite ${recipe.title}',
-            onPressed: onFavorite,
+            onPressed: () {
+              popCardStar(context, !recipe.favorite);
+              onFavorite();
+            },
             icon: Icon(
               Symbols.star,
               fill: recipe.favorite ? 1 : 0,
               color: recipe.favorite
-                  ? theme.colorScheme.primary
+                  ? theme.colorScheme.tertiary
                   : theme.colorScheme.onSurfaceVariant,
             ),
           );
@@ -1163,158 +1260,155 @@ class _RecipeRow extends StatelessWidget {
       singleLine: grid,
       optimizeItems: !compact,
     );
-    return Material(
-      color: view == RecipeView.cards
-          ? theme.colorScheme.surfaceContainer
-          : Colors.transparent,
-      borderRadius: BorderRadius.circular(compact ? 0 : 12),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => onOpen(recipe.id),
-        onLongPress: () => onActions(recipe),
-        onSecondaryTap: () => onActions(recipe),
-        child: compact
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              title,
-                              if (recipe.tags.isNotEmpty)
-                                Text(
-                                  normalizeTags(recipe.tags).join(' · '),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        SizedBox(width: 48, child: star),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1),
-                ],
-              )
-            : grid
-            ? Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                child: Stack(
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(right: 44),
-                          child: RecipeCardTextBudget(
-                            title: recipe.title,
-                            preparedTitle: prepared == null ? null : title,
-                            preparedTitleLines: prepared?.painter
-                                .computeLineMetrics()
-                                .length
-                                .clamp(1, 2),
-                            description: stage >= 1 ? recipe.description : '',
-                          ),
-                        ),
-                        const Spacer(),
-                        SizedBox(
-                          height: recipeMetadataLineHeight(context),
-                          child: stage >= 2 ? metadata : null,
-                        ),
-                        const SizedBox(height: 8),
-                        // Empty tags reserve the same footer slot as populated cards.
-                        SizedBox(
-                          height: recipeGridTagHeight(context),
-                          child: stage >= 3
-                              ? RecipeTagLine(
-                                  recipe.tags,
-                                  preparedValues: geometry?.tagLabels,
-                                  preparedVisible: geometry?.visibleTags,
-                                  preparedWidth: geometry?.tagWidth,
-                                )
-                              : null,
-                        ),
-                      ],
-                    ),
-                    if (stage >= 4 || selecting)
-                      Positioned(right: -10, top: 0, child: star),
-                  ],
-                ),
-              )
-            : Padding(
-                padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: Stack(
-                    fit: StackFit.passthrough,
+    final row = InkWell(
+      onTap: () => onOpen(recipe.id),
+      onLongPress: () => onActions(recipe),
+      onSecondaryTap: () => onActions(recipe),
+      child: compact
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 54),
-                        child: RecipeCardContent(
-                          title: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              title,
-                              if (recipe.description.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: stage < 1
-                                      ? SizedBox(
-                                          height: geometry!.descriptionHeight,
-                                        )
-                                      : Text(
-                                          recipe.description,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                                color: theme
-                                                    .colorScheme
-                                                    .onSurfaceVariant,
-                                              ),
-                                        ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            title,
+                            if (recipe.tags.isNotEmpty)
+                              Text(
+                                normalizeTags(recipe.tags).join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
                                 ),
-                            ],
-                          ),
-                          metadata: stage < 2
-                              ? SizedBox(height: geometry!.metadataHeight)
-                              : metadata.isEmpty
-                              ? const SizedBox.shrink()
-                              : metadata,
-                          tags: stage < 3
-                              ? SizedBox(height: geometry!.tagsHeight)
-                              : recipe.tags.isEmpty
-                              ? const SizedBox.shrink()
-                              : RecipeTagLine(
-                                  recipe.tags,
-                                  preparedValues: geometry?.tagLabels,
-                                  preparedVisible: geometry?.visibleTags,
-                                  preparedWidth: geometry?.tagWidth,
-                                ),
+                              ),
+                          ],
                         ),
                       ),
-                      if (stage >= 4 || selecting)
-                        Positioned(right: 0, top: 0, child: star),
+                      SizedBox(width: 48, child: star),
                     ],
                   ),
                 ),
+                const Divider(height: 1),
+              ],
+            )
+          : grid
+          ? Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Stack(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 44),
+                        child: RecipeCardTextBudget(
+                          title: recipe.title,
+                          preparedTitle: prepared == null ? null : title,
+                          preparedTitleLines: prepared?.painter
+                              .computeLineMetrics()
+                              .length
+                              .clamp(1, 2),
+                          description: stage >= 1 ? recipe.description : '',
+                        ),
+                      ),
+                      const Spacer(),
+                      SizedBox(
+                        height: recipeMetadataLineHeight(context),
+                        child: stage >= 2 ? metadata : null,
+                      ),
+                      const SizedBox(height: 8),
+                      // Empty tags reserve the same footer slot as populated cards.
+                      SizedBox(
+                        height: recipeGridTagHeight(context),
+                        child: stage >= 3
+                            ? RecipeTagLine(
+                                recipe.tags,
+                                preparedValues: geometry?.tagLabels,
+                                preparedVisible: geometry?.visibleTags,
+                                preparedWidth: geometry?.tagWidth,
+                              )
+                            : null,
+                      ),
+                    ],
+                  ),
+                  if (stage >= 4 || selecting)
+                    Positioned(right: -10, top: 0, child: star),
+                ],
               ),
-      ),
+            )
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 48),
+                child: Stack(
+                  fit: StackFit.passthrough,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 54),
+                      child: RecipeCardContent(
+                        title: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            title,
+                            if (recipe.description.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: stage < 1
+                                    ? SizedBox(
+                                        height: geometry!.descriptionHeight,
+                                      )
+                                    : Text(
+                                        recipe.description,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                              color: theme
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                            ),
+                                      ),
+                              ),
+                          ],
+                        ),
+                        metadata: stage < 2
+                            ? SizedBox(height: geometry!.metadataHeight)
+                            : metadata.isEmpty
+                            ? const SizedBox.shrink()
+                            : metadata,
+                        tags: stage < 3
+                            ? SizedBox(height: geometry!.tagsHeight)
+                            : recipe.tags.isEmpty
+                            ? const SizedBox.shrink()
+                            : RecipeTagLine(
+                                recipe.tags,
+                                preparedValues: geometry?.tagLabels,
+                                preparedVisible: geometry?.visibleTags,
+                                preparedWidth: geometry?.tagWidth,
+                              ),
+                      ),
+                    ),
+                    if (stage >= 4 || selecting)
+                      Positioned(right: 0, top: 0, child: star),
+                  ],
+                ),
+              ),
+            ),
+    );
+    if (compact) return row;
+    return Material(
+      color: theme.colorScheme.surfaceContainer,
+      borderRadius: BorderRadius.circular(FaceliftTokens.cardRadius),
+      clipBehavior: Clip.antiAlias,
+      child: row,
     );
   }
 }

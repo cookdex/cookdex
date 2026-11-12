@@ -1808,5 +1808,334 @@
     "fingerprints": [
       "3044182195696bcf509dde05ee499aaf710374df7e1448f4f90d91c027a628ee"
     ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Four printable bytes at offset 46568 inside the ARM64 Dart AOT read-only snapshot resemble a drive path. Adjacent bytes are binary data and the fragment contains no file or account name.",
+    "fingerprints": [
+      "236171a5b2ad317dcaf8822685bbb5e409a30b927b3925c60f2c200a13848b43"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Four printable bytes at offset 82559 inside the ARM64 Dart AOT read-only snapshot contain a drive-like prefix. The adjoining non-text bytes delimit the match. It contains no file or account name.",
+    "fingerprints": [
+      "afb65228d1cf16911a29e85d89cba727ae130329673c54eac9b5ea1087fcef1f"
+    ]
+  },
+  {
+    "classification": "runtime-path",
+    "reason": "The approved Help text gives a fixed Credential Manager entry suffix ending in flutter-v1/gemini. The scanner includes the sentence-ending period. This is an instruction shared by all installations.",
+    "fingerprints": [
+      "9fee9f044439cd33622d7414f6ae4f455f6d666fffda3eca5ce5175f1f84a133",
+      "76d7535a0d87bc5a068e2e93446795a74698d4726fbf43769c15a6e82adc4110"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Flutter persistent hash map constructor _HashCollisionNode.fromCollision is emitted with a numeric private-library key. The at sign and constructor separator match the email pattern.",
+    "fingerprints": [
+      "5bef61721a9d8d1e4f922419bcf5a675645f5df9ca49e3ba1b8271cc29cb08b8",
+      "dc1c2adefa72d9b5614c818e476df184a838d8986b8a46f1ce28f5ab4b7902cf"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Dart file-system link constructor _Link.fromRawPath is emitted with a numeric private-library key. The at sign and constructor separator match the email pattern. Adjacent snapshot bytes contributed the leading character.",
+    "fingerprints": [
+      "887d618dba2cbac5311b8b47f9120afbb4b2e72da97d36b8beebb205534bd6c5"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Flutter persistent hash map constructor _CompressedNode.single is emitted with a numeric private-library key. The at sign and constructor separator match the email pattern.",
+    "fingerprints": [
+      "c9565f560a609be506df61c8352abeb9c6c5533d16c5acbf118504718de27581",
+      "3f073011e29a6458ad89cb35a2f31eefbd1a5a13a1bf90806a7bd8d4974f0aa3"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Dart HTTP authentication constructor _AuthenticationScheme.fromString is emitted with a numeric private-library key. The at sign and constructor separator match the email pattern.",
+    "fingerprints": [
+      "21c83fd933724d26b0b0dea9aeceb67a262c7445242e908b13d6df93788f5e87"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Flutter scale gesture constructor _PointerPanZoomData.fromStartEvent is emitted with a numeric private-library key. The at sign and constructor separator match the email pattern.",
+    "fingerprints": [
+      "c8756e9a4270350e68920eb6f46c56779b8570bc685cd4693cd3f8e6af79d3fd",
+      "75b12f469fd0e20d06b47ac6b63aee876e8bde1c0ac41615c9353ea7ce62b152"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Flutter image filter constructor _ImageFilter.matrix is emitted with a numeric private-library key. The at sign and constructor separator match the email pattern. The terminal n is the following byte after the length-delimited name.",
+    "fingerprints": [
+      "7d5696efec1e968595dacae854930e6092bca5ab86cb4a7a06b6deb228b1ee03"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Flutter scale gesture constructor _PointerPanZoomData.fromUpdateEvent is emitted with a numeric private-library key. The at sign and constructor separator match the email pattern.",
+    "fingerprints": [
+      "58624490abf394f4d896f52b714868be73b1359b120eaa7e3080b6b2d59ad08d",
+      "dfdfc5be7ec174ec5002c1cdc380f3c2e67328fc88aec698c4fe14fed9316c3b"
+    ]
+  },
+  {
+    "classification": "generic-build-path",
+    "reason": "Rust embeds the compiler source location for miniz_oxide-0.9.1/src/deflate/core.rs used by Android gzip backup. The exact path has the established generic repository cache root and only the loopback registry, pinned public crate and source components.",
+    "fingerprints": [
+      "95d29dfd5e9575746a3c7a68561ba39d56bef06233afea56fb364bd5e06c62e4"
+    ]
+  },
+  {
+    "classification": "generic-build-path",
+    "reason": "Rust embeds the compiler source location for miniz_oxide-0.9.1/src/deflate/stream.rs used by Android gzip backup. The exact path has the established generic repository cache root and only the loopback registry, pinned public crate and source components.",
+    "fingerprints": [
+      "ee6adee1f0015be180a163e12c4142922049e0c3081deb2ba2e61686cd8feb08"
+    ]
+  },
+  {
+    "classification": "generic-build-path",
+    "reason": "Rust embeds the compiler source location for flate2-1.1.10/src/crc.rs used by Android gzip backup. The exact path has the established generic repository cache root and only the loopback registry, pinned public crate and source components.",
+    "fingerprints": [
+      "397ff129495b5058ae56f13cff10ef7a2a613a3bf723339d4c3d9f7005523817"
+    ]
+  },
+  {
+    "classification": "runtime-path",
+    "reason": "Android backup and restore resolve the open database descriptor through the standard procfs self/fd directory. This prefix is a fixed format string. Descriptor numbers and resolved file paths are supplied only at runtime.",
+    "fingerprints": [
+      "df6b447d5d6ee198eb5b3882d8e42df31d04e9277533699c6d0689408363108d"
+    ]
+  },
+  {
+    "classification": "generic-build-path",
+    "reason": "Rust embeds the compiler source location for miniz_oxide-0.9.1/src/deflate/stored.rs used by Android gzip backup. The exact path has the established generic repository cache root and only the loopback registry, pinned public crate and source components.",
+    "fingerprints": [
+      "b642ffa814c63d4cd435edc7ff6d44461009a7b96c026c3d5d2faed4d5b4e318"
+    ]
+  },
+  {
+    "classification": "generic-build-path",
+    "reason": "Rust embeds the compiler source location for flate2-1.1.10/src/gz/mod.rs used by Android gzip backup. The exact path has the established generic repository cache root and only the loopback registry, pinned public crate and source components.",
+    "fingerprints": [
+      "311b0f9db2a6da3b7d5ff5f3e77dd159c80ec418cec1a953a58ae06a51e6a602"
+    ]
+  },
+  {
+    "classification": "generic-build-path",
+    "reason": "Rust embeds the compiler source location for flate2-1.1.10/src/gz/write.rs used by Android gzip backup. The exact path has the established generic repository cache root and only the loopback registry, pinned public crate and source components.",
+    "fingerprints": [
+      "2942fe26d7368855df9e9214bbc8c8cb57279800d584e32abbd082c55c25113b"
+    ]
+  },
+  {
+    "classification": "generic-build-path",
+    "reason": "Rust embeds the compiler source location for flate2-1.1.10/src/zio.rs used by Android gzip backup. The exact path has the established generic repository cache root and only the loopback registry, pinned public crate and source components.",
+    "fingerprints": [
+      "26187c9d90133984d0bf49f633354639420072afa0c112934059dfdee70474ba"
+    ]
+  },
+  {
+    "classification": "loopback",
+    "reason": "The standard IPv4 loopback literal occurs in the Cargo registry directory of the compiler source path for miniz_oxide-0.9.1/src/deflate/core.rs. The entire containing path was reviewed separately.",
+    "fingerprints": [
+      "74f20442e961ef958949105045db3262d63d21978ad4d90a9ecd289ee2064e77"
+    ]
+  },
+  {
+    "classification": "loopback",
+    "reason": "The standard IPv4 loopback literal occurs in the Cargo registry directory of the compiler source path for miniz_oxide-0.9.1/src/deflate/stream.rs. The entire containing path was reviewed separately.",
+    "fingerprints": [
+      "5f95e71e48c9d734dbc4d102e9d2d0cf920eec1555d66d9b6c4806c6034e22b6"
+    ]
+  },
+  {
+    "classification": "loopback",
+    "reason": "The standard IPv4 loopback literal occurs in the Cargo registry directory of the compiler source path for flate2-1.1.10/src/crc.rs. The entire containing path was reviewed separately.",
+    "fingerprints": [
+      "efb13953f774512671096bffbd451e28e7bf3cd88f43343bf60e07998852f94a"
+    ]
+  },
+  {
+    "classification": "loopback",
+    "reason": "The standard IPv4 loopback literal occurs in the Cargo registry directory of the compiler source path for miniz_oxide-0.9.1/src/deflate/stored.rs. The entire containing path was reviewed separately.",
+    "fingerprints": [
+      "aec89475d08139da6ac74c3cb2115db2ffa3e453ba9145cacd2ac47e24cf404b"
+    ]
+  },
+  {
+    "classification": "loopback",
+    "reason": "The standard IPv4 loopback literal occurs in the Cargo registry directory of the compiler source path for flate2-1.1.10/src/gz/mod.rs. The entire containing path was reviewed separately.",
+    "fingerprints": [
+      "b99875db32a6972dca8cc5f7f0019b39a5f802fb6ff2edfb4f729d7968329334"
+    ]
+  },
+  {
+    "classification": "loopback",
+    "reason": "The standard IPv4 loopback literal occurs in the Cargo registry directory of the compiler source path for flate2-1.1.10/src/gz/write.rs. The entire containing path was reviewed separately.",
+    "fingerprints": [
+      "fb315942f6cb416ab3663dce6d0bc726af1e0463d4d60a17f8214219eaad5cf7"
+    ]
+  },
+  {
+    "classification": "loopback",
+    "reason": "The standard IPv4 loopback literal occurs in the Cargo registry directory of the compiler source path for flate2-1.1.10/src/zio.rs. The entire containing path was reviewed separately.",
+    "fingerprints": [
+      "b825ef35c290a29efc6e701774a370978e5f219d474b1fe48f23e65c43bf7051"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Rust bridge concatenates the end of a Tokio nested-runtime diagnostic (asynchronous tasks.) and the beginning of the Rust internal error diagnostic. Their boundary happens to spell a host-like name.",
+    "fingerprints": [
+      "fa95e32ae0a214c053193958bce4ec70629668b771edf0793e294bf85635b7a6"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Rust public recipe URL filter stores its fixed localhost and local domain suffixes consecutively. The detector spans their boundary. These literals are used when rejecting local destinations.",
+    "fingerprints": [
+      "26ea666c0d16f6802a0ba758c910ce6d9c3c738d45c488293c06706f5319d376",
+      "3a12077847657f7335f479cf536245101b1b3ceaa11d222d58a0cae37fee3b76"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Two slash-and-B groups produce the path-shaped match in the Material Symbols Outlined subset. Every occurrence of the inspected context falls within the TrueType glyf table containing binary glyph outlines.",
+    "fingerprints": [
+      "be4b8ad1c2f7f50ef2a0f13a18818dc0f61d5019af6832a7e9527c38cdeec724",
+      "ff3988725a98296c4b37f3005e687748e09473b4772a292a33eabd4fc51b8c7e"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Four slash-and-B groups produce the path-shaped match in the Material Symbols Outlined subset. Every occurrence of the inspected context falls within the TrueType glyf table containing binary glyph outlines.",
+    "fingerprints": [
+      "781db8f19c34e7cb9d0a0def0b22665165d3bbecf15e8ee3b18c5894bfa5c732",
+      "d772c6dd4654d90d82dc83019df65a4ba1ca3ad1f950d4483c64619cd99a12ef"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Two colons in the longer asterisk run produce the IPv6-shaped match in the Material Symbols Outlined subset. Every occurrence of the inspected context falls within the TrueType glyf table containing binary glyph outlines.",
+    "fingerprints": [
+      "8fcbdb3998c245f21c8a0e5b3343fbf1283d86235e0916e77002d276eb044d6a",
+      "f9b61ad1db00ff039c224a7cdf234561d9c8219e9d3a4bd03b3eaba6774be459"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Two colons between two asterisks produce the IPv6-shaped match in the Material Symbols Outlined subset. Every occurrence of the inspected context falls within the TrueType glyf table containing binary glyph outlines.",
+    "fingerprints": [
+      "c42c224b5e508800d36005222b63478757477c68e016e9dcddecf818b37c61b3",
+      "3f0fc785d113affe85f15f4699c051317f4a0db792a0e620be915138d0da504d"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Windows Rust bridge stores the fixed internal and LAN suffixes from the public recipe URL filter consecutively. The host detector spans both suffixes.",
+    "fingerprints": [
+      "7526cf22ed4ba8345be6ad0941b2043d2f5bde2d1ce1b34ab23bc0e9b7e9c50d"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "A generic host label and the Smart Create spice name dried thyme occupy separate NUL-padded Dart strings in the Windows AOT snapshot. Joining printable runs gives the host matcher an artificial value.",
+    "fingerprints": [
+      "6362cc49867a375713ff4fefa91af638d83cfdddd5e60272050281d9db41a513"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The little-endian UTF-16 view at offset 1875580 interprets two colon code units in the Windows Dart AOT read-only snapshot as an IPv6 address. The following units and surrounding binary table bytes establish the context.",
+    "fingerprints": [
+      "5bbc278293350f8ddc55cd2aa6491ac54f2901b8c7247ba47e265f9242611a3a"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The odd-aligned big-endian UTF-16 view at offset 1875579 reads the same two colons from the Windows Dart AOT binary data. The overlapping little-endian view was checked at the next byte.",
+    "fingerprints": [
+      "bdd0b29147ab0ab397edf68450837fa387ed8d779e13e066e0e5e10811262e1d"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Four printable bytes at offset 46099 in the production Android Dart AOT read-only snapshot resemble a path. The bytes on both sides are binary snapshot data.",
+    "fingerprints": [
+      "8d9ff105b2e0e356b942b9471d1c2454f2b6085814a8dd4296f0b62493c4a00c"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Four printable bytes at offset 835156 in the production Android Dart AOT read-only snapshot resemble a path. The bytes on both sides are binary snapshot data.",
+    "fingerprints": [
+      "67383c1c98efe26b85b2d60c61886f29279644d84b1bd9142182b25d803e4e3d"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Flutter _PointerPanZoomData.fromStartEvent constructor with its numeric Dart private-library key. The qualified private symbol is present in the pinned Flutter SDK.",
+    "fingerprints": [
+      "c223f8892069e2fa1c3dc5d8629922bc5593f87ab00e29ff75e0149b02c13ca8",
+      "aacd1305808b1751dc9660f1613ac68ac014a9269f0a6acc9505409f07b01cf0"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Flutter _PointerPanZoomData.fromUpdateEvent constructor with its numeric Dart private-library key. The qualified private symbol is present in the pinned Flutter SDK.",
+    "fingerprints": [
+      "e9941838e55615df79238e8d5f6158295823f0cfd7704eb1aee7ae8fcd2cf71b",
+      "f265edc0bc4634e52ba4588c909dee87e4865fe7ac7451d27d9b2f542e9bb2cc"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Flutter _HashCollisionNode.fromCollision constructor with its numeric Dart private-library key. The qualified private symbol is present in the pinned Flutter SDK.",
+    "fingerprints": [
+      "a4dfa6a7cb1cddd5a6a253156ddabfb00f298669c899e98ba4e0f3f82cffab3c",
+      "3be5782d3838da0d36d447e3e0ff3405f1f2947f397d63d82fd4fddc6c1525b5"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Flutter _CompressedNode.single constructor with its numeric Dart private-library key. The qualified private symbol is present in the pinned Flutter SDK.",
+    "fingerprints": [
+      "e365ba0afcb2e360c462597b805e770dce11fa0e3c9ab1aa46a1bfe1433cd72a",
+      "c065d0d448c712434efc1093d7517a835b9f1fa63b25766c7446500020e3b92d"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The Dart snapshot stores a generic socket host label followed by a separate length-prefixed Smart Create ingredient, dried thyme. The string scanner joins the two printable runs.",
+    "fingerprints": [
+      "0e21d68ee3768aa6df3530b551f6995149268ad529b5d0bcd05a3cc284b3e94a"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The socket timeout label and the Flutter RenderPointerListener class name occupy distinct Dart string objects, separated by padding and an object header. The string scanner joins the two printable runs.",
+    "fingerprints": [
+      "cde0a432fa88d08d75c26bad2d4f135a8d2440153d3cc31307ae42fb962dfeed"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The utf-16le view of the Windows Dart AOT read-only snapshot reads the same two colon code units at offset 1882658 amid binary table data.",
+    "fingerprints": [
+      "da9a8a2a0b7ebfc94474b0a7752870106f6f8ecbab54dc22fcbb1491cd010b58"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The utf-16be view of the Windows Dart AOT read-only snapshot reads the same two colon code units at offset 1882657 amid binary table data.",
+    "fingerprints": [
+      "d5b8283e3bbc97e687075e5aca9c04f8b32effc0d06af7d300c5e4a359396639"
+    ]
   }
 ]

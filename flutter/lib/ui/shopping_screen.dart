@@ -1,3 +1,4 @@
+import 'page_headings.dart';
 import 'pixel_scroll.dart';
 
 import 'dart:async';
@@ -17,6 +18,8 @@ import '../recipe_store.dart';
 import '../src/rust/api.dart';
 import 'components.dart';
 import 'feedback.dart';
+import 'facelift_motion.dart';
+import 'facelift_tokens.dart';
 import 'navigation_feedback.dart';
 
 String _message(Object error) =>
@@ -52,8 +55,10 @@ class ShoppingScreen extends StatefulWidget {
     super.key,
     required this.store,
     required this.onSaveText,
+    this.controller,
   });
   final RecipeStore store;
+  final ScrollController? controller;
   final Future<void> Function(BuildContext context) onSaveText;
 
   @override
@@ -62,21 +67,50 @@ class ShoppingScreen extends StatefulWidget {
 
 class _ShoppingScreenState extends State<ShoppingScreen>
     with TickerProviderStateMixin {
-  static const _checkPause = Duration(milliseconds: 300);
-  static const _moveDuration = Duration(milliseconds: 200);
+  final _draggedRow = ValueNotifier<String?>(null);
+  bool _landingDrop = false;
+  bool _checkedExpanded = false;
+  // ReorderableList translates neighboring rows for 250ms after the gap moves.
+  // Repaint only the card backing while those paint transforms are changing.
+  late final _gapMotion = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+  );
+  late final _departure = AnimationController(vsync: this)
+    ..addStatusListener((status) {
+      if (status == AnimationStatus.completed) _finishMoves();
+    });
+  Duration _checkPause = Duration.zero;
+  Timer? _batchTimer;
+  Timer? _arrivalTimer;
+  Duration _moveDuration = Duration.zero;
+  Timer? _allDone;
+  int _previousUnchecked = 0;
+  int? _dragGeneration;
+  ({List<ShoppingItem> snapshot, String id, String category, String? before})?
+  _pendingDrop;
   final _input = TextEditingController();
+  int _inputRevision = 0;
+  int? _submittedRevision;
   final _scaffold = GlobalKey<ScaffoldState>();
   final _messenger = GlobalKey<ScaffoldMessengerState>();
   bool _busy = false;
   String? _inputError;
   bool _reduceMotion = false;
   final _placements = <String, bool>{};
-  final _moves = <String, _ShoppingMove>{};
-  final _arrivals = <String, Timer>{};
+  final _checkWrites = <String, bool>{};
+  final _queued = <String, bool>{};
+  final _departing = <String, bool>{};
+  final _arrivals = <String>{};
+  bool get _editingLocked => _busy || _checkWrites.isNotEmpty;
+  bool get _movingRows => _queued.isNotEmpty || _departing.isNotEmpty;
+  bool _moving(String id) =>
+      _queued.containsKey(id) || _departing.containsKey(id);
 
   @override
   void initState() {
     super.initState();
+    _previousUnchecked = widget.store.uncheckedShoppingCount;
     _resetPlacements();
     widget.store.addListener(_shoppingChanged);
   }
@@ -85,7 +119,16 @@ class _ShoppingScreenState extends State<ShoppingScreen>
   void didUpdateWidget(ShoppingScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.store != widget.store) {
+      _submittedRevision = null;
+      _inputRevision++;
       oldWidget.store.removeListener(_shoppingChanged);
+      if (_dragGeneration != null) _dragGeneration = -1;
+      _draggedRow.value = null;
+      _pendingDrop = null;
+      _checkWrites.clear();
+      _allDone?.cancel();
+      _allDone = null;
+      _previousUnchecked = widget.store.uncheckedShoppingCount;
       _resetPlacements();
       widget.store.addListener(_shoppingChanged);
     }
@@ -94,95 +137,207 @@ class _ShoppingScreenState extends State<ShoppingScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    _checkPause = FaceliftMotion.checkOffDelay(context);
+    // Share one 250ms transition between collapse and expansion at normal speed.
+    _moveDuration = FaceliftMotion.duration(
+      context,
+      MotionGroup.lists,
+      fraction: 125 / 220,
+    );
+    _departure.duration = _moveDuration;
+    _reduceMotion = _moveDuration == Duration.zero;
     if (_reduceMotion) _resetPlacements();
   }
 
   void _resetPlacements() {
-    for (final move in _moves.values) {
-      move.dispose();
-    }
-    for (final timer in _arrivals.values) {
-      timer.cancel();
-    }
-    _moves.clear();
+    _batchTimer?.cancel();
+    _batchTimer = null;
+    _arrivalTimer?.cancel();
+    _departure.stop();
+    _queued.clear();
+    _departing.clear();
     _arrivals.clear();
     _placements
       ..clear()
-      ..addEntries(widget.store.shopping.map((i) => MapEntry(i.id, i.checked)));
+      ..addEntries(
+        widget.store.shopping.map(
+          (i) => MapEntry(i.id, _checkWrites[i.id] ?? i.checked),
+        ),
+      );
+  }
+
+  void _updateCompletion() {
+    final remaining = widget.store.shopping
+        .where((item) => !(_checkWrites[item.id] ?? item.checked))
+        .length;
+    final finished =
+        remaining == 0 &&
+        _previousUnchecked > 0 &&
+        widget.store.shopping.any(
+          (item) =>
+              (_checkWrites[item.id] ?? item.checked) &&
+              (_checkWrites[item.id] == true || _placements[item.id] == false),
+        );
+    _previousUnchecked = remaining;
+    if (remaining > 0 || widget.store.shopping.isEmpty) {
+      _allDone?.cancel();
+      _allDone = null;
+    } else if (finished) {
+      _allDone?.cancel();
+      _allDone = Timer(const Duration(seconds: 5), () {
+        if (mounted) setState(() => _allDone = null);
+      });
+    }
   }
 
   void _shoppingChanged() {
     if (!mounted) return;
     if (!TickerMode.valuesOf(context).enabled ||
         ModalRoute.isCurrentOf(context) == false) {
+      _previousUnchecked = widget.store.uncheckedShoppingCount;
+      _allDone?.cancel();
+      _allDone = null;
       _resetPlacements();
       return;
     }
     setState(() {
+      _updateCompletion();
       final items = widget.store.shopping;
+      if (_reduceMotion) {
+        _resetPlacements();
+        return;
+      }
       final ids = items.map((i) => i.id).toSet();
-      for (final id in _placements.keys.toList()) {
-        if (!ids.contains(id)) {
-          _placements.remove(id);
-          _moves.remove(id)?.dispose();
-          _arrivals.remove(id)?.cancel();
-        }
-      }
+      _placements.removeWhere((id, _) => !ids.contains(id));
+      _queued.removeWhere((id, _) => !ids.contains(id));
+      _departing.removeWhere((id, _) => !ids.contains(id));
+      var externalCheck = false;
       for (final item in items) {
-        _placements.putIfAbsent(item.id, () => item.checked);
-        if (_reduceMotion || _placements[item.id] == item.checked) {
-          _moves.remove(item.id)?.dispose();
-          _placements[item.id] = item.checked;
-          continue;
+        final placement = _placements.putIfAbsent(item.id, () => item.checked);
+        final target = _checkWrites[item.id] ?? item.checked;
+        if (placement == target) {
+          _queued.remove(item.id);
+          _departing.remove(item.id);
+        } else if (!_departing.containsKey(item.id) &&
+            !_queued.containsKey(item.id)) {
+          _queued[item.id] = target;
+          if (!_checkWrites.containsKey(item.id)) externalCheck = true;
         }
-        // Store notifications unrelated to this row must not restart its hold.
-        if (_moves.containsKey(item.id)) continue;
-        _arrivals.remove(item.id)?.cancel();
-        final move = _ShoppingMove(
-          item.checked,
-          AnimationController(vsync: this, duration: _moveDuration),
-        );
-        move.animation.addStatusListener((status) {
-          if (status == AnimationStatus.completed) _finishMove(item.id, move);
-        });
-        _moves[item.id] = move;
-        move.timer = Timer(_checkPause, () {
-          if (!mounted || _moves[item.id] != move) return;
-          move.animation.forward();
-        });
       }
+      if (_departing.isEmpty) _departure.stop();
+      if (externalCheck) _holdChecks();
+      _startReadyMoves();
     });
   }
 
-  void _finishMove(String id, _ShoppingMove move) {
-    if (!mounted || _moves[id] != move) return;
-    setState(() {
-      _moves.remove(id);
-      move.dispose();
-      _placements[id] = move.checked;
-      _arrivals[id] = Timer(_moveDuration, () {
-        if (mounted) setState(() => _arrivals.remove(id));
-      });
+  void _holdChecks() {
+    if (_reduceMotion) return;
+    _batchTimer?.cancel();
+    _batchTimer = Timer(_checkPause, () {
+      _batchTimer = null;
+      if (mounted) setState(_startReadyMoves);
     });
+  }
+
+  void _startReadyMoves() {
+    if (_batchTimer != null || _departing.isNotEmpty || _queued.isEmpty) {
+      return;
+    }
+    // A closed Checked group has no visible arrival to animate.
+    _departure.duration =
+        !_checkedExpanded && _queued.values.every((target) => target)
+        ? _moveDuration * 2
+        : _moveDuration;
+    _departing.addAll(_queued);
+    _queued.clear();
+    _departure.forward(from: 0);
+  }
+
+  void _finishMoves() {
+    if (!mounted || _departing.isEmpty) return;
+    setState(() {
+      _placements.addAll(_departing);
+      _arrivals
+        ..clear()
+        ..addAll(_departing.keys);
+      _departing.clear();
+      _arrivalTimer?.cancel();
+      _arrivalTimer = Timer(_moveDuration, _arrivals.clear);
+      _startReadyMoves();
+    });
+  }
+
+  Future<void> _checkRow(ShoppingItem item) async {
+    if (_busy || _checkWrites.containsKey(item.id) || _moving(item.id)) return;
+    HapticFeedback.selectionClick();
+    final store = widget.store;
+    final checked = !item.checked;
+    setState(() {
+      _checkWrites[item.id] = checked;
+      _updateCompletion();
+      if (_reduceMotion) {
+        _placements[item.id] = checked;
+      } else {
+        _queued[item.id] = checked;
+        _holdChecks();
+      }
+    });
+    try {
+      // Persistence runs independently of the gesture and its animation.
+      await store.checkShoppingRow(item.id, checked);
+    } catch (error) {
+      if (mounted && identical(store, widget.store)) {
+        showFeedbackWithMessenger(
+          _messenger.currentState!,
+          _message(error),
+          kind: FeedbackKind.error,
+        );
+      }
+    } finally {
+      if (mounted && identical(store, widget.store)) {
+        setState(() {
+          _checkWrites.remove(item.id);
+          final current = store.shopping
+              .where((row) => row.id == item.id)
+              .firstOrNull;
+          if (current != null && current.checked != checked) {
+            _updateCompletion();
+            _queued.remove(item.id);
+            _departing.remove(item.id);
+            _arrivals.remove(item.id);
+            _placements[item.id] = current.checked;
+            if (_departing.isEmpty) _departure.stop();
+          }
+          _startReadyMoves();
+        });
+      }
+    }
   }
 
   @override
   void dispose() {
     widget.store.removeListener(_shoppingChanged);
-    for (final move in _moves.values) {
-      move.dispose();
-    }
-    for (final timer in _arrivals.values) {
-      timer.cancel();
-    }
+    _batchTimer?.cancel();
+    _arrivalTimer?.cancel();
+    _departure.dispose();
+    _gapMotion.dispose();
+    _draggedRow.dispose();
+    _allDone?.cancel();
     _input.dispose();
     super.dispose();
   }
 
   Future<bool> _change(ShoppingEdit edit, [String? undoMessage]) async {
-    if (_busy) return false;
+    if (_editingLocked) return false;
     setState(() => _busy = true);
+    try {
+      return await _saveEdit(edit, undoMessage);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<bool> _saveEdit(ShoppingEdit edit, [String? undoMessage]) async {
     try {
       final undo = await widget.store.editShopping(edit);
       if (mounted && undoMessage != null) {
@@ -203,26 +358,29 @@ class _ShoppingScreenState extends State<ShoppingScreen>
         );
       }
       return false;
-    } finally {
-      if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _add() async {
-    if (_busy) return;
+    final revision = _inputRevision;
+    if (_submittedRevision == revision) return;
     final text = _input.text;
     if (text.trim().isEmpty) {
       setState(() => _inputError = 'Enter an item.');
       return;
     }
-    setState(() => _inputError = null);
-    if (await _change(ShoppingEdit.addManual(text: text)) && mounted) {
-      if (_input.text == text) _input.clear();
+    _submittedRevision = revision;
+    final saved = await _saveEdit(ShoppingEdit.addManual(text: text));
+    if (mounted && _submittedRevision == revision) {
+      _submittedRevision = null;
+      if (saved && _inputRevision == revision && _input.text == text) {
+        _input.clear();
+      }
     }
   }
 
   Future<void> _edit(ShoppingItem item) async {
-    if (_busy) return;
+    if (_editingLocked) return;
     await showDialog<ShoppingUndo>(
       context: context,
       builder: (_) => _EditShoppingDialog(store: widget.store, item: item),
@@ -230,36 +388,87 @@ class _ShoppingScreenState extends State<ShoppingScreen>
   }
 
   Future<void> _itemMenu(ShoppingItem item) async {
-    if (_busy || _moves.containsKey(item.id)) return;
+    if (_editingLocked || _moving(item.id)) return;
     final choice = await showCookdexSheet<String>(
       context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       child: Builder(
-        builder: (context) => Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: const Text('Edit'),
-              leading: const Icon(Symbols.edit),
-              onTap: () => Navigator.pop(context, 'edit'),
-            ),
-            ListTile(
-              title: const Text('Move to category'),
-              leading: const Icon(Symbols.drive_file_move),
-              onTap: () => Navigator.pop(context, 'move'),
-            ),
-            ListTile(
-              title: Text(
-                'Delete',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+        builder: (context) {
+          final theme = Theme.of(context);
+          final source = widget.store.shoppingSourceLabel(item);
+          final delete = mutedDeleteColor(theme.colorScheme);
+          final category = widget.store.shoppingCategories
+              .where((category) => category.id == item.categoryId)
+              .firstOrNull;
+          final detail = [
+            if (category != null) 'In ${category.name}',
+            if (source != null) 'from $source',
+          ].join(' · ');
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                [
+                  if (item.quantityText.isNotEmpty)
+                    displayFractions(item.quantityText),
+                  item.name,
+                ].join(' '),
+                style: FaceliftTokens.sheetTitle(context),
               ),
-              leading: Icon(
-                Symbols.delete,
-                color: Theme.of(context).colorScheme.error,
+              if (detail.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  detail,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              FaceliftQuickGrid(
+                longestLabel: 'Move to category',
+                children: [
+                  FaceliftQuickAction(
+                    label: 'Edit',
+                    icon: const Icon(Symbols.edit),
+                    onTap: () => Navigator.pop(context, 'edit'),
+                  ),
+                  FaceliftQuickAction(
+                    label: 'Move to category',
+                    icon: const Icon(Symbols.drive_file_move),
+                    onTap: () => Navigator.pop(context, 'move'),
+                  ),
+                ],
               ),
-              onTap: () => Navigator.pop(context, 'delete'),
-            ),
-          ],
-        ),
+              const SizedBox(height: 12),
+              Material(
+                color: theme.colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(FaceliftTokens.groupRadius),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 52),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Symbols.delete, color: delete),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Delete',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: delete,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(context, 'delete'),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
     if (!mounted) return;
@@ -303,71 +512,99 @@ class _ShoppingScreenState extends State<ShoppingScreen>
     String categoryId,
     String name,
     List<ShoppingItem> items,
-  ) => TweenAnimationBuilder<double>(
-    key: ValueKey('shopping-heading-$categoryId'),
-    tween: Tween(
-      begin: items.every((item) => _arrivals.containsKey(item.id)) ? 0 : 1,
-      end: 1,
-    ),
-    duration: _reduceMotion ? Duration.zero : _moveDuration,
-    builder: (context, arrival, child) => AnimatedBuilder(
-      animation: Listenable.merge([
-        for (final item in items)
-          if (_moves[item.id] != null) _moves[item.id]!.animation,
-      ]),
-      builder: (context, child) {
-        final departing = items.every(
-          (item) => _moves[item.id]?.checked == true,
-        );
-        final departure = departing
-            ? items
-                  .map((item) => _moves[item.id]!.animation.value)
-                  .reduce((a, b) => a < b ? a : b)
-            : 0.0;
-        final value =
-            arrival * (1 - Curves.easeInOutCubic.transform(departure));
-        return ClipRect(
-          child: Align(
-            alignment: Alignment.topLeft,
-            heightFactor: value,
-            child: Opacity(opacity: value, child: child),
-          ),
-        );
-      },
-      child: child,
-    ),
-    child: _categoryBand(name, items),
-  );
+  ) {
+    final departing =
+        _departing.isNotEmpty &&
+        items.every((item) => _departing[item.id] == true);
+    return TweenAnimationBuilder<double>(
+      key: ValueKey('shopping-heading-$categoryId'),
+      tween: Tween(
+        begin:
+            _arrivals.isNotEmpty &&
+                items.every((item) => _arrivals.contains(item.id))
+            ? 0
+            : 1,
+        end: 1,
+      ),
+      duration: _moveDuration,
+      builder: (context, arrival, child) => AnimatedBuilder(
+        animation: departing ? _departure : const AlwaysStoppedAnimation(0.0),
+        builder: (context, child) {
+          final departure = departing
+              ? Curves.easeInOutCubic.transform(_departure.value)
+              : 0.0;
+          final value = arrival * (1 - departure);
+          return ClipRect(
+            child: Align(
+              alignment: Alignment.topLeft,
+              heightFactor: value,
+              child: Opacity(opacity: value, child: child),
+            ),
+          );
+        },
+        child: child,
+      ),
+      child: _categoryBand(categoryId, name, items),
+    );
+  }
 
-  Widget _categoryBand(String name, List<ShoppingItem> items) {
+  Widget _categoryBand(String id, String name, List<ShoppingItem> items) {
     final theme = Theme.of(context);
-    final count = items.where((item) => !item.checked).length;
+    final colors = theme.colorScheme;
+    final count = items
+        .where((item) => !(_checkWrites[item.id] ?? item.checked))
+        .length;
+    final icon = switch (id) {
+      'produce' => Symbols.nutrition,
+      'meat' => Symbols.set_meal,
+      'dairy' => Symbols.egg,
+      'bakery' => Symbols.bakery_dining,
+      'pantry' => Symbols.shelves,
+      'canned' => Symbols.grocery,
+      'spices' => Symbols.stockpot,
+      'frozen' => Symbols.ac_unit,
+      'beverages' => Symbols.local_drink,
+      'household' => Symbols.cleaning_services,
+      _ => Symbols.shopping_basket,
+    };
     return ColoredBox(
-      color: theme.colorScheme.surfaceContainerLow,
-      child: Semantics(
-        header: true,
-        label: '$name, $count unchecked',
-        excludeSemantics: true,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: colors.surface,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        padding: const EdgeInsets.fromLTRB(12, 10, 16, 6),
+        decoration: BoxDecoration(
+          color: colors.surfaceContainer,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(FaceliftTokens.groupRadius),
+          ),
+        ),
+        child: Semantics(
+          header: true,
+          label: '$name, $count unchecked',
+          excludeSemantics: true,
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  name,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w500,
+              Container(
+                width: FaceliftTokens.categoryIconSize,
+                height: FaceliftTokens.categoryIconSize,
+                decoration: BoxDecoration(
+                  color: colors.primaryContainer,
+                  borderRadius: BorderRadius.circular(
+                    FaceliftTokens.categoryIconRadius,
                   ),
                 ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 18, color: colors.onPrimaryContainer),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(name, style: FaceliftTokens.categoryTitle(context)),
+              ),
+              const SizedBox(width: 8),
               Text(
                 '$count',
-                style: theme.textTheme.titleSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.normal,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colors.onSurfaceVariant,
                 ),
               ),
             ],
@@ -382,7 +619,12 @@ class _ShoppingScreenState extends State<ShoppingScreen>
     int oldIndex,
     int newIndex,
   ) {
-    if (_busy || _moves.isNotEmpty || oldIndex == newIndex) return;
+    // The framework reports indices after its drop animation. A sync or
+    // other write during the gesture may have put different items there.
+    final generation = _dragGeneration;
+    _dragGeneration = null;
+    if (generation != null && generation != widget.store.generation) return;
+    if (_editingLocked || _movingRows || oldIndex == newIndex) return;
     final item = entries[oldIndex].item;
     if (item == null) return;
     final reordered = entries.toList();
@@ -392,33 +634,44 @@ class _ShoppingScreenState extends State<ShoppingScreen>
     for (var i = 0; i < newIndex; i++) {
       if (reordered[i].item == null) destination = reordered[i].categoryId;
     }
+    String? beforeId;
+    for (final entry in reordered.skip(newIndex + 1)) {
+      if (entry.item != null && entry.categoryId == destination) {
+        beforeId = entry.item!.id;
+        break;
+      }
+    }
+    final ShoppingEdit edit;
     if (destination == item.categoryId) {
       final ids = [
         for (final entry in reordered)
           if (entry.item != null && entry.categoryId == destination)
             entry.item!.id,
       ];
-      _change(ShoppingEdit.reorderItems(categoryId: destination, ids: ids));
+      edit = ShoppingEdit.reorderItems(categoryId: destination, ids: ids);
     } else {
-      String? beforeId;
-      for (final entry in reordered.skip(newIndex + 1)) {
-        if (entry.item != null && entry.categoryId == destination) {
-          beforeId = entry.item!.id;
-          break;
-        }
-      }
-      _change(
-        ShoppingEdit.move(
-          id: item.id,
-          categoryId: destination,
-          beforeId: beforeId,
-        ),
+      edit = ShoppingEdit.move(
+        id: item.id,
+        categoryId: destination,
+        beforeId: beforeId,
       );
     }
+    // Preview just the dropped row. A new store snapshot takes precedence,
+    // including remote changes or a generation refresh after a failed save.
+    final drop = (
+      snapshot: widget.store.shopping,
+      id: item.id,
+      category: destination,
+      before: beforeId,
+    );
+    setState(() => _pendingDrop = drop);
+    _change(edit).whenComplete(() {
+      if (mounted && _pendingDrop == drop) setState(() => _pendingDrop = null);
+    });
   }
 
   Future<void> _menu(String choice) async {
-    if (_busy) return;
+    if (_editingLocked) return;
     final items = widget.store.shopping;
     switch (choice) {
       case 'categories':
@@ -480,32 +733,24 @@ class _ShoppingScreenState extends State<ShoppingScreen>
     }
   }
 
-  String? _source(ShoppingItem item) {
-    final ids = item.contributorIds.toSet();
-    if (ids.isEmpty) return null;
-    final titles = {
-      for (final recipe in widget.store.summaries) recipe.id: recipe.title,
-    };
-    final visible = ids.take(2).map((id) => titles[id] ?? 'Recipe').join(', ');
-    return ids.length > 2 ? '$visible +${ids.length - 2} more' : visible;
-  }
-
   Widget _row(ShoppingItem item, {int? dragIndex}) {
-    final source = _source(item);
+    final source = widget.store.shoppingSourceLabel(item);
     final theme = Theme.of(context);
-    final decoration = item.checked ? TextDecoration.lineThrough : null;
-    final enabled = !_busy && !_moves.containsKey(item.id);
+    final checked = _checkWrites[item.id] ?? item.checked;
+    final decoration = checked ? TextDecoration.lineThrough : null;
+    final enabled =
+        !_busy && !_checkWrites.containsKey(item.id) && !_moving(item.id);
     return GestureDetector(
       key: ValueKey(item.id),
-      onSecondaryTap: enabled ? () => _itemMenu(item) : null,
+      onSecondaryTap: enabled && !_editingLocked ? () => _itemMenu(item) : null,
       child: MergeSemantics(
         child: Semantics(
-          checked: item.checked,
+          checked: checked,
           enabled: enabled,
           child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-            minTileHeight: source == null ? 48 : 60,
-            minVerticalPadding: 6,
+            contentPadding: const EdgeInsets.only(left: 14, right: 4),
+            minTileHeight: source == null ? 48 : 56,
+            minVerticalPadding: 4,
             minLeadingWidth: 24,
             horizontalTitleGap: 12,
             titleAlignment: ListTileTitleAlignment.center,
@@ -514,13 +759,15 @@ class _ShoppingScreenState extends State<ShoppingScreen>
                 : _shoppingDrag(
                     dragIndex,
                     'Reorder ${item.name}',
-                    enabled && _moves.isEmpty,
+                    enabled && !_editingLocked && !_movingRows,
                   ),
             leading: ExcludeSemantics(
               child: Icon(
-                item.checked
-                    ? Symbols.check_box
-                    : Symbols.check_box_outline_blank,
+                checked ? Symbols.check_circle : Symbols.radio_button_unchecked,
+                fill: checked ? 1 : 0,
+                color: checked
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant,
               ),
             ),
             title: Text.rich(
@@ -553,60 +800,112 @@ class _ShoppingScreenState extends State<ShoppingScreen>
                       decoration: decoration,
                     ),
                   ),
-            onTap: !enabled
-                ? null
-                : () => _change(
-                    ShoppingEdit.check(ids: [item.id], checked: !item.checked),
-                  ),
-            onLongPress: enabled ? () => _itemMenu(item) : null,
+            onTap: enabled ? () => _checkRow(item) : null,
+            onLongPress: enabled && !_editingLocked
+                ? () => _itemMenu(item)
+                : null,
           ),
         ),
       ),
     );
   }
 
-  Widget _animatedRow(ShoppingItem item, {int? dragIndex}) =>
-      TweenAnimationBuilder<double>(
-        key: ValueKey('shopping-row-${item.id}-${_placements[item.id]}'),
-        tween: Tween(begin: _arrivals.containsKey(item.id) ? 0 : 1, end: 1),
-        duration: _reduceMotion ? Duration.zero : _moveDuration,
-        curve: Curves.easeInOutCubic,
-        builder: (context, arrival, child) => AnimatedBuilder(
-          animation:
-              _moves[item.id]?.animation ?? const AlwaysStoppedAnimation(0.0),
-          builder: (context, child) {
-            final departure = _moves[item.id]?.animation.value ?? 0.0;
-            final value =
-                arrival * (1 - Curves.easeInOutCubic.transform(departure));
-            return ClipRect(
-              child: Align(
-                alignment: Alignment.topCenter,
-                heightFactor: value,
-                child: Opacity(opacity: value, child: child),
+  Widget _animatedRow(
+    ShoppingItem item, {
+    int? dragIndex,
+    bool last = false,
+    String? lastRowAfterDivider,
+  }) => TweenAnimationBuilder<double>(
+    key: ValueKey('shopping-row-${item.id}-${_placements[item.id]}'),
+    tween: Tween(begin: _arrivals.contains(item.id) ? 0 : 1, end: 1),
+    duration: _reduceMotion ? Duration.zero : _moveDuration,
+    curve: Curves.easeInOutCubic,
+    builder: (context, arrival, child) => AnimatedBuilder(
+      animation: _departing.containsKey(item.id)
+          ? _departure
+          : const AlwaysStoppedAnimation(0.0),
+      builder: (context, child) {
+        final departure = _departing.containsKey(item.id)
+            ? _departure.value
+            : 0.0;
+        final value =
+            arrival * (1 - Curves.easeInOutCubic.transform(departure));
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.topCenter,
+            heightFactor: value,
+            child: Transform.translate(
+              offset: Offset(
+                0,
+                (_departing[item.id] == true ? 14 : -14) * departure,
               ),
-            );
-          },
-          child: child,
-        ),
+              child: Opacity(opacity: value, child: child),
+            ),
+          ),
+        );
+      },
+      child: child,
+    ),
+    child: Padding(
+      padding: EdgeInsets.symmetric(horizontal: dragIndex == null ? 0 : 16),
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainer,
+        borderRadius: last
+            ? const BorderRadius.vertical(
+                bottom: Radius.circular(FaceliftTokens.groupRadius),
+              )
+            : null,
+        clipBehavior: last ? Clip.antiAlias : Clip.none,
         child: Column(
           children: [
             _row(item, dragIndex: dragIndex),
-            const Divider(),
+            if (lastRowAfterDivider != null)
+              ValueListenableBuilder<String?>(
+                valueListenable: _draggedRow,
+                child: const Divider(indent: 50, endIndent: 16),
+                builder: (context, lifted, child) => Opacity(
+                  opacity: lifted == lastRowAfterDivider ? 0 : 1,
+                  child: child,
+                ),
+              )
+            else if (!last)
+              const Divider(indent: 50, endIndent: 16),
           ],
         ),
-      );
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     final items = widget.store.shopping;
-    final checked = items.where((i) => _placements[i.id] == true).toList();
-    final unchecked = items.where((i) => _placements[i.id] != true).toList();
+    final checked = <ShoppingItem>[];
+    final unchecked = <ShoppingItem>[];
+    final remaining = widget.store.uncheckedShoppingCount;
+    for (final item in items) {
+      (_placements[item.id] == true ? checked : unchecked).add(item);
+    }
+    final pending = _pendingDrop;
+    final drop = pending != null && identical(items, pending.snapshot)
+        ? pending
+        : null;
+    final groups = <String, List<ShoppingItem>>{};
+    for (final item in unchecked) {
+      final group = item.id == drop?.id ? drop!.category : item.categoryId;
+      (groups[group] ??= []).add(item);
+    }
+    if (drop != null) {
+      final rows = groups[drop.category]!;
+      final moved = rows.removeAt(
+        rows.indexWhere((item) => item.id == drop.id),
+      );
+      final index = rows.indexWhere((item) => item.id == drop.before);
+      rows.insert(index < 0 ? rows.length : index, moved);
+    }
     final entries = <_ShoppingEntry>[];
     for (final category in widget.store.shoppingCategories) {
-      final rows = unchecked
-          .where((item) => item.categoryId == category.id)
-          .toList();
-      if (rows.isEmpty) continue;
+      final rows = groups[category.id];
+      if (rows == null || rows.isEmpty) continue;
       entries.add((
         categoryId: category.id,
         name: category.name,
@@ -623,130 +922,291 @@ class _ShoppingScreenState extends State<ShoppingScreen>
       }
     }
 
+    // ReorderableList requests the same visible children on pointer moves.
+    // Reuse their widget instances until the page rebuilds with new state.
+    // The bound also covers long drags that auto-scroll through many aisles.
+    final rows = <int, Widget>{};
+    Widget buildRow(BuildContext context, int index) {
+      final cached = rows[index];
+      if (cached != null) return cached;
+      if (rows.length >= 32) rows.remove(rows.keys.first);
+      final entry = entries[index];
+      final item = entry.item;
+      if (item == null) {
+        return rows[index] = _categoryHeading(
+          entry.categoryId,
+          entry.name,
+          entry.items,
+        );
+      }
+      final group = entry.items;
+      return rows[index] = _animatedRow(
+        item,
+        dragIndex: index,
+        last: group.last.id == item.id,
+        lastRowAfterDivider:
+            group.length > 1 && group[group.length - 2].id == item.id
+            ? group.last.id
+            : null,
+      );
+    }
+
     return ScaffoldMessenger(
       key: _messenger,
       child: Scaffold(
         key: _scaffold,
-        appBar: AppBar(
-          title: const Text('Shopping list'),
-          actions: [
-            PopupMenuButton<String>(
-              icon: const Icon(Symbols.more_vert),
-              tooltip: 'Shopping list options',
-              enabled: !_busy,
-              onSelected: _menu,
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'categories',
-                  child: Text('Categories'),
-                ),
-                PopupMenuItem(
-                  value: 'check',
-                  enabled: items.any((item) => !item.checked),
-                  child: const Text('Check all'),
-                ),
-                PopupMenuItem(
-                  value: 'uncheck',
-                  enabled: items.any((item) => item.checked),
-                  child: const Text('Uncheck all'),
-                ),
-                PopupMenuItem(
-                  value: 'checked',
-                  enabled: items.any((item) => item.checked),
-                  child: const Text('Clear checked'),
-                ),
-                PopupMenuItem(
-                  value: 'save',
-                  enabled: items.isNotEmpty,
-                  child: const Text('Save list as text'),
-                ),
-                PopupMenuItem(
-                  value: 'clear',
-                  enabled: items.isNotEmpty,
-                  child: Text(
-                    'Clear entire list',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
         body: SafeArea(
-          top: false,
           bottom: false,
           child: Column(
             children: [
-              Expanded(
-                child: items.isEmpty
-                    ? const Center(child: Text('Your shopping list is empty'))
-                    : PixelCustomScrollView(
-                        slivers: [
-                          _PinnedShoppingCategories(
-                            entries: entries,
-                            bands: [
-                              for (final entry in entries)
-                                if (entry.item == null)
-                                  SliverToBoxAdapter(
-                                    key: ValueKey(
-                                      'pinned-shopping-${entry.categoryId}',
-                                    ),
-                                    child: _categoryHeading(
-                                      entry.categoryId,
-                                      entry.name,
-                                      entry.items,
-                                    ),
-                                  ),
-                            ],
-                            sliver: SliverReorderableList(
-                              key: const ValueKey('unchecked-shopping-items'),
-                              itemCount: entries.length,
-                              onReorderStart: (_) =>
-                                  HapticFeedback.lightImpact(),
-                              proxyDecorator: (child, index, animation) =>
-                                  Material(child: child),
-                              itemBuilder: (_, index) {
-                                final entry = entries[index];
-                                return entry.item == null
-                                    ? _categoryHeading(
-                                        entry.categoryId,
-                                        entry.name,
-                                        entry.items,
-                                      )
-                                    : _animatedRow(
-                                        entry.item!,
-                                        dragIndex: index,
-                                      );
-                              },
-                              onReorderItem: (oldIndex, newIndex) =>
-                                  _reorderShopping(entries, oldIndex, newIndex),
-                            ),
+              TabHeading(
+                title: const Text('Shopping list'),
+                subtitle: Text(
+                  '$remaining ${remaining == 1 ? 'item' : 'items'}',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                action: PopupMenuButton<String>(
+                  icon: const Icon(Symbols.more_vert),
+                  tooltip: 'Shopping list options',
+                  enabled: !_editingLocked,
+                  onSelected: _menu,
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'categories',
+                      child: Text('Categories'),
+                    ),
+                    PopupMenuItem(
+                      value: 'check',
+                      enabled: items.any((item) => !item.checked),
+                      child: const Text('Check all'),
+                    ),
+                    PopupMenuItem(
+                      value: 'uncheck',
+                      enabled: items.any((item) => item.checked),
+                      child: const Text('Uncheck all'),
+                    ),
+                    PopupMenuItem(
+                      value: 'checked',
+                      enabled: items.any((item) => item.checked),
+                      child: const Text('Clear checked'),
+                    ),
+                    PopupMenuItem(
+                      value: 'save',
+                      enabled: items.isNotEmpty,
+                      child: const Text('Save list as text'),
+                    ),
+                    PopupMenuItem(
+                      value: 'clear',
+                      enabled: items.isNotEmpty,
+                      child: Text(
+                        'Clear entire list',
+                        style: TextStyle(
+                          color: mutedDeleteColor(
+                            Theme.of(context).colorScheme,
                           ),
-                          if (checked.isNotEmpty)
-                            SliverToBoxAdapter(
-                              child: ExpansionTile(
-                                key: const PageStorageKey(
-                                  'checked-shopping-items',
-                                ),
-                                title: Text('Checked (${checked.length})'),
-                                initiallyExpanded: false,
-                                expansionAnimationStyle: _reduceMotion
-                                    ? AnimationStyle.noAnimation
-                                    : const AnimationStyle(
-                                        duration: _moveDuration,
-                                        reverseDuration: _moveDuration,
-                                        curve: Curves.easeInOutCubic,
-                                      ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Listener(
+                  onPointerMove: (_) {
+                    if (_draggedRow.value != null && !_landingDrop) {
+                      _gapMotion.forward(from: 0);
+                    }
+                  },
+                  onPointerCancel: (_) {
+                    _draggedRow.value = null;
+                  },
+                  child: PixelCustomScrollView(
+                    controller: widget.controller,
+                    slivers: [
+                      if (items.isEmpty)
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  for (final item in checked)
-                                    _animatedRow(item),
+                                  const FaceliftIconTile(
+                                    Symbols.shopping_basket,
+                                    size: 56,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'Add your first shopping item.',
+                                    textAlign: TextAlign.center,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium,
+                                  ),
                                 ],
                               ),
                             ),
-                        ],
-                      ),
+                          ),
+                        ),
+                      if (entries.isNotEmpty)
+                        _PinnedShoppingCategories(
+                          entries: entries,
+                          gapMotion: _gapMotion,
+                          liftedRow: _draggedRow,
+                          dragColor: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainer,
+                          bands: [
+                            for (final entry in entries)
+                              if (entry.item == null)
+                                SliverToBoxAdapter(
+                                  key: ValueKey(
+                                    'pinned-shopping-${entry.categoryId}',
+                                  ),
+                                  child: _categoryHeading(
+                                    entry.categoryId,
+                                    entry.name,
+                                    entry.items,
+                                  ),
+                                ),
+                          ],
+                          sliver: SliverReorderableList(
+                            key: const ValueKey('unchecked-shopping-items'),
+                            itemCount: entries.length,
+                            onReorderStart: (index) {
+                              _dragGeneration = widget.store.generation;
+                              _landingDrop = false;
+                              _gapMotion.stop();
+                              _draggedRow.value = entries[index].item?.id;
+                              HapticFeedback.lightImpact();
+                            },
+                            onReorderEnd: (_) {
+                              // The proxy keeps landing after the finger lifts.
+                              _landingDrop = true;
+                              _gapMotion.forward(from: 0).then((_) {
+                                if (mounted) _draggedRow.value = null;
+                              });
+                            },
+                            proxyDecorator: (child, index, animation) {
+                              final item = entries[index].item!;
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                child: Material(
+                                  key: const ValueKey('shopping-drag-proxy'),
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHigh,
+                                  elevation: 3,
+                                  borderRadius: BorderRadius.circular(
+                                    FaceliftTokens.groupRadius,
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: _row(item, dragIndex: index),
+                                ),
+                              );
+                            },
+                            itemBuilder: buildRow,
+                            onReorderItem: (oldIndex, newIndex) =>
+                                _reorderShopping(entries, oldIndex, newIndex),
+                          ),
+                        ),
+                      if (_allDone != null &&
+                          entries.isEmpty &&
+                          checked.isNotEmpty)
+                        SliverToBoxAdapter(
+                          child: Container(
+                            margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer,
+                              borderRadius: BorderRadius.circular(
+                                FaceliftTokens.groupRadius,
+                              ),
+                            ),
+                            child: Wrap(
+                              alignment: WrapAlignment.spaceBetween,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Semantics(
+                                  liveRegion: true,
+                                  child: Text(
+                                    'All done',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onPrimaryContainer,
+                                        ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: _editingLocked
+                                      ? null
+                                      : () => _menu('checked'),
+                                  child: const Text('Clear checked'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (checked.isNotEmpty)
+                        SliverToBoxAdapter(
+                          key: const ValueKey('checked-shopping-group'),
+                          child: Container(
+                            margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainer,
+                              borderRadius: BorderRadius.circular(
+                                FaceliftTokens.groupRadius,
+                              ),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: ExpansionTile(
+                              key: const PageStorageKey(
+                                'checked-shopping-items',
+                              ),
+                              onExpansionChanged: (expanded) =>
+                                  _checkedExpanded = expanded,
+                              title: Text('Checked (${checked.length})'),
+                              leading: Icon(
+                                Symbols.check_circle,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              shape: const Border(),
+                              collapsedShape: const Border(),
+                              initiallyExpanded: _checkedExpanded,
+                              expansionAnimationStyle: AnimationStyle(
+                                duration: _moveDuration,
+                                reverseDuration: _moveDuration,
+                                curve: Curves.easeInOutCubic,
+                              ),
+                              children: [
+                                for (final item in checked)
+                                  _animatedRow(
+                                    item,
+                                    last: item.id == checked.last.id,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -757,7 +1217,7 @@ class _ShoppingScreenState extends State<ShoppingScreen>
             padding: EdgeInsets.fromLTRB(
               16,
               8,
-              8,
+              16,
               8 + MediaQuery.viewInsetsOf(context).bottom,
             ),
             child: Row(
@@ -770,13 +1230,13 @@ class _ShoppingScreenState extends State<ShoppingScreen>
                       scrollController: PrimaryScrollController.of(context),
                       controller: _input,
                       textCapitalization: TextCapitalization.none,
-                      readOnly: _busy,
                       decoration: InputDecoration(
                         hintText: 'Add an item',
                         errorText: _inputError,
                       ),
                       textInputAction: TextInputAction.done,
                       onChanged: (_) {
+                        _inputRevision++;
                         if (_inputError != null) {
                           setState(() => _inputError = null);
                         }
@@ -785,9 +1245,10 @@ class _ShoppingScreenState extends State<ShoppingScreen>
                     ),
                   ),
                 ),
-                IconButton(
+                const SizedBox(width: 8),
+                IconButton.filled(
                   tooltip: 'Add item',
-                  onPressed: _busy ? null : _add,
+                  onPressed: _add,
                   icon: const Icon(Symbols.add),
                 ),
               ],
@@ -880,7 +1341,7 @@ class _ShoppingCategoriesState extends State<_ShoppingCategories> {
     child: PopScope(
       canPop: !_busy,
       child: Scaffold(
-        appBar: AppBar(title: const Text('Categories')),
+        appBar: pageHeadingBar(context, title: 'Categories'),
         body: SafeArea(
           top: false,
           child: ListenableBuilder(
@@ -1078,6 +1539,9 @@ typedef _ShoppingEntry = ({
 /// heights or rebuilding widgets on each scroll frame.
 class _PinnedShoppingCategories extends MultiChildRenderObjectWidget {
   _PinnedShoppingCategories({
+    required this.gapMotion,
+    required this.liftedRow,
+    required this.dragColor,
     required List<_ShoppingEntry> entries,
     required Widget sliver,
     required List<Widget> bands,
@@ -1088,16 +1552,27 @@ class _PinnedShoppingCategories extends MultiChildRenderObjectWidget {
        super(children: [sliver, ...bands]);
 
   final List<int> headingIndices;
+  final Listenable gapMotion;
+  final ValueNotifier<String?> liftedRow;
+  final Color dragColor;
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderPinnedShoppingCategories(headingIndices);
+      _RenderPinnedShoppingCategories(
+        headingIndices,
+        gapMotion,
+        liftedRow,
+        dragColor,
+      );
 
   @override
   void updateRenderObject(
     BuildContext context,
     _RenderPinnedShoppingCategories renderObject,
-  ) => renderObject.headingIndices = headingIndices;
+  ) {
+    renderObject.headingIndices = headingIndices;
+    renderObject.dragColor = dragColor;
+  }
 }
 
 class _RenderPinnedShoppingCategories extends RenderSliver
@@ -1106,11 +1581,34 @@ class _RenderPinnedShoppingCategories extends RenderSliver
           RenderSliver,
           SliverPhysicalContainerParentData
         > {
-  _RenderPinnedShoppingCategories(this._headingIndices);
+  _RenderPinnedShoppingCategories(
+    this._headingIndices,
+    this.gapMotion,
+    this.liftedRow,
+    this.dragColor,
+  );
+  final Listenable gapMotion;
+  final ValueNotifier<String?> liftedRow;
+  Color dragColor;
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    gapMotion.addListener(markNeedsPaint);
+    liftedRow.addListener(markNeedsPaint);
+  }
+
+  @override
+  void detach() {
+    gapMotion.removeListener(markNeedsPaint);
+    liftedRow.removeListener(markNeedsPaint);
+    super.detach();
+  }
+
   List<int> _headingIndices;
   RenderSliver? _pinned;
   double _pinnedTop = 0;
   double _pinnedHeight = 0;
+  double _categoryBottom = 0;
   bool _pinnedSemantics = false;
 
   set headingIndices(List<int> value) {
@@ -1180,14 +1678,11 @@ class _RenderPinnedShoppingCategories extends RenderSliver
           band = childAfter(band)!;
         }
         _pinnedHeight = band.geometry!.scrollExtent;
-        _pinnedTop = math.min(
-          0,
-          math.min(
-                nextHeadingTop ?? double.infinity,
-                geometry!.scrollExtent - constraints.scrollOffset,
-              ) -
-              _pinnedHeight,
+        _categoryBottom = math.min(
+          nextHeadingTop ?? double.infinity,
+          geometry!.scrollExtent - constraints.scrollOffset,
         );
+        _pinnedTop = math.min(0, _categoryBottom - _pinnedHeight);
         if (_pinnedTop + _pinnedHeight > 0) {
           _pinned = band;
           _pinnedSemantics = true;
@@ -1225,7 +1720,44 @@ class _RenderPinnedShoppingCategories extends RenderSliver
   @override
   void paint(PaintingContext context, Offset offset) {
     if (!geometry!.visible) return;
-    context.paintChild(firstChild!, offset);
+    if (_pinned == null ||
+        _categoryBottom >= _pinnedHeight + FaceliftTokens.groupRadius) {
+      _paintListAndBand(context, offset);
+      return;
+    }
+    // Only during push-off: clip the outgoing band and the rows under it
+    // together so its backing cannot square off the final item's corners.
+    final bounds = Rect.fromLTWH(
+      0,
+      0,
+      constraints.crossAxisExtent,
+      geometry!.paintExtent,
+    );
+    final bottom = math.min(_categoryBottom, bounds.height);
+    final card = Rect.fromLTRB(16, 0, bounds.width - 16, bottom);
+    final clip = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          card,
+          const Radius.circular(FaceliftTokens.groupRadius),
+        ).scaleRadii(),
+      )
+      ..addRect(Rect.fromLTRB(0, bottom, bounds.width, bounds.height));
+    context.pushClipPath(
+      needsCompositing,
+      offset,
+      bounds,
+      clip,
+      _paintListAndBand,
+    );
+  }
+
+  void _paintListAndBand(PaintingContext context, Offset offset) {
+    if (liftedRow.value == null) {
+      context.paintChild(firstChild!, offset);
+    } else {
+      _paintDragCards(context, offset, dragColor);
+    }
     if (_pinned != null) {
       context.pushClipRect(
         needsCompositing,
@@ -1235,6 +1767,61 @@ class _RenderPinnedShoppingCategories extends RenderSliver
             context.paintChild(_pinned!, offset + Offset(0, _pinnedTop)),
       );
     }
+  }
+
+  // The framework translates items to open a drop gap. Use the painted
+  // heading positions to give the entire gap the destination card surface
+  // and round the newly exposed edge of the source card.
+  void _paintDragCards(PaintingContext context, Offset offset, Color color) {
+    final rows = _rows(firstChild!);
+    final bounds = Rect.fromLTWH(
+      0,
+      0,
+      constraints.crossAxisExtent,
+      geometry!.paintExtent,
+    );
+    final cards = Path();
+    var start = -constraints.scrollOffset;
+    void addCard(double end) {
+      if (end <= start || end <= 0 || start >= bounds.bottom) return;
+      cards.addRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(16, start, bounds.width - 16, end),
+          const Radius.circular(FaceliftTokens.groupRadius),
+        ).scaleRadii(),
+      );
+    }
+
+    if (rows != null) {
+      for (var row = rows.firstChild; row != null; row = rows.childAfter(row)) {
+        final data = row.parentData! as SliverMultiBoxAdaptorParentData;
+        if (!_headingIndices.contains(data.index)) continue;
+        // Only the first Transform above the heading belongs to reorder.
+        RenderObject heading = row;
+        while (heading is! RenderTransform) {
+          RenderObject? next;
+          heading.visitChildren((child) => next ??= child);
+          if (next == null) break;
+          heading = next!;
+        }
+        final transform = Matrix4.identity();
+        if (heading is RenderTransform && heading.child != null) {
+          heading.applyPaintTransform(heading.child!, transform);
+        }
+        final shift = transform.getTranslation().y;
+        final top = (data.layoutOffset ?? 0) - constraints.scrollOffset + shift;
+        addCard(top);
+        start = top + 8;
+      }
+    }
+    addCard(geometry!.scrollExtent - constraints.scrollOffset);
+    context.pushClipPath(needsCompositing, offset, bounds, cards, (
+      context,
+      offset,
+    ) {
+      context.canvas.drawRect(bounds.shift(offset), Paint()..color = color);
+      context.paintChild(firstChild!, offset);
+    });
   }
 
   @override
@@ -1276,17 +1863,6 @@ class _RenderPinnedShoppingCategories extends RenderSliver
 
   @override
   double? childScrollOffset(RenderObject child) => 0;
-}
-
-class _ShoppingMove {
-  _ShoppingMove(this.checked, this.animation);
-  final bool checked;
-  final AnimationController animation;
-  Timer? timer;
-  void dispose() {
-    timer?.cancel();
-    animation.dispose();
-  }
 }
 
 class _EditShoppingDialog extends StatefulWidget {

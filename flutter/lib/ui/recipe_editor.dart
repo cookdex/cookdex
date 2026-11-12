@@ -15,8 +15,10 @@ import '../editor_model.dart';
 import '../name_matching.dart';
 import '../recipe_store.dart';
 import '../tag_labels.dart';
+import '../youtube_import.dart' show amountGuessNote;
 import '../src/rust/api.dart' as core;
 import 'components.dart';
+import 'facelift_motion.dart';
 import 'feedback.dart';
 import 'navigation_feedback.dart';
 
@@ -41,9 +43,11 @@ class RecipeEditor extends StatefulWidget {
     required this.controller,
     this.tagSuggestions = const [],
     this.ingredientSuggestions = const [],
+    this.onSmartCreateSaved,
   });
   final EditorController controller;
   final List<String> tagSuggestions, ingredientSuggestions;
+  final ValueChanged<core.Recipe>? onSmartCreateSaved;
   @override
   State<RecipeEditor> createState() => _RecipeEditorState();
 }
@@ -56,9 +60,8 @@ class _RecipeEditorState extends State<RecipeEditor>
   String? _placingSection;
   _SectionDragSession? _sectionDragSession;
   bool get _sectionDrag => _sectionDragSession != null;
-  Duration get _sectionTransition => MediaQuery.disableAnimationsOf(context)
-      ? Duration.zero
-      : const Duration(milliseconds: 220);
+  Duration get _sectionTransition =>
+      FaceliftMotion.duration(context, MotionGroup.lists);
   final _editorViewportKey = GlobalKey();
   double _sectionFocusSpace = 0;
   final _scroll = PixelScrollController();
@@ -72,6 +75,7 @@ class _RecipeEditorState extends State<RecipeEditor>
   double _keyboardInset = 0;
   List<String> _usedUnits = const [];
   final _hintWidths = <String, double>{};
+  static final _word = RegExp(r'\S+');
   Timer? _unitTimer;
   late final List<String> _ingredientNames;
   late final List<String> _tags;
@@ -206,6 +210,7 @@ class _RecipeEditorState extends State<RecipeEditor>
   Future<void> _save() async {
     FocusManager.instance.primaryFocus?.unfocus();
     final saved = await c.save(
+      showSaving: () => WidgetsBinding.instance.endOfFrame,
       chooseDuplicate: _chooseDuplicate,
       reviewNames: _reviewNames,
     );
@@ -217,6 +222,10 @@ class _RecipeEditorState extends State<RecipeEditor>
       showFeedback(context, c.persistenceError!, kind: FeedbackKind.error);
     }
     setState(() => _leaving = true);
+    if (widget.onSmartCreateSaved case final action?) {
+      action(saved);
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) Navigator.pop(context, saved);
     });
@@ -1100,59 +1109,103 @@ class _RecipeEditorState extends State<RecipeEditor>
             LayoutBuilder(
               builder: (context, constraints) {
                 final phone = MediaQuery.sizeOf(context).width < 600;
-                final sizedUnit = row.unit.trimLeft().startsWith('(');
-                final amountWidth = _hintWidth(
-                  '1 1/2',
-                  minimum: _hintWidth('Amount', minimum: 80),
-                ).clamp(0.0, constraints.maxWidth);
-                // Fixed allowances avoid resizing while typing. Phones retain
-                // their compact package width; wider layouts can show containers.
-                // Ordinary wide-layout units keep their existing compact width.
-                final unitWidth =
-                    (phone
-                            ? _hintWidth('(14 oz) cans') + 3
-                            : sizedUnit
-                            ? _hintWidth('(14 oz) containers') + 3
-                            : _hintWidth('clove', minimum: 64))
-                        .clamp(0.0, constraints.maxWidth);
-                final nameWidth = _hintWidth(
-                  'Ingredient',
-                  minimum: unitWidth > 96 ? unitWidth + 1 : 96,
-                );
-                final wrapFields =
-                    amountWidth + unitWidth + nameWidth + 12 >
-                    constraints.maxWidth;
-                final fieldWidgets = <Widget>[
-                  SizedBox(
-                    width: amountWidth,
-                    child: _compactField(
-                      '${row.id}-amount',
-                      'Amount',
-                      () => row.amount,
-                      (s) => row.amount = s,
+                final width = constraints.maxWidth;
+                // The native field scrolls as the user types. Use its value
+                // at focus entry for layout until that edit has finished.
+                String value(String part, String current) {
+                  final active = _suggestions.active;
+                  return active != null &&
+                          active.widget.key == ValueKey('${row.id}-$part')
+                      ? active._valueAtFocus
+                      : current;
+                }
+
+                final amount = value('amount', row.amount).trim();
+                final unit = value('unit', row.unit).trim();
+                final name = value('name', row.name).trim();
+                // Text needs 12dp at the start and 15dp at the end in both
+                // resting and active fields. _hintWidth includes 24dp.
+                final amountWidth =
+                    (_hintWidth(amount.isEmpty ? 'Amount' : amount) + 3)
+                        .clamp(56.0, _hintWidth('1/2–1 1/2', minimum: 56) + 3)
+                        .clamp(0.0, width);
+                final sizedUnit = unit.startsWith('(');
+                final unitWidth = sizedUnit
+                    ? (_hintWidth(
+                                phone ? '(14 oz) cans' : '(14 oz) containers',
+                                minimum: _hintWidth(unit),
+                              ) +
+                              3)
+                          .clamp(0.0, width)
+                    : (_hintWidth(unit.isEmpty ? 'Unit' : unit) + 3)
+                          .clamp(
+                            64.0,
+                            _hintWidth('tablespoons', minimum: 64) + 3,
+                          )
+                          .clamp(0.0, width);
+                // Allow natural wrapping between words, without splitting
+                // ordinary names such as "Olive" or "tomatoes" into fragments.
+                final wordLimit = _hintWidth('tomatoes') + 5;
+                var minName =
+                    _hintWidth(name.isEmpty ? 'Ingredient' : 'Olive') + 5;
+                for (final word in _word.allMatches(name).take(4)) {
+                  final wordWidth = (_hintWidth(word[0]!) + 5).clamp(
+                    0.0,
+                    wordLimit,
+                  );
+                  if (wordWidth > minName) minName = wordWidth;
+                }
+                final remaining = width - amountWidth - unitWidth - 12;
+                final nameWidth =
+                    remaining >= minName.clamp(88.0, double.infinity)
+                    ? remaining
+                    : width;
+                // Keep field elements mounted when resizing changes the layout.
+                return Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    SizedBox(
+                      width: amountWidth,
+                      child: _compactField(
+                        '${row.id}-amount',
+                        'Amount',
+                        () => row.amount,
+                        (s) {
+                          if (s != row.amount &&
+                              (row.aiGuessedAmount ||
+                                  row.prepNote.trim() == amountGuessNote)) {
+                            setState(() {
+                              row.aiGuessedAmount = false;
+                              row.prepNote = row.prepNote
+                                  .replaceFirst(amountGuessNote, '')
+                                  .trim();
+                              if (row.prepNote.isEmpty) row.showNote = false;
+                            });
+                          }
+                          row.amount = s;
+                        },
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  SizedBox(
-                    width: unitWidth,
-                    child: _compactField(
-                      '${row.id}-unit',
-                      'Unit',
-                      () => row.unit,
-                      (s) => row.unit = s,
-                      suggestionProvider: () => [
-                        ..._usedUnits,
-                        ...standardUnits.where(
-                          (unit) => !_usedUnits.any(
-                            (used) => used.toLowerCase() == unit,
+                    SizedBox(
+                      width: unitWidth,
+                      child: _compactField(
+                        '${row.id}-unit',
+                        'Unit',
+                        () => row.unit,
+                        (s) => row.unit = s,
+                        suggestionProvider: () => [
+                          ..._usedUnits,
+                          ...standardUnits.where(
+                            (unit) => !_usedUnits.any(
+                              (used) => used.toLowerCase() == unit,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  if (!wrapFields)
-                    Expanded(
+                    SizedBox(
+                      width: nameWidth,
                       child: _compactField(
                         '${row.id}-name',
                         'Ingredient',
@@ -1162,32 +1215,21 @@ class _RecipeEditorState extends State<RecipeEditor>
                         suggestions: _ingredientNames,
                       ),
                     ),
-                ];
-                final fields = wrapFields
-                    ? Wrap(runSpacing: 6, children: fieldWidgets)
-                    : Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: fieldWidgets,
-                      );
-                return wrapFields
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          fields,
-                          const SizedBox(height: 6),
-                          _compactField(
-                            '${row.id}-name',
-                            'Ingredient',
-                            () => row.name,
-                            (s) => row.name = s,
-                            multiline: true,
-                            suggestions: _ingredientNames,
-                          ),
-                        ],
-                      )
-                    : fields;
+                  ],
+                );
               },
             ),
+            if (row.aiGuessedAmount && !row.prepNote.contains(amountGuessNote))
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    amountGuessNote,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ),
             if (row.showNote || row.prepNote.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
@@ -1289,7 +1331,9 @@ class _RecipeEditorState extends State<RecipeEditor>
                                 _delete(section.rows, row, 'Ingredient'),
                             icon: Icon(
                               Symbols.delete,
-                              color: Theme.of(context).colorScheme.error,
+                              color: mutedDeleteColor(
+                                Theme.of(context).colorScheme,
+                              ),
                             ),
                           ),
                         ],
@@ -1542,7 +1586,7 @@ class _RecipeEditorState extends State<RecipeEditor>
               onPressed: () => _delete(d.steps, step, 'Step'),
               icon: Icon(
                 Symbols.delete,
-                color: Theme.of(context).colorScheme.error,
+                color: mutedDeleteColor(Theme.of(context).colorScheme),
               ),
             ),
           ),
@@ -1617,7 +1661,9 @@ class _RecipeEditorState extends State<RecipeEditor>
                           icon: const Icon(Symbols.arrow_back),
                         ),
                         title: Text(
-                          d.imported
+                          d.smartCreated
+                              ? 'Review recipe'
+                              : d.imported
                               ? 'Review import'
                               : d.base == null
                               ? 'Write a recipe'
@@ -1625,13 +1671,25 @@ class _RecipeEditorState extends State<RecipeEditor>
                         ),
                         actions: [
                           TextButton(
+                            style: c.saving
+                                ? TextButton.styleFrom(
+                                    disabledForegroundColor:
+                                        Theme.of(context).colorScheme.onSurface,
+                                  )
+                                : null,
                             onPressed:
                                 c.saving ||
                                     _sectionDrag ||
                                     _placingSection != null
                                 ? null
                                 : _save,
-                            child: Text(d.stale ? 'Save copy' : 'Save'),
+                            child: Text(
+                              c.saving
+                                  ? 'Saving…'
+                                  : d.stale
+                                  ? 'Save copy'
+                                  : 'Save',
+                            ),
                           ),
                         ],
                       ),
@@ -1690,15 +1748,62 @@ class _RecipeEditorState extends State<RecipeEditor>
                                           ),
                                           sliver: BuiltSliverList(
                                             children: [
-                                              if (c.saving)
+                                              if (c.saving &&
+                                                  widget.onSmartCreateSaved ==
+                                                      null)
                                                 const LinearProgressIndicator(),
-                                              if (d.imported)
-                                                const Padding(
-                                                  padding: EdgeInsets.only(
-                                                    bottom: 12,
+                                              if (d.smartCreated)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        bottom: 16,
+                                                      ),
+                                                  child: ListTile(
+                                                    tileColor: Theme.of(context)
+                                                        .colorScheme
+                                                        .tertiaryContainer,
+                                                    textColor: Theme.of(context)
+                                                        .colorScheme
+                                                        .onTertiaryContainer,
+                                                    iconColor: Theme.of(context)
+                                                        .colorScheme
+                                                        .onTertiaryContainer,
+                                                    shape: RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            16,
+                                                          ),
+                                                    ),
+                                                    leading: const Icon(
+                                                      Symbols.auto_awesome,
+                                                    ),
+                                                    title: const Text(
+                                                      'Made with Smart Create',
+                                                      style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                    subtitle: Text(
+                                                      [
+                                                        'Check it over before saving. Amounts and times are its best guess.',
+                                                        if (d.createWarning !=
+                                                            null)
+                                                          d.createWarning!,
+                                                      ].join('\n'),
+                                                    ),
                                                   ),
+                                                )
+                                              else if (d.imported)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        bottom: 12,
+                                                      ),
                                                   child: Text(
-                                                    'Imported, review and save',
+                                                    d.importSourceLine.isEmpty
+                                                        ? 'Imported, review and save'
+                                                        : d.importSourceLine,
                                                   ),
                                                 ),
                                               if (d.aiRewrittenSteps)
@@ -2224,9 +2329,10 @@ class _RecipeEditorState extends State<RecipeEditor>
                                                     ),
                                                     _field(
                                                       'source',
-                                                      'Source link',
+                                                      'Source',
                                                       () => d.source,
                                                       (s) => d.source = s,
+                                                      hint: 'Book, person or link',
                                                     ),
                                                   ],
                                                 ),
@@ -2729,6 +2835,7 @@ class _EditorFieldState extends State<_EditorField> {
     text: widget.value,
   );
   final FocusNode _focus = FocusNode();
+  String _valueAtFocus = '';
   _EditorSuggestions? _suggestions;
 
   @override
@@ -2751,6 +2858,7 @@ class _EditorFieldState extends State<_EditorField> {
   }
 
   void _focusChanged() {
+    if (_focus.hasFocus) _valueAtFocus = widget.value;
     final firstFocus = _focus.hasFocus && !_activated;
     if (mounted) {
       setState(() {

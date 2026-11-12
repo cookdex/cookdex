@@ -1,3 +1,4 @@
+import 'page_headings.dart';
 import 'pixel_scroll.dart';
 import 'retained_screen.dart';
 
@@ -6,12 +7,15 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../help_content.dart';
 import 'components.dart';
+import 'facelift_tokens.dart';
 
 /// Presentation only: the shell owns persistence, services and confirmations.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
     super.key,
-    required this.hasPrevious,
+    required this.readHasPrevious,
+    this.controller,
+    this.recoveryChanges,
     this.busy = false,
     required this.syncSummary,
     this.syncChanges,
@@ -23,8 +27,9 @@ class SettingsScreen extends StatelessWidget {
     this.onRecoverPreviousSave,
     this.onSnapshots,
     this.snapshotsFailing = false,
-    this.onCleanUpRecipes,
     this.onLibrary,
+    this.onGeminiKey,
+    this.onSmartCreateSettings,
     this.onSmartImportSettings,
     this.onHowCookdexWorks,
     this.onGitHub,
@@ -43,7 +48,9 @@ class SettingsScreen extends StatelessWidget {
     this.updateSettings,
   });
 
-  final bool hasPrevious;
+  final ValueGetter<bool> readHasPrevious;
+  final ScrollController? controller;
+  final Listenable? recoveryChanges;
   final bool busy;
   final String syncSummary;
   final Listenable? syncChanges;
@@ -55,8 +62,9 @@ class SettingsScreen extends StatelessWidget {
   final VoidCallback? onRecoverPreviousSave;
   final VoidCallback? onSnapshots;
   final bool snapshotsFailing;
-  final VoidCallback? onCleanUpRecipes;
   final VoidCallback? onLibrary;
+  final VoidCallback? onGeminiKey;
+  final VoidCallback? onSmartCreateSettings;
   final VoidCallback? onSmartImportSettings;
   final VoidCallback? onHowCookdexWorks;
   final VoidCallback? onGitHub;
@@ -92,15 +100,14 @@ class SettingsScreen extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(
-              'Theme',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Text('Theme', style: FaceliftTokens.sheetTitle(context)),
           ),
+          const SizedBox(height: 8),
           for (final entry in _themes.entries)
             ListTile(
+              contentPadding: EdgeInsets.zero,
               title: Text(entry.value),
               selected: themeMode == entry.key,
               trailing: themeMode == entry.key
@@ -121,15 +128,17 @@ class SettingsScreen extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
             child: Text(
               'Recipe text size',
-              style: Theme.of(context).textTheme.titleMedium,
+              style: FaceliftTokens.sheetTitle(context),
             ),
           ),
+          const SizedBox(height: 8),
           for (final entry in _textSizes.entries)
             ListTile(
+              contentPadding: EdgeInsets.zero,
               title: Text(entry.value),
               selected: recipeTextScale == entry.key,
               trailing: recipeTextScale == entry.key
@@ -228,144 +237,149 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Settings')),
     body: SafeArea(
-      top: false,
-      child: PixelListView(
-        key: const PageStorageKey('settings'),
-        padding: const EdgeInsets.all(16),
+      child: Column(
         children: [
-          _group(context, 'Sync', [
-            VisibleListenableBuilder(
-              listenable: syncChanges,
-              builder: (_) => _action(
-                'Sync settings',
-                Symbols.sync,
-                onSync,
-                summary: readSyncSummary?.call() ?? syncSummary,
-              ),
-            ),
-          ]),
-          _group(context, 'Recipes', [
-            _action(
-              'Library',
-              Symbols.menu_book,
-              onLibrary,
-              summary: 'Tidy up ingredient names and tags',
-            ),
-          ]),
-          _group(context, 'Backup & restore', [
-            _action(
-              'Download recipe ZIP',
-              Symbols.folder_zip,
-              onDownloadRecipeZip,
-            ),
-            _action(
-              'Save readable cookbook',
-              Symbols.menu_book,
-              onSaveReadableCookbook,
-            ),
-            _action(
-              'Restore recipe ZIP',
-              Symbols.upload_file,
-              onRestoreRecipeZip,
-            ),
-            _action(
-              'Recover previous save',
-              Symbols.history,
-              onRecoverPreviousSave,
-              available: hasPrevious,
-              summary: hasPrevious ? null : 'No previous save',
-            ),
-            _action(
-              'Snapshots',
-              Symbols.history,
-              onSnapshots,
-              summary: snapshotsFailing
-                  ? 'Automatic snapshots have not been saving'
-                  : 'Automatic backups on this device',
-            ),
-            _action(
-              'Clean up recipes',
-              Symbols.cleaning_services,
-              onCleanUpRecipes,
-            ),
-          ]),
-          _group(context, 'Smart Import', [
-            _action(
-              'Smart Import settings',
-              Symbols.auto_awesome,
-              onSmartImportSettings,
-            ),
-          ]),
-          _group(context, 'Shopping list', [
-            _preferenceToggle(
-              icon: Symbols.light_mode,
-              label: 'Keep shopping screen awake',
-              value: shoppingKeepAwake,
-              onChanged: onShoppingKeepAwake,
-            ),
-          ]),
-          _group(context, 'Appearance', [
-            _action(
-              'Recipe text size',
-              Symbols.text_fields,
-              () => _chooseTextSize(context),
-              summary: _textSizes[recipeTextScale] ?? 'Default',
-            ),
-            _action(
-              'Theme',
-              Symbols.brightness_6,
-              () => _chooseTheme(context),
-              summary: _themes[themeMode],
-            ),
-            if (isAndroid)
-              _preferenceToggle(
-                icon: Symbols.palette,
-                label: 'Wallpaper colors',
-                value: wallpaperColors,
-                onChanged: onWallpaperColors,
-              ),
-          ]),
-          _group(context, 'Help', [
-            _action(helpTitle, Symbols.help, onHowCookdexWorks),
-          ]),
-          _group(context, 'About', [
-            _action(
-              'cookdex on GitHub',
-              Symbols.open_in_new,
-              onGitHub,
-              summary: 'Updates, source code and help',
-            ),
-            _action('Share cookdex', Symbols.share, onShareCookdex),
-            ListTile(
-              leading: const Icon(Symbols.info),
-              title: const Text('cookdex'),
-              subtitle: installedVersion == null
-                  ? Text(version)
-                  : FutureBuilder<String>(
-                      future: installedVersion,
-                      builder: (context, snapshot) => Text(
-                        snapshot.hasError
-                            ? 'Version unavailable'
-                            : snapshot.data ?? 'Loading version…',
-                      ),
-                    ),
-              minVerticalPadding: 12,
-            ),
-            ?updateSettings,
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Recipes stay on your devices. Optional encrypted LAN sync '
-                'connects paired devices. When you use Smart Import with AI, '
-                'selected inputs are sent to Google. Link imports contact '
-                'recipe websites. Update checks contact GitHub.',
-              ),
-            ),
-          ]),
+          const TabHeading(title: Text('Settings')),
+          Expanded(child: _settingsList(context)),
         ],
       ),
     ),
+  );
+
+  Widget _settingsList(BuildContext context) => PixelListView(
+    key: const PageStorageKey('settings'),
+    controller: controller,
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    children: [
+      _group(context, 'Sync', [
+        VisibleListenableBuilder(
+          listenable: syncChanges,
+          builder: (_) => _action(
+            'Sync settings',
+            Symbols.sync,
+            onSync,
+            summary: readSyncSummary?.call() ?? syncSummary,
+          ),
+        ),
+      ]),
+      _group(context, 'Recipes', [
+        _action(
+          'Library',
+          Symbols.menu_book,
+          onLibrary,
+          summary: 'Tidy up ingredient names and tags',
+        ),
+      ]),
+      _group(context, 'Backup & restore', [
+        _action('Download recipe ZIP', Symbols.folder_zip, onDownloadRecipeZip),
+        _action(
+          'Save readable cookbook',
+          Symbols.menu_book,
+          onSaveReadableCookbook,
+        ),
+        _action('Restore recipe ZIP', Symbols.upload_file, onRestoreRecipeZip),
+        VisibleListenableBuilder(
+          listenable: recoveryChanges,
+          builder: (_) {
+            final available = readHasPrevious();
+            return _action(
+              'Recover previous save',
+              Symbols.history,
+              onRecoverPreviousSave,
+              available: available,
+              summary: available ? null : 'No previous save',
+            );
+          },
+        ),
+        _action(
+          'Snapshots',
+          Symbols.history,
+          onSnapshots,
+          summary: snapshotsFailing
+              ? 'Automatic snapshots have not been saving'
+              : 'Automatic backups on this device',
+        ),
+      ]),
+      _group(context, 'Smart features', [
+        _action('Gemini key', Symbols.key, onGeminiKey),
+        _action(
+          'Smart Import settings',
+          Symbols.auto_awesome,
+          onSmartImportSettings,
+        ),
+        _action(
+          'Smart Create settings',
+          Symbols.lightbulb,
+          onSmartCreateSettings,
+        ),
+      ]),
+      _group(context, 'Shopping list', [
+        _preferenceToggle(
+          icon: Symbols.light_mode,
+          label: 'Keep shopping screen awake',
+          value: shoppingKeepAwake,
+          onChanged: onShoppingKeepAwake,
+        ),
+      ]),
+      _group(context, 'Appearance', [
+        _action(
+          'Recipe text size',
+          Symbols.text_fields,
+          () => _chooseTextSize(context),
+          summary: _textSizes[recipeTextScale] ?? 'Default',
+        ),
+        _action(
+          'Theme',
+          Symbols.brightness_6,
+          () => _chooseTheme(context),
+          summary: _themes[themeMode],
+        ),
+        if (isAndroid)
+          _preferenceToggle(
+            icon: Symbols.palette,
+            label: 'Wallpaper colors',
+            value: wallpaperColors,
+            onChanged: onWallpaperColors,
+          ),
+      ]),
+      _group(context, 'Help', [
+        _action(helpTitle, Symbols.help, onHowCookdexWorks),
+      ]),
+      _group(context, 'About', [
+        _action(
+          'cookdex on GitHub',
+          Symbols.open_in_new,
+          onGitHub,
+          summary: 'Updates, source code and help',
+        ),
+        _action('Share cookdex', Symbols.share, onShareCookdex),
+        ListTile(
+          leading: const Icon(Symbols.info),
+          title: const Text('cookdex'),
+          subtitle: installedVersion == null
+              ? Text(version)
+              : FutureBuilder<String>(
+                  future: installedVersion,
+                  builder: (context, snapshot) => Text(
+                    snapshot.hasError
+                        ? 'Version unavailable'
+                        : snapshot.data ?? 'Loading version…',
+                  ),
+                ),
+          minVerticalPadding: 12,
+        ),
+        ?updateSettings,
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            '${isAndroid ? 'Android can back up your recipes to your Google account with encryption.' : 'Recipes are stored on this device.'} Optional encrypted LAN sync '
+            'connects paired devices. When you use Smart Import with AI or Smart Create, '
+            'selected inputs are sent to Google. Link imports contact '
+            'recipe websites. Update checks contact GitHub.',
+          ),
+        ),
+      ]),
+    ],
   );
 }

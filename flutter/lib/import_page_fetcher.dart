@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'import_link_policy.dart';
 import 'import_platform.dart';
 
 /// Reject private/reserved targets, including IPv4-mapped IPv6, before a socket
@@ -38,16 +39,28 @@ bool isPublicImportAddress(InternetAddress address) {
       (a == 203 && c == 0 && d == 113));
 }
 
-const insecureImportMessage =
-    "This site doesn't use a secure connection. Copy and paste the recipe text instead.";
+/// Return control to Smart Import before the first request to a YouTube redirect.
+class YouTubeImportRedirect extends FormatException {
+  YouTubeImportRedirect(this.url) : super('YouTube link');
+  final Uri url;
+}
 
-class InsecureImportUrl extends FormatException {
-  const InsecureImportUrl() : super(insecureImportMessage);
+class BlockedSocialImportUrl extends FormatException {
+  BlockedSocialImportUrl(this.site) : super(blockedLinkMessage(site));
+  final SocialSite site;
+}
+
+/// Raised only after the checked HTTPS fetch reaches a site that refuses it.
+class ImportPageRefused extends HttpException {
+  ImportPageRefused(int status)
+    : super('The site blocked the download (HTTP $status).');
 }
 
 Uri checkedImportUrl(String input) {
-  final uri = Uri.tryParse(input.trim());
-  if (uri?.scheme == 'http') throw const InsecureImportUrl();
+  final original = Uri.tryParse(input.trim());
+  final uri = original?.scheme == 'http'
+      ? original!.replace(scheme: 'https')
+      : original;
   if (uri == null ||
       uri.scheme != 'https' ||
       uri.host.isEmpty ||
@@ -66,9 +79,19 @@ Uri checkedImportUrl(String input) {
         '.local',
         '.internal',
         '.home',
+        '.home.arpa',
         '.lan',
       ].any(host.endsWith)) {
     throw const FormatException('Use a public HTTPS recipe link.');
+  }
+  return uri;
+}
+
+Uri _fetchableUrl(String input) {
+  final uri = checkedImportUrl(input);
+  final site = socialSite(uri);
+  if (site != null && site != SocialSite.youtube) {
+    throw BlockedSocialImportUrl(site);
   }
   return uri;
 }
@@ -90,7 +113,10 @@ class ImportPageFetcher {
     client.findProxy = (_) => 'DIRECT';
     client.connectionFactory = (uri, proxyHost, proxyPort) async {
       if (epoch != _epoch) throw const HttpException('Cancelled.');
-      checkedImportUrl(uri.toString());
+      if (uri.scheme != 'https') {
+        throw const FormatException('Use a public HTTPS recipe link.');
+      }
+      _fetchableUrl(uri.toString());
       final addresses = await InternetAddress.lookup(
         uri.host.replaceAll('[', '').replaceAll(']', ''),
       ).timeout(const Duration(seconds: 15));
@@ -120,12 +146,10 @@ class ImportPageFetcher {
               active!.destroy();
               throw const HttpException('Import cancelled.');
             }
-            if (uri.scheme == 'https') {
-              active = await SecureSocket.secure(
-                active!,
-                host: uri.host,
-              ).timeout(const Duration(seconds: 8));
-            }
+            active = await SecureSocket.secure(
+              active!,
+              host: uri.host,
+            ).timeout(const Duration(seconds: 8));
             if (cancelled || epoch != _epoch) {
               active!.destroy();
               throw const HttpException('Import cancelled.');
@@ -145,7 +169,7 @@ class ImportPageFetcher {
       });
     };
     Future<ImportPage> run() async {
-      var uri = checkedImportUrl(input);
+      var uri = _fetchableUrl(input);
       for (var hop = 0; hop <= 5; hop++) {
         if (epoch != _epoch) throw const HttpException('Cancelled.');
         final request = await client.getUrl(uri);
@@ -164,13 +188,19 @@ class ImportPageFetcher {
           if (hop == 5 || location == null) {
             throw const HttpException('Too many page redirects.');
           }
-          uri = checkedImportUrl(uri.resolve(location).toString());
+          final next = _fetchableUrl(uri.resolve(location).toString());
+          if (socialSite(next) == SocialSite.youtube &&
+              socialSite(uri) != SocialSite.youtube) {
+            throw YouTubeImportRedirect(next);
+          }
+          uri = next;
           continue;
         }
         if (response.statusCode < 200 || response.statusCode >= 300) {
+          if (response.statusCode == 401 || response.statusCode == 403) {
+            throw ImportPageRefused(response.statusCode);
+          }
           throw HttpException(switch (response.statusCode) {
-            401 || 403 =>
-              'The site blocked the download (HTTP ${response.statusCode}).',
             429 =>
               'The site is limiting downloads. Try again later (HTTP 429).',
             404 || 410 =>

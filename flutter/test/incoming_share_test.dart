@@ -112,6 +112,65 @@ void main() {
     },
   );
 
+  test(
+    'social shares discard trackers and preserve the remaining URL bytes',
+    () async {
+      final c = ImportController(
+        service: ImportFakeService(),
+        storage: MemoryDraftStorage(),
+      );
+      addTearDown(c.dispose);
+      for (final (raw, expected) in [
+        (
+          'http://recipes.example.test:80/rice?x=a%2fb&x=A+B#steps',
+          'https://recipes.example.test/rice?x=a%2fb&x=A+B#steps',
+        ),
+        (
+          'http://m.youtube.com/watch?v=AbCdEfGhI12&si=sender',
+          'https://m.youtube.com/watch?v=AbCdEfGhI12',
+        ),
+        (
+          'https://youtu.be/AbCdEfGhI12?si=sender',
+          'https://youtu.be/AbCdEfGhI12',
+        ),
+        (
+          'https://www.youtube.com/watch?v=AbCdEfGhI12&si=sender&t=43#clip',
+          'https://www.youtube.com/watch?v=AbCdEfGhI12&t=43#clip',
+        ),
+        (
+          'https://www.instagram.com/reel/FictionalId/?igsh=sender',
+          'https://www.instagram.com/reel/FictionalId/',
+        ),
+        (
+          'https://pin.it/FictionalId?utm_source=copy&x=a%2fb&x=A+B',
+          'https://pin.it/FictionalId?x=a%2fb&x=A+B',
+        ),
+        (
+          'https://www.reddit.com/r/recipes/comments/abc123/lemon_rice/?utm_source=copy',
+          'https://www.reddit.com/r/recipes/comments/abc123/lemon_rice/',
+        ),
+        (
+          'https://www.reddit.com/r/recipes/comments/abc123/lemon_rice/def456/?context=3&utm_source=copy',
+          'https://www.reddit.com/r/recipes/comments/abc123/lemon_rice/def456/?context=3',
+        ),
+        ('https://redd.it/abc123?utm_source=copy', 'https://redd.it/abc123'),
+        (
+          'https://recipes.example.test/rice?si=keep&igsh=keep#servings',
+          'https://recipes.example.test/rice?si=keep&igsh=keep#servings',
+        ),
+        (
+          'https://youtube.com.example.test/rice?si=keep',
+          'https://youtube.com.example.test/rice?si=keep',
+        ),
+      ]) {
+        await IncomingShare({'text': raw}).apply(c);
+        expect(c.tab, ImportTab.link);
+        expect(c.link, expected);
+      }
+      await c.flush();
+    },
+  );
+
   test('incoming photos retain order and partial errors; rejected share shows error', () async {
     final c = ImportController(
       service: ImportFakeService(),

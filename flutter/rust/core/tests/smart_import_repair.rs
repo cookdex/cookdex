@@ -42,6 +42,27 @@ fn unsupported_amounts_repair_in_ai_but_fail_exact_text() {
     }
 }
 #[test]
+fn smart_review_decimals_are_scalable_fractions_including_a_leading_point() {
+    for (raw, expected) in [
+        ("0.25", "1/4"),
+        ("0.33", "1/3"),
+        (".5", "1/2"),
+        ("0.75", "3/4"),
+        ("1.5", "1 1/2"),
+        (".25–.5", "1/4–1/2"),
+    ] {
+        let mut value = written();
+        value["ingredients"][0]["amount"] = json!(raw);
+        let (recipe, _) = provider::validated_response(&envelope(value)).unwrap();
+        let row = &recipe.content.ingredients[0];
+        assert_eq!(row.amount.text(), expected);
+        assert_eq!(row.amount, Amount::parse_exact(expected).unwrap());
+        assert!(!row.unit.is_empty());
+        assert_eq!(row.prep_note, "sifted");
+    }
+    assert!(Amount::parse_exact(".5").is_err());
+}
+#[test]
 fn corrupt_fields_never_discard_usable_siblings() {
     let mut v = written();
     v["source"] = json!("javascript:bad");
@@ -58,7 +79,7 @@ fn corrupt_fields_never_discard_usable_siblings() {
     assert_eq!(r.content.title.len(), 160);
     assert_eq!(r.content.steps, ["Mix."]);
     assert_eq!(r.content.ingredients.len(), 2);
-    assert!(r.content.source.is_empty());
+    assert_eq!(r.content.source, "javascript:bad");
     assert_eq!(r.content.servings, "12");
     assert!(w.len() > 6);
     r.validate().unwrap();
@@ -94,7 +115,7 @@ fn only_empty_content_fails_and_status_and_truncation_explain_why() {
     assert!(e.message.contains("cut off"));
 }
 #[test]
-fn malformed_guesses_are_ignored_and_tags_still_filtered() {
+fn malformed_guesses_are_ignored_and_new_tags_reach_review() {
     for bad in [Value::Null, json!("servings"), json!([0]), json!({})] {
         let mut v = written();
         v["aiGuessedFields"] = bad;
@@ -105,7 +126,7 @@ fn malformed_guesses_are_ignored_and_tags_still_filtered() {
         let review = provider::review_response(&bytes, &input(), &mut r).unwrap();
         assert_eq!(review.ai_guessed_fields, ["servings", "tags"]);
         assert_eq!(review.ai_guessed_steps, [0]);
-        assert_eq!(r.content.tags, ["dinner"]);
+        assert_eq!(r.content.tags, ["invented", "dinner"]);
     }
 }
 #[test]
@@ -133,7 +154,7 @@ fn shared_rules_cannot_diverge_and_retry_contains_specific_problem() {
         );
         assert!(prompt.starts_with(provider::INSTRUCTION));
         assert!(copy.starts_with(provider::INSTRUCTION));
-        assert!(prompt.contains("family favorite") && copy.contains("family favorite"));
+        assert!(prompt.contains("Family Favorite") && copy.contains("Family Favorite"));
         assert!(!prompt.contains("return an empty object"));
     }
     let body: Value = serde_json::from_slice(
@@ -351,12 +372,11 @@ fn updated_rules_preserve_source_constraints_in_both_output_modes() {
         );
         assert!(provider::copy_prompt(&[]).contains(fragment));
     }
-    // The owner selected the exact tested C snapshot, including its historical
-    // baseline examples. New examples must remain independent of fixtures.
+    // Preserve the accepted recipe rules and the requested library tag policy.
     use sha2::{Digest, Sha256};
     assert_eq!(
         format!("{:x}", Sha256::digest(provider::INSTRUCTION.as_bytes())),
-        "a31d394176ca9fe9de8bb5cb4c77551554fe1ddeeed8293ac4f6538f1becf82c"
+        "178296651ba14c8a7509caaade9e98b59beeec89d28f8bcc64f3a0c77e281c7b"
     );
     assert!(!provider::INSTRUCTION.contains("Estimate missing servings, prep time"));
     let schema = provider::schema(&provider::Mode::Recipe);

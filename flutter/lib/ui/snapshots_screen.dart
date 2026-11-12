@@ -1,3 +1,5 @@
+import 'page_headings.dart';
+
 import 'package:flutter/material.dart';
 
 import 'pixel_scroll.dart';
@@ -160,7 +162,7 @@ class _SnapshotsScreenState extends State<SnapshotsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Snapshots')),
+    appBar: pageHeadingBar(context, title: 'Snapshots'),
     body: SafeArea(
       top: false,
       child: Align(

@@ -50,15 +50,17 @@ class NormalizingRepository extends ImportRepositoryFake {
 void main() {
   for (final accept in [false, true]) {
     test(
-      'exact import spelling review changes only consented names: $accept',
+      'exact import uses library case and asks before other spelling changes: $accept',
       () async {
         final json = recipeToJson(exactFixture());
         (json['fields'] as Map<String, dynamic>)['tags'] = [
           'QUICK',
-          'UPPER Case',
+          'UPPER-Case',
         ];
         final source = recipeFromJson(json);
-        final repo = NormalizingRepository([recipe('existing')]);
+        final existing = recipe('existing');
+        existing.fields.tags.add('Upper Case');
+        final repo = NormalizingRepository([existing]);
         final store = RecipeStore(repo, LocalPreferences.memory());
         await store.initialize();
         addTearDown(store.dispose);
@@ -78,12 +80,16 @@ void main() {
           reviewNames: (matches) async {
             reviews++;
             expect(matches, hasLength(1));
+            expect(matches.single.entered, 'UPPER-Case');
             return accept ? {0} : <int>{};
           },
         );
         expect(reviews, 1);
         expect(saved, isNotNull);
-        expect(saved!.fields.tags, [accept ? 'Quick' : 'QUICK', 'UPPER Case']);
+        expect(saved!.fields.tags, [
+          'Quick',
+          accept ? 'Upper Case' : 'UPPER-Case',
+        ]);
         expect(saved.fields.prepTime, source.fields.prepTime);
         expect(saved.fields.cookTime, source.fields.cookTime);
         expect(saved.fields.totalTime, source.fields.totalTime);

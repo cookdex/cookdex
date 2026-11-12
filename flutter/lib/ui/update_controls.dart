@@ -5,6 +5,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '../update_checker.dart';
 import 'components.dart';
+import 'facelift_tokens.dart';
 
 class UpdateSettingsPanel extends StatelessWidget {
   const UpdateSettingsPanel({
@@ -81,7 +82,9 @@ class UpdateDetails extends StatefulWidget {
     super.key,
     required this.release,
     required this.openPage,
+    this.titleStyle,
   });
+  final TextStyle? titleStyle;
   final PublishedRelease release;
   final Future<void> Function(String) openPage;
   @override
@@ -105,7 +108,7 @@ class _UpdateDetailsState extends State<UpdateDetails> {
     children: [
       Text(
         'cookdex ${widget.release.version} is available',
-        style: Theme.of(context).textTheme.titleMedium,
+        style: widget.titleStyle ?? Theme.of(context).textTheme.titleMedium,
       ),
       if (widget.release.notes.isNotEmpty) ...[
         const SizedBox(height: 12),
@@ -171,12 +174,10 @@ class UpdateNotice extends StatelessWidget {
                       context,
                       child: SizedBox(
                         width: double.infinity,
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          child: UpdateDetails(
-                            release: release,
-                            openPage: openPage,
-                          ),
+                        child: UpdateDetails(
+                          release: release,
+                          openPage: openPage,
+                          titleStyle: FaceliftTokens.sheetTitle(context),
                         ),
                       ),
                     ),

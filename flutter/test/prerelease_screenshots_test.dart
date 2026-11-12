@@ -294,7 +294,7 @@ void main() {
           await shot('import-text');
           await tap(find.text('Smart Import settings'));
           await shot('smart-settings');
-          await tap(find.text('Cancel').last);
+          await tap(find.byTooltip('Back'));
           await tester.enterText(
             find.byWidgetPredicate(
               (w) =>
@@ -304,7 +304,7 @@ void main() {
             'Synthetic family recipe',
           );
           FocusManager.instance.primaryFocus?.unfocus();
-          await tap(find.widgetWithText(FilledButton, 'Smart Import'));
+          await tap(find.byKey(const Key('smart-import-action')));
           await shot('import-candidates');
           await tap(find.text('First recipe'));
           await shot('import-review-warning');

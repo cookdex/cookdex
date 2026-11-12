@@ -1,8 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <exclude domain="root" path="."/>
-    <exclude domain="file" path="."/>
-    <exclude domain="database" path="."/>
-    <exclude domain="sharedpref" path="."/>
-    <exclude domain="external" path="."/>
+    <include domain="file" path="phone-backup-v1/cloud" requireFlags="clientSideEncryption" />
+    <include domain="file" path="phone-backup-v1/transfer" requireFlags="deviceToDeviceTransfer" />
 </full-backup-content>

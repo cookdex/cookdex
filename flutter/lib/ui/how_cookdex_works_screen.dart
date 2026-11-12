@@ -1,3 +1,4 @@
+import 'page_headings.dart';
 import 'pixel_scroll.dart';
 
 import 'package:flutter/material.dart';
@@ -12,10 +13,12 @@ class HowCookdexWorksScreen extends StatefulWidget {
     super.key,
     required this.loadAppInfo,
     required this.openUrl,
+    this.openDataSection = false,
   });
 
   final Future<String> Function() loadAppInfo;
   final Future<void> Function(String) openUrl;
+  final bool openDataSection;
 
   @override
   State<HowCookdexWorksScreen> createState() => _HowCookdexWorksScreenState();
@@ -23,6 +26,18 @@ class HowCookdexWorksScreen extends StatefulWidget {
 
 class _HowCookdexWorksScreenState extends State<HowCookdexWorksScreen> {
   bool _copying = false;
+  final _dataCard = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.openDataSection) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final card = _dataCard.currentContext;
+        if (card != null) Scrollable.ensureVisible(card);
+      });
+    }
+  }
 
   Future<void> _copyAppInfo() async {
     if (_copying) return;
@@ -52,66 +67,98 @@ class _HowCookdexWorksScreenState extends State<HowCookdexWorksScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text(helpTitle)),
+    appBar: pageHeadingBar(context, title: helpTitle),
     body: SafeArea(
       top: false,
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
-          child: PixelListView(
+          // Mount every section header so a direct link can reach even the
+          // last card before the reader has scrolled through the guide.
+          child: PixelSingleChildScrollView(
             key: const PageStorageKey('how-cookdex-works'),
             padding: const EdgeInsets.all(16),
-            children: [
-              const Padding(
-                padding: EdgeInsets.only(bottom: 16),
-                child: Text(helpIntroduction),
-              ),
-              for (final section in helpSections)
-                Card(
-                  clipBehavior: Clip.antiAlias,
-                  child: ExpansionTile(
-                    key: PageStorageKey('help-${section.id}'),
-                    initiallyExpanded: section.id == 'start',
-                    title: Text(section.title),
-                    expandedAlignment: Alignment.centerLeft,
-                    childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    children: [
-                      for (final paragraph in section.paragraphs)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: _HelpParagraph(paragraph),
-                          ),
-                        ),
-                      for (final link in section.links)
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: () => _openLink(link),
-                            icon: const Icon(Symbols.open_in_new),
-                            label: Text(link.label),
-                          ),
-                        ),
-                      if (section.id == 'feedback')
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: OutlinedButton.icon(
-                            onPressed: _copying ? null : _copyAppInfo,
-                            icon: const Icon(Symbols.content_copy),
-                            label: const Text(helpCopyAppInfo),
-                          ),
-                        ),
-                    ],
-                  ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 16),
+                  child: Text(helpIntroduction),
                 ),
-            ],
+                for (final section in helpSections)
+                  Card(
+                    key: widget.openDataSection && section.id == dataHelp.id
+                        ? _dataCard
+                        : null,
+                    clipBehavior: Clip.antiAlias,
+                    child: ExpansionTile(
+                      key: PageStorageKey('help-${section.id}'),
+                      initiallyExpanded:
+                          section.id ==
+                          (widget.openDataSection ? dataHelp.id : 'start'),
+                      title: Text(section.title),
+                      expandedAlignment: Alignment.centerLeft,
+                      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      children: [
+                        ..._helpText(section.paragraphs, section.links),
+                        for (final group in section.groups) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8, bottom: 8),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Semantics(
+                                header: true,
+                                child: Text(
+                                  group.title,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium,
+                                ),
+                              ),
+                            ),
+                          ),
+                          ..._helpText(group.paragraphs, group.links),
+                        ],
+                        if (section.id == 'feedback')
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: _copying ? null : _copyAppInfo,
+                              icon: const Icon(Symbols.content_copy),
+                              label: const Text(helpCopyAppInfo),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
     ),
   );
+
+  List<Widget> _helpText(List<String> paragraphs, List<HelpLink> links) => [
+    for (final paragraph in paragraphs)
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: _HelpParagraph(paragraph),
+        ),
+      ),
+    for (final link in links)
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: () => _openLink(link),
+          icon: const Icon(Symbols.open_in_new),
+          label: Text(link.label),
+        ),
+      ),
+  ];
 }
 
 class _HelpParagraph extends StatelessWidget {

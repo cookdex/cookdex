@@ -3,6 +3,7 @@ import 'package:cookdex/sync_controller.dart';
 import 'package:cookdex/ui/pairing_screen.dart';
 import 'package:cookdex/ui/scan_invitation_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_zxing/flutter_zxing.dart';
 
@@ -178,9 +179,14 @@ void main() {
     expect(results, [null]);
   });
 
-  testWidgets('denied camera returns to pairing and paste remains usable', (
+  testWidgets('camera setup failure returns to pairing and paste remains usable', (
     tester,
   ) async {
+    const channel = MethodChannel('com.sylph.cookdex.dev/platform');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel, (_) async => 'granted',
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null));
     camera.unavailable = true;
     final backend = FakeSyncBackend();
     final controller = SyncController(

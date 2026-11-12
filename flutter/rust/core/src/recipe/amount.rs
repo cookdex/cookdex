@@ -2,7 +2,7 @@ use super::{Result, bounded, error};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_INTEGER: u64 = 9_007_199_254_740_991;
-pub const NUMBER_PATTERN: &str = r"(?:[0-9]+(?:\s+|\s*-\s*)[0-9]+/[0-9]+|[0-9]+/[0-9]+|(?:[0-9]+\s*)?[¼½¾⅓⅔⅛⅜⅝⅞]|[0-9]+(?:\.[0-9]+)?)";
+pub const NUMBER_PATTERN: &str = r"(?:[0-9]+(?:\s+(?i:and)\s+|\s*[-&]\s*|\s+)(?:[0-9]+/[0-9]+|[¼½¾⅓⅔⅛⅜⅝⅞⅐⅑⅒⅕⅖⅗⅘⅙⅚])|[0-9]+/[0-9]+|(?:[0-9]+\s*)?[¼½¾⅓⅔⅛⅜⅝⅞⅐⅑⅒⅕⅖⅗⅘⅙⅚]|[0-9]+(?:\.[0-9]+)?)";
 fn gcd(mut a: u128, mut b: u128) -> u128 {
     while b != 0 {
         (a, b) = (b, a % b);
@@ -283,6 +283,15 @@ impl Amount {
             ('⅜', "3/8"),
             ('⅝', "5/8"),
             ('⅞', "7/8"),
+            ('⅐', "1/7"),
+            ('⅑', "1/9"),
+            ('⅒', "1/10"),
+            ('⅕', "1/5"),
+            ('⅖', "2/5"),
+            ('⅗', "3/5"),
+            ('⅘', "4/5"),
+            ('⅙', "1/6"),
+            ('⅚', "5/6"),
         ] {
             text = text.replace(c, &format!(" {r}"));
         }
@@ -297,11 +306,11 @@ impl Amount {
         // An en dash or "to" is always a range; improper fractions remain
         // range endpoints (for example 1-3/2 means 1 through 1 1/2).
         static MIXED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-            regex::Regex::new(r"^([0-9]+)\s*-\s*([0-9]+)/([0-9]+)$").unwrap()
+            regex::Regex::new(r"(?i)^([0-9]+)(?:\s+(?:and)\s+|\s*[-&]\s*)([0-9]+)/([0-9]+)$")
+                .unwrap()
         });
         if let Some(c) = MIXED.captures(text)
             && let (Ok(n), Ok(d)) = (c[2].parse::<u128>(), c[3].parse::<u128>())
-            && d > 0
             && n < d
         {
             return Self::parse(&format!("{} {}/{}", &c[1], &c[2], &c[3]), snap);

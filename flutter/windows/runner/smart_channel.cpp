@@ -1,5 +1,6 @@
 #include "app_identity.h"
 #include "smart_channel.h"
+#include "create_photo_picker.h"
 #include "http_request.h"
 #include <flutter/standard_method_codec.h>
 #include <wincred.h>
@@ -90,23 +91,67 @@ SmartChannel::SmartChannel(flutter::BinaryMessenger* messenger, HWND window) : w
           if (!key.empty()) settings.key = key;
         }
         Write(settings); SecureZeroMemory(settings.key.data(), settings.key.size()); result->Success();
-      } else if (method == "providerRequest") {
-        const auto* body = call.arguments() ? std::get_if<std::vector<uint8_t>>(call.arguments()) : nullptr;
-        if (!body || body->size() >= 16 * 1024 * 1024) throw std::runtime_error("Import request is too large.");
-        if (busy_.exchange(true)) { result->Error("busy", "A request is already running."); return; }
+      } else if (method == "providerRequest" || method == "pickPhotos") {
+        const auto token = generation_.load();
+        std::function<V()> run;
+        if (method == "pickPhotos") {
+          const auto* args = call.arguments() ? std::get_if<M>(call.arguments()) : nullptr;
+          const auto value = [args](const char* key) -> const V* {
+            if (!args) return nullptr;
+            const auto it = args->find(V(key));
+            return it == args->end() ? nullptr : &it->second;
+          };
+          const auto* retain = std::get_if<bool>(value("retainOriginals"));
+          if (!retain || *retain) { result->NotImplemented(); return; }
+          const auto* camera = std::get_if<bool>(value("camera"));
+          const auto* count = std::get_if<int32_t>(value("maxCount"));
+          if (!camera || !count || *count < 1) {
+            result->Error("limit", "Choose up to eight photos."); return;
+          }
+          if (busy_.exchange(true)) { result->Error("busy", "Finish the current request first."); return; }
+          try {
+            auto selected = ChooseCreatePhotos(window, *camera, std::min<int>(*count, 8));
+            if (selected.paths.empty() && selected.camera_bmp.empty()) {
+              busy_ = false; result->Success(); return;
+            }
+            run = [this, selected = std::move(selected), token]() {
+              return PrepareCreatePhotos(selected, [this, token] { return generation_ != token; });
+            };
+          } catch (const std::runtime_error& e) {
+            busy_ = false; result->Error("picker", e.what()); return;
+          } catch (...) {
+            busy_ = false; result->Error("picker", "Windows could not open the photo picker."); return;
+          }
+        } else {
+          const auto* body = call.arguments() ? std::get_if<std::vector<uint8_t>>(call.arguments()) : nullptr;
+          if (!body || body->size() >= 16 * 1024 * 1024) throw std::runtime_error("Import request is too large.");
+          run = [this, body = *body, token] { return Request(body, generation_, token); };
+          if (busy_.exchange(true)) { result->Error("busy", "A request is already running."); return; }
+        }
         if (worker_.joinable()) worker_.join();
         auto reply = std::shared_ptr<flutter::MethodResult<V>>(std::move(result));
-        const auto token = generation_.load();
-        worker_ = std::thread([this, window, reply, body = *body, token]() {
-          V value; std::string error;
-          try { value = Request(body, generation_, token); }
-          catch (const std::exception& e) { error = e.what(); }
-          if (!closed_) {
-            auto callback = new std::function<void()>([reply, value, error]() { if (error.empty()) reply->Success(value); else reply->Error("import", error); });
-            if (!PostMessageW(window, kReply, 0, reinterpret_cast<LPARAM>(callback))) delete callback;
-          }
-          busy_ = false;
-        });
+        try {
+          worker_ = std::thread([this, window, reply, run = std::move(run), token, method]() {
+            V value; std::string error;
+            try { value = run(); }
+            catch (const std::exception& e) {
+              error = method == "pickPhotos" ? "Windows could not prepare the selected photos." : e.what();
+            } catch (...) {
+              error = method == "pickPhotos" ? "Windows could not prepare the selected photos." : "The request failed.";
+            }
+            if (!closed_) {
+              auto callback = new std::function<void()>([this, reply, value = std::move(value), error, token, method]() {
+                if (method == "pickPhotos" && generation_ != token) reply->Success();
+                else if (error.empty()) reply->Success(value);
+                else reply->Error(method == "pickPhotos" ? "picker" : "import", error);
+              });
+              if (!PostMessageW(window, kReply, 0, reinterpret_cast<LPARAM>(callback))) delete callback;
+            }
+            busy_ = false;
+          });
+        } catch (...) {
+          busy_ = false; reply->Error("busy", "Could not start the current request.");
+        }
       } else result->NotImplemented();
     } catch (const std::exception& e) { result->Error("settings", e.what()); }
   });

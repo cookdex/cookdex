@@ -33,6 +33,9 @@ void main() {
           'Prep time': '15 min',
           'Cook time': '30 min',
         };
+        final source = appendAfterReturn
+            ? 'Sunday suppers, page 36'
+            : 'https://example.com/updated';
         for (final entry in values.entries) {
           FocusManager.instance.primaryFocus?.unfocus();
           await reveal(tester, field(entry.key));
@@ -67,7 +70,7 @@ void main() {
         );
         for (final entry in {
           'Notes': 'Updated notes',
-          'Source link': 'https://example.com/updated',
+          'Source': source,
         }.entries) {
           FocusManager.instance.primaryFocus?.unfocus();
           await reveal(tester, field(entry.key));
@@ -124,7 +127,7 @@ void main() {
         );
         for (final entry in {
           'Notes': 'Updated notes',
-          'Source link': 'https://example.com/updated',
+          'Source': source,
         }.entries) {
           FocusManager.instance.primaryFocus?.unfocus();
           await reveal(tester, field(entry.key));
@@ -165,7 +168,7 @@ void main() {
         expect(stored.prepTime, values['Prep time']);
         expect(stored.cookTime, values['Cook time']);
         expect(stored.notes, 'Updated notes');
-        expect(stored.source, 'https://example.com/updated');
+        expect(stored.source, source);
         expect(stored.ingredients.last.name, 'Updated ingredient');
         expect(stored.ingredients.last.unit, 'cup');
         expect(stored.ingredients.last.prepNote, 'freshly chopped');

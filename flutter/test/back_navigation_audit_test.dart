@@ -141,7 +141,7 @@ void main() {
         await tester.tap(find.text('Smart Import'));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField).last, 'source for soup');
-        await tester.tap(find.widgetWithText(FilledButton, 'Smart Import'));
+        await tester.tap(find.byKey(const Key('smart-import-action')));
         await tester.pumpAndSettle();
         expect(find.text('Review import'), findsOneWidget);
         await back(tester, predictive);
@@ -199,7 +199,9 @@ void main() {
         await tester.tap(find.text('Family pork supper').first);
         await tester.pumpAndSettle();
         final detail = tester.element(find.byType(RecipeDetail));
-        await tester.tap(find.byTooltip('Edit recipe'));
+        await tester.tap(find.byTooltip('Recipe actions'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Edit'));
         await tester.pumpAndSettle();
         await enterFieldText(
           tester,
