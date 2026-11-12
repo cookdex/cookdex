@@ -1,107 +1,123 @@
 # cookdex
-
+ 
 A simple, local-first recipe book with a shopping list that actually adds things up. Android and Windows.
-
+ 
 No account. No ads. No tracking. Your recipes live on your devices.
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/8f0f8c2c-6e05-4df6-b1d7-fb04ee7e8b1a" alt="Recipes" width="260">
-  <img src="https://github.com/user-attachments/assets/65c5bad7-1f4e-4181-914a-8b61af3949d5" alt="Recipe Viewer" width="260">
-  <img src="https://github.com/user-attachments/assets/b3cecb41-f6b0-4f2d-a5c2-674d229666c7" alt="Cook Mode" width="260">
-</p>
+ 
+**[Download the latest release](https://github.com/cookdex/cookdex/releases/latest)**
+ 
+<table>
+  <tr>
+    <td align="center"><img src="https://github.com/user-attachments/assets/90d5cefa-2d36-40ee-b3d3-fc5ff0af29d0" width="180" alt="Recipes list in Cards view"><br><sub>Your recipes</sub></td>
+    <td align="center"><img src="https://github.com/user-attachments/assets/c263088b-00ea-4d0d-b4fb-eaa400a4cf56" width="180" alt="A recipe with ingredient sections, scaled to 2×"><br><sub>A recipe at 2×</sub></td>
+    <td align="center"><img src="https://github.com/user-attachments/assets/4563a4c7-0380-4774-b18c-3d213e6dd591" width="180" alt="Cook mode with the current step highlighted"><br><sub>Cook mode</sub></td>
+    <td align="center"><img src="https://github.com/user-attachments/assets/dee3aec9-089f-4949-b088-3a335ee2ec37" width="180" alt="Shopping list grouped by aisle, with amounts combined across recipes"><br><sub>Shopping list</sub></td>
+  </tr>
+</table>
 
 ## Features
+ 
+- **Add recipes your way.** Type them, paste them, or let Smart Import read a website, a YouTube video, photos of a recipe card or pasted text.
+- **Smart Create.** Turn a craving, the ingredients you have or photos of your kitchen into meal ideas, then get the full recipe.
+- **A shopping list that adds things up.** Amounts combine across recipes, items sort by store aisle, and each item shows which recipes need it.
+- **Cook mode.** Check off ingredients, follow the highlighted step, scale from 0.5× to 5×, and keep the screen awake.
+- **Find anything.** Search that handles typos, accents and plurals, plus tags, favorites, and card or compact views.
+- **Keep it organized.** Ingredient sections like Sauce or Topping, bold step labels, sources that credit a website, cookbook or family member, and tools to rename or merge ingredients and tags.
+- **Your devices, your data.** Encrypted Wi-Fi sync between your own devices, automatic snapshots, recipe ZIP backups, Android backup and phone transfer, and a readable cookbook export.
+- **Share recipes.** Send a cookdex recipe file or plain text, and add recipes people send you.
 
-- **Add recipes your way**: type them in, paste them, or use **Smart Import** to turn pasted text, a link, or a photo of a handwritten recipe card into a clean recipe (uses your own Gemini API key).
-- **Recipe sections**: keep the marinade, sauce, and main dish separate in the recipe.
-- **Smart shopping list**: add ingredients from any recipe, with quantities combined and items sorted into store categories.
-- **Favorites, tags, search, and card or compact views.**
-- **Cook mode and scaling**: adjust servings, check off ingredients, and keep the screen awake while cooking.
-- **Share recipes**: send one recipe or a selection as readable text, or import shared recipe files.
-- **Sync between your own devices** over your home Wi-Fi. Encrypted, no cloud, no account.
-- **Backups**: automatic snapshots on each device, plus ZIP backup/restore and a readable cookbook export.
+## See it in action
+ 
+<table>
+  <tr>
+    <td align="center"><img src="https://github.com/user-attachments/assets/99d1457e-34f9-4f49-8ffc-a21e56b4efda" width="240" alt="Smart Create turning a craving into a saved recipe"><br><sub><b>Smart Create</b><br>From a craving to a saved recipe</sub></td>
+    <td align="center"><img src="https://github.com/user-attachments/assets/5944870e-5b15-4083-8083-82bfb000809a" width="240" alt="Smart Import reading both sides of a handwritten recipe card"><br><sub><b>Smart Import</b><br>Both sides of a recipe card</sub></td>
+    <td align="center"><img src="https://github.com/user-attachments/assets/9be7e3cf-de4f-4f5d-a12c-6970e415ca0d" width="240" alt="Doubling a recipe, adding it to the shopping list and checking items off"><br><sub><b>Shopping list</b><br>Double it, add it, check it off</sub></td>
+  </tr>
+</table>
+<sub>Gemini waits are shortened to about one second.</sub>
+ 
+## Smart features
+ 
+Smart Import’s AI help and Smart Create use your own Gemini API key from Google. Gemini has a free tier.
+ 
+<table>
+  <tr>
+    <td align="center"><img src="https://github.com/user-attachments/assets/bbfcd601-307e-4a6a-ad74-a35a91f7f2d9" width="240" alt="Smart Import review screen with AI guesses marked"><br><sub>Smart Import marks what the AI guessed</sub></td>
+    <td align="center"><img src="https://github.com/user-attachments/assets/0b37dfb9-8586-4c37-849d-187e1ce09e9b" width="240" alt="Smart Create ideas with one idea open"><br><sub>Smart Create ideas</sub></td>
+  </tr>
+</table>
+- **Smart Import** reads websites, YouTube videos and Shorts, up to 8 photos of a recipe, or pasted text. It marks anything the AI estimated or wrote, so you can check it before saving. Without a key, it still reads cookdex files and the recipe details many websites include.
+- **Smart Create** suggests dishes from your ingredients, kitchen photos or a craving. Each idea shows what you have, what you’d need to buy and estimated calories per serving. Pick one, and Gemini writes the full recipe for you to review.
+- **Getting a key:** create one in [Google AI Studio](https://aistudio.google.com/apikey), then add it in Settings > Smart features > Gemini key. Google requires you to be 18 or older to use the Gemini API.
+- **On the free tier,** Google may use what you send to improve its products, and people may review it, so don’t send anything personal. On a paid plan, Google says it doesn’t use your requests to improve its products. See [Google’s Gemini API terms](https://ai.google.dev/gemini-api/terms).
 
 ## Privacy
-
-cookdex only goes online when you do one of these:
-
-- **Sync** with your own paired devices on the same network.
-- **Import from a link.** cookdex downloads the recipe page itself, HTTPS sites only.
-- **Use Smart Import.** The text, photo, or page you're importing is sent to Google Gemini using your own API key.
-- **Check for updates.** Only when you tap Check for updates in Settings > About, or turn on daily checks, cookdex asks GitHub for the latest version. Nothing about you or your recipes is sent.
-
-There's no analytics, crash reporting, or advertising code.
-
-**About Gemini's free tier:** if you use a free Gemini API key, Google may use what you send to improve its products, and human reviewers may read it. A paid Gemini key avoids this, and so does living in the EEA, UK, or Switzerland. Don't Smart Import anything you'd consider private on a free key. See [Google's current terms](https://ai.google.dev/gemini-api/terms).
-
-Your Gemini key is stored securely on your device (Android Keystore / Windows Credential Manager). It's never included in backups or sync.
-
+ 
+cookdex collects no data for itself: there’s no account, analytics, crash reporting or advertising code. Your recipes stay on your devices. Information leaves your device only when a feature needs it:
+ 
+- **Smart Import and Smart Create** send what you give them to Google’s Gemini, using your key.
+- **Importing a website or YouTube video** downloads that page. If a site blocks cookdex and Use AI for this link is on, Gemini opens the page instead.
+- **Sync** goes directly to your paired devices over your local network, encrypted.
+- **Update checks**, if you turn them on, ask GitHub for the latest release.
+- **Android backup**, when it’s on and your phone has a screen lock, keeps an encrypted copy in your Google account.
+Your Gemini key is stored in Android Keystore or Windows Credential Manager. It’s never included in backups, exports or sync, and neither are your sync pairings. In the app, How cookdex works lists exactly what each feature sends.
+ 
 ## Install
-
+ 
 ### Android
-
-Most phones from the last several years are supported (64-bit ARM).
-
-1. Download the latest `cookdex-x.y.z-build.apk` from [Releases](https://github.com/cookdex/cookdex/releases).
-2. Open it. If Android asks, allow your browser or Files app to install unknown apps.
-3. If Play Protect warns about an unrecognized app or offers to scan it, that's normal for any app that isn't from the Play Store. Let it scan, then install.
-
-**Updating:** install the newer APK over the top. Your recipes stay put.
-
-**Update notices:** turn on Check automatically in Settings > About, and cookdex will let you know when a new version is out.
-
-**Automatic updates:** add `https://github.com/cookdex/cookdex` to [Obtainium](https://github.com/ImranR98/Obtainium) and it will notify you about new releases and install them.
-
+ 
+1. Download the APK from the [latest release](https://github.com/cookdex/cookdex/releases/latest).
+2. Open it, and allow installing from your browser or Files app when Android asks.
+3. Play Protect may show a warning because cookdex isn’t from Google Play. Choose the option to install anyway.
+To get updates automatically, you can track releases with [Obtainium](https://github.com/ImranR98/Obtainium).
+ 
 ### Windows (64-bit)
-
-1. Download `cookdex-windows-x.y.z-build.zip` from [Releases](https://github.com/cookdex/cookdex/releases).
-2. Unzip it somewhere permanent, like `Documents\cookdex`. Keep all the files together.
-3. Run cookdex from that folder. If Windows says "Windows protected your PC," click **More info → Run anyway**. That happens because the app isn't code-signed.
-
-**Updating:** replace the folder with the new one. Your recipes are stored separately in your Windows user data, so they aren't affected.
-
-**Update notices:** turn on Check automatically in Settings > About, and cookdex will let you know when a new version is out.
-
+ 
+<img src="https://github.com/user-attachments/assets/f7aaa028-ab75-4bc4-b64c-664733cf81ab" width="720" alt="cookdex on Windows, showing a recipe with its steps, notes and source">
+1. Download the Windows ZIP from the [latest release](https://github.com/cookdex/cookdex/releases/latest).
+2. Right-click it, choose Extract All, and extract it to a folder you’ll keep.
+3. In the extracted folder, double-click Create shortcut.cmd to make a cookdex shortcut, or run cookdex.exe directly.
+Windows SmartScreen may warn you because cookdex isn’t code-signed. Choose More info, then Run anyway.
+ 
+### Updating
+ 
+- **Android:** install the new APK over the old one. Your recipes and settings stay.
+- **Windows:**
+  1. Close cookdex, download the new ZIP and choose Extract All.
+  2. Extract it to the folder that holds your current cookdex folder, so the old and new versions sit side by side.
+  3. In the new folder, double-click Create shortcut.cmd to point your shortcut at the new version. If you copied the shortcut to your desktop, replace that copy too.
+  4. Open cookdex and check the version in Settings > About. Your recipes and settings live with your Windows account, not in the app folder, so once they show up you can delete the old folder.
+- **If you sync,** update every paired device. They stay paired, and a device on an older version shows Update needed until it’s updated too.
+Downloading a recipe ZIP before an update is a good habit.
+ 
 ## Using cookdex
-
-### Smart Import
-
-Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/) and paste it into cookdex's settings. Photo import works on Android only for now.
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/2146e28a-bacf-4755-b1a6-89a229ea5844" alt="Smart Import" width="250">
-  <img src="https://github.com/user-attachments/assets/f6d2c0d3-5728-46cd-a762-e4372937acf7" alt="Smart Import Settings" width="250">
-</p>
-
-### Syncing your devices
-
-- Both devices need cookdex open on the same Wi-Fi. On Android, the app has to be on screen.
-- Pair once: create an invitation on one device, then scan its QR code (or paste it) on the other.
-- On Android 17 and later, allow the local network permission when asked. Sync needs it.
-- **Only pair devices you own.** A paired device can change or delete any recipe.
-
-### Backups
-
-- Each device keeps automatic snapshots: one per day for a week, then one per week for a month. Find them in **Settings → Backup & restore → Snapshots**.
-- Snapshots live on that device. Export a ZIP backup now and then and keep it somewhere else.
-- Sync is not a backup. A deletion on one device syncs to the others.
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/dda12047-0a02-4eaa-98e1-bbea2c1c4c42" alt="Settings" width="250">
-</p>
+ 
+How cookdex works, in Settings, covers everything in detail. The essentials:
+ 
+- **Syncing your devices:** both devices need cookdex open on the same Wi-Fi. Pair once by scanning a QR code (Android) or pasting an invitation. On Android 17 and later, allow the local network permission. Only pair devices you own: edits and deletions reach every paired device.
+- **Backups:** cookdex keeps daily snapshots for a week and weekly ones for a month, in Settings > Backup & restore > Snapshots. For a copy you control, download a recipe ZIP. Sync isn’t a backup: a deletion on one device syncs to the others.
+- **Moving to a new phone:** download a recipe ZIP on the old phone first. Install cookdex on the new one; Android may bring your data along from its backup. If it doesn’t, restore the ZIP or pair with a device that has your recipes. Then add your Gemini key and pair your devices again.
 
 ## Known limitations
-
-- Sync only works while both apps are open on the same network.
+ 
+- Sync only works while cookdex is open on both devices, on the same network. On Android, keep it on screen.
+- The AI features need your own Gemini key.
+- Gemini can watch YouTube videos up to 15 minutes long. Longer videos import only from a recipe written in the description or a linked recipe page.
+- cookdex can’t import from TikTok, Instagram, Threads, Facebook, X, Reddit or Pinterest.
+- Some recipe sites block imports. With Use AI for this link on, Gemini can often open them anyway.
 - Smart Import from photos is Android-only.
-- Some recipe sites can't be imported from a link, including sites without HTTPS. Copy and paste the recipe text instead.
-- No iPhone or web version.
+- There’s no iPhone or web version.
 
 ## Built with AI
-
-cookdex was built by a non-developer using AI coding tools: mostly OpenAI's Codex, with Claude for planning. The ideas, testing, and decisions are human. The code has had an AI-assisted security review with the findings fixed, but no professional audit.
-
+ 
+cookdex was built by a non-developer using AI coding tools: mostly OpenAI’s Codex, with Claude for planning and reviews. The ideas, testing and decisions are human. The code has had an AI-assisted security review with the findings fixed, but no professional audit.
+ 
 ## Feedback and security issues
-
-- **Bugs and ideas:** open an [Issue](https://github.com/cookdex/cookdex/issues).
-- **Security problems:** please report them privately using **Report a vulnerability** on the repo's Security tab, not as a public issue.
+ 
+Found a bug or have an idea? [Open an issue](https://github.com/cookdex/cookdex/issues). Copy app info, at the end of How cookdex works, adds your app version and device to your report.
+ 
+Please report security problems privately through the repository’s [Security tab](https://github.com/cookdex/cookdex/security), not in a public issue.
 
 ## Verifying downloads
 
