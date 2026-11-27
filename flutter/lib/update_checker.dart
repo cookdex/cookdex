@@ -1,4 +1,7 @@
 import 'dart:async';
+
+import 'interaction_idle.dart';
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -99,15 +102,19 @@ class GitHubReleaseSource implements ReleaseSource {
       ..userAgent = 'cookdex-update-checker'
       ..connectionTimeout = timeout;
     _clients.add(client);
+    late List<int> bytes;
     try {
-      return await _read(client).timeout(timeout);
+      bytes = await _read(client).timeout(timeout);
     } finally {
       _clients.remove(client);
       client.close(force: true);
     }
+    if (InteractionIdle.instance.busy) await InteractionIdle.instance.idle;
+    if (_closed) throw StateError('Closed');
+    return PublishedRelease.fromJson(jsonDecode(utf8.decode(bytes)));
   }
 
-  Future<PublishedRelease?> _read(HttpClient client) async {
+  Future<List<int>> _read(HttpClient client) async {
     final request = await client.getUrl(endpoint);
     request.followRedirects = false;
     request.headers.set(
@@ -127,9 +134,7 @@ class GitHubReleaseSource implements ReleaseSource {
       }
       bytes.add(chunk);
     }
-    return PublishedRelease.fromJson(
-      jsonDecode(utf8.decode(bytes.takeBytes())),
-    );
+    return bytes.takeBytes();
   }
 
   @override
@@ -241,8 +246,22 @@ class UpdateController extends ChangeNotifier {
     }
     final completion = Completer<void>();
     _flight = completion.future;
+    final generation = _automaticGeneration;
+    Future<void> perform() async {
+      if (InteractionIdle.instance.busy) await InteractionIdle.instance.idle;
+      if (_disposed ||
+          (automatic &&
+              (!_ready ||
+                  !_active ||
+                  !preferences.checkUpdatesAutomatically ||
+                  generation != _automaticGeneration))) {
+        return;
+      }
+      await _check(automatic, generation);
+    }
+
     unawaited(
-      _check(automatic, _automaticGeneration).whenComplete(() {
+      perform().whenComplete(() {
         _flight = null;
         _schedule();
         completion.complete();
@@ -271,7 +290,11 @@ class UpdateController extends ChangeNotifier {
       if (_disposed || (automatic && generation != _automaticGeneration)) {
         return;
       }
-      final result = await _source.latest();
+      final result = await InteractionIdle.asynchronous(
+        'update-check',
+        _source.latest,
+      );
+      if (InteractionIdle.instance.busy) await InteractionIdle.instance.idle;
       if (_disposed || (automatic && generation != _automaticGeneration)) {
         return;
       }
@@ -293,6 +316,7 @@ class UpdateController extends ChangeNotifier {
             : release;
       }
     } catch (_) {
+      if (InteractionIdle.instance.busy) await InteractionIdle.instance.idle;
       if (!_disposed && (!automatic || generation == _automaticGeneration)) {
         state = UpdateCheckState.error;
         release = null;

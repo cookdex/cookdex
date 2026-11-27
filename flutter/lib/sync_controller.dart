@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'interaction_idle.dart';
+
 import 'package:flutter/foundation.dart';
 
 import 'recipe_store.dart';
@@ -162,7 +164,9 @@ class SyncController extends ChangeNotifier {
     if (_closed || _polling) return;
     _polling = true;
     try {
-      status = await backend.status();
+      if (InteractionIdle.instance.busy) await InteractionIdle.instance.idle;
+      if (_closed) return;
+      status = await InteractionIdle.asynchronous('sync-poll', backend.status);
       if (currentGeneration == null ||
           status?.generation != currentGeneration!()) {
         await refreshRecipes();

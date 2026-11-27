@@ -298,6 +298,71 @@ class _RetainedTabTransitionState extends State<RetainedTabTransition>
   int? _outgoing;
   late final _mountedTabs = <int>{widget.index};
   Timer? _warmTimer;
+  bool _warmReady = false, _warmQueued = false;
+  int _warmGeneration = 0;
+  final _contacts = <int>{};
+  // Readiness may stay false for this transition's entire lifetime. Weak
+  // entries never keep a removed nested scroller alive while warming is off.
+  final _scrolling = <int, List<WeakReference<ScrollableState>>>{};
+
+  bool get _hasUnwarmed => _mountedTabs.length < widget.children.length;
+
+  void _cancelWarmUp() {
+    _warmGeneration++;
+    _warmTimer?.cancel();
+    _warmTimer = null;
+    _warmReady = _warmQueued = false;
+  }
+
+  void _pruneScrolling() {
+    // Disposing a position does not emit ScrollEnd. Inspect live state on
+    // naturally occurring frames, including the frame that removes a scroller.
+    for (final entries in _scrolling.values) {
+      entries.removeWhere((entry) {
+        final state = entry.target;
+        return state == null ||
+            !state.mounted ||
+            !state.position.isScrollingNotifier.value;
+      });
+    }
+  }
+
+  bool get _currentTabScrolling {
+    _pruneScrolling();
+    return _scrolling[widget.index]?.isNotEmpty ?? false;
+  }
+
+  bool _scrollActivity(int tab, ScrollNotification notification) {
+    if (!_hasUnwarmed) {
+      _scrolling.clear();
+      return false;
+    }
+    if (notification is! ScrollStartNotification &&
+        notification is! ScrollEndNotification) {
+      return false;
+    }
+    final context = notification.context;
+    if (context == null) return false;
+    final state = Scrollable.maybeOf(context);
+    _pruneScrolling();
+    if (notification is ScrollStartNotification) {
+      if (state != null) {
+        final entries = _scrolling[tab] ??= [];
+        if (!entries.any((entry) => identical(entry.target, state))) {
+          entries.add(WeakReference(state));
+        }
+      }
+    } else if (notification is ScrollEndNotification) {
+      _scrolling[tab]?.removeWhere((entry) => identical(entry.target, state));
+      _warmNextAfterFrame(requestFrame: true);
+    }
+    return false;
+  }
+
+  void _endContact(int pointer) {
+    _contacts.remove(pointer);
+    _warmNextAfterFrame(requestFrame: true);
+  }
 
   @override
   void initState() {
@@ -306,35 +371,60 @@ class _RetainedTabTransitionState extends State<RetainedTabTransition>
   }
 
   void _startWarmUp() {
-    // Leave the first populated library frame and startup cover time to settle.
+    _cancelWarmUp();
+    if (!widget.readyToWarm || !_hasUnwarmed) return;
+    final generation = _warmGeneration;
+    // Preserve the initial populated-library/cover settling delay.
     _warmTimer = Timer(const Duration(milliseconds: 300), () {
-      _warmNextAfterFrame();
-      WidgetsBinding.instance.ensureVisualUpdate();
+      if (!mounted || generation != _warmGeneration || !widget.readyToWarm) {
+        return;
+      }
+      _warmTimer = null;
+      _warmReady = true;
+      _warmNextAfterFrame(requestFrame: true);
     });
   }
 
-  void _warmNextAfterFrame() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (WidgetsBinding.instance.transientCallbackCount > 0) {
-        // The running animation already requested the next frame.
-        _warmNextAfterFrame();
-        return;
-      }
-      for (var i = 0; i < widget.children.length; i++) {
-        if (_mountedTabs.add(i)) {
-          setState(() {});
+  void _warmNextAfterFrame({bool requestFrame = false}) {
+    if (!mounted || !widget.readyToWarm || !_warmReady || !_hasUnwarmed) return;
+    if (!_warmQueued) {
+      _warmQueued = true;
+      final generation = _warmGeneration;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || generation != _warmGeneration) return;
+        _warmQueued = false;
+        if (!widget.readyToWarm || !_warmReady || !_hasUnwarmed) return;
+        if (_contacts.isNotEmpty ||
+            _currentTabScrolling ||
+            WidgetsBinding.instance.transientCallbackCount > 0) {
+          // Wait for a natural frame. Never drive frames or a retry timer just
+          // because the user is holding/scrolling a destination.
           _warmNextAfterFrame();
-          break;
+          return;
         }
-      }
-    });
+        for (var i = 0; i < widget.children.length; i++) {
+          if (_mountedTabs.add(i)) {
+            setState(() {});
+            _warmNextAfterFrame();
+            break;
+          }
+        }
+        if (!_hasUnwarmed) _scrolling.clear();
+      });
+    }
+    if (requestFrame) WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override
   void didUpdateWidget(RetainedTabTransition oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.readyToWarm && !oldWidget.readyToWarm) _startWarmUp();
+    if (widget.readyToWarm != oldWidget.readyToWarm) {
+      if (widget.readyToWarm) {
+        _startWarmUp();
+      } else {
+        _cancelWarmUp();
+      }
+    }
     if (oldWidget.index != widget.index) {
       _mountedTabs.add(widget.index);
       if (MediaQuery.disableAnimationsOf(context)) {
@@ -344,6 +434,8 @@ class _RetainedTabTransitionState extends State<RetainedTabTransition>
         _outgoing = oldWidget.index;
         _animation.forward(from: 0);
       }
+      if (!_hasUnwarmed) _scrolling.clear();
+      _warmNextAfterFrame(requestFrame: true);
     }
   }
 
@@ -359,70 +451,83 @@ class _RetainedTabTransitionState extends State<RetainedTabTransition>
 
   @override
   void dispose() {
-    _warmTimer?.cancel();
+    _cancelWarmUp();
+    _contacts.clear();
+    _scrolling.clear();
     _animation.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _animation,
-    builder: (context, _) {
-      final progress = _animation.value;
-      final incoming = const Interval(
-        .35,
-        .90,
-        curve: Curves.easeOutCubic,
-      ).transform(progress);
-      final outgoing = 1 - const Interval(0, .35).transform(progress);
-      final preview = widget.backProgress;
-      final previewAmount = MediaQuery.disableAnimationsOf(context)
-          ? 0.0
-          : preview ?? 0.0;
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          for (var i = 0; i < widget.children.length; i++)
-            if (!_mountedTabs.contains(i))
-              const SizedBox.shrink()
-            else
-              Offstage(
-                offstage: preview != null
-                    ? i != widget.index && i != 0
-                    : i != widget.index && i != _outgoing,
-                child: TickerMode(
-                  enabled: i == widget.index,
-                  child: IgnorePointer(
-                    ignoring: i != widget.index,
-                    child: ExcludeSemantics(
-                      excluding: i != widget.index,
-                      child: Opacity(
-                        opacity: preview != null
-                            ? 1
-                            : i == widget.index
-                            ? incoming
-                            : outgoing,
-                        child: Transform.translate(
-                          offset: i == widget.index
-                              ? Offset(
-                                  (widget.backFromRight ? -1 : 1) *
-                                      28 *
-                                      previewAmount,
-                                  0,
-                                )
-                              : Offset.zero,
-                          child: ClipRRect(
-                            clipBehavior: previewAmount == 0
-                                ? Clip.none
-                                : Clip.antiAlias,
-                            borderRadius: BorderRadius.circular(
-                              i == widget.index ? 24 * previewAmount : 0,
-                            ),
-                            child: ColoredBox(
-                              color: Theme.of(context).scaffoldBackgroundColor,
-                              child: RetainedScreen(
-                                visible: i == widget.index,
-                                child: widget.children[i],
+  Widget build(BuildContext context) => Listener(
+    onPointerDown: (event) => _contacts.add(event.pointer),
+    onPointerUp: (event) => _endContact(event.pointer),
+    onPointerCancel: (event) => _endContact(event.pointer),
+    child: AnimatedBuilder(
+      animation: _animation,
+      builder: (context, _) {
+        final progress = _animation.value;
+        final incoming = const Interval(
+          .35,
+          .90,
+          curve: Curves.easeOutCubic,
+        ).transform(progress);
+        final outgoing = 1 - const Interval(0, .35).transform(progress);
+        final preview = widget.backProgress;
+        final previewAmount = MediaQuery.disableAnimationsOf(context)
+            ? 0.0
+            : preview ?? 0.0;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            for (var i = 0; i < widget.children.length; i++)
+              if (!_mountedTabs.contains(i))
+                const SizedBox.shrink()
+              else
+                Offstage(
+                  offstage: preview != null
+                      ? i != widget.index && i != 0
+                      : i != widget.index && i != _outgoing,
+                  child: TickerMode(
+                    enabled: i == widget.index,
+                    child: IgnorePointer(
+                      ignoring: i != widget.index,
+                      child: ExcludeSemantics(
+                        excluding: i != widget.index,
+                        child: Opacity(
+                          opacity: preview != null
+                              ? 1
+                              : i == widget.index
+                              ? incoming
+                              : outgoing,
+                          child: Transform.translate(
+                            offset: i == widget.index
+                                ? Offset(
+                                    (widget.backFromRight ? -1 : 1) *
+                                        28 *
+                                        previewAmount,
+                                    0,
+                                  )
+                                : Offset.zero,
+                            child: ClipRRect(
+                              clipBehavior: previewAmount == 0
+                                  ? Clip.none
+                                  : Clip.antiAlias,
+                              borderRadius: BorderRadius.circular(
+                                i == widget.index ? 24 * previewAmount : 0,
+                              ),
+                              child: ColoredBox(
+                                color: Theme.of(context)
+                                    .scaffoldBackgroundColor,
+                                child: RetainedScreen(
+                                  visible: i == widget.index,
+                                  child:
+                                      NotificationListener<ScrollNotification>(
+                                        onNotification: (notification) =>
+                                            _scrollActivity(i, notification),
+                                        child: widget.children[i],
+                                      ),
+                                ),
                               ),
                             ),
                           ),
@@ -431,10 +536,10 @@ class _RetainedTabTransitionState extends State<RetainedTabTransition>
                     ),
                   ),
                 ),
-              ),
-        ],
-      );
-    },
+          ],
+        );
+      },
+    ),
   );
 }
 

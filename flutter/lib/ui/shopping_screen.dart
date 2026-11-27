@@ -15,12 +15,16 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../recipe_store.dart';
+import '../staples.dart';
 import '../src/rust/api.dart';
 import 'components.dart';
 import 'feedback.dart';
 import 'facelift_motion.dart';
 import 'facelift_tokens.dart';
 import 'navigation_feedback.dart';
+import 'recipes_on_list_screen.dart';
+import 'staples_screen.dart';
+import 'window_size.dart';
 
 String _message(Object error) =>
     error is ServiceError ? error.message : 'Could not update shopping list.';
@@ -674,6 +678,21 @@ class _ShoppingScreenState extends State<ShoppingScreen>
     if (_editingLocked) return;
     final items = widget.store.shopping;
     switch (choice) {
+      case 'staples':
+        await openStaples(context, store: widget.store);
+        if (mounted) setState(_resetPlacements);
+      case 'recipes':
+        final removal = await showRecipesOnList(context, store: widget.store);
+        if (!mounted) return;
+        setState(_resetPlacements);
+        if (removal != null) {
+          _shoppingUndo(
+            _messenger.currentState!,
+            widget.store,
+            removal.undo,
+            '${removal.title} removed from list',
+          );
+        }
       case 'categories':
         await Navigator.of(context).push(
           cookdexRoute<void>(
@@ -951,311 +970,359 @@ class _ShoppingScreenState extends State<ShoppingScreen>
       );
     }
 
-    return ScaffoldMessenger(
-      key: _messenger,
-      child: Scaffold(
-        key: _scaffold,
-        body: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              TabHeading(
-                title: const Text('Shopping list'),
-                subtitle: Text(
-                  '$remaining ${remaining == 1 ? 'item' : 'items'}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                action: PopupMenuButton<String>(
-                  icon: const Icon(Symbols.more_vert),
-                  tooltip: 'Shopping list options',
-                  enabled: !_editingLocked,
-                  onSelected: _menu,
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(
-                      value: 'categories',
-                      child: Text('Categories'),
-                    ),
-                    PopupMenuItem(
-                      value: 'check',
-                      enabled: items.any((item) => !item.checked),
-                      child: const Text('Check all'),
-                    ),
-                    PopupMenuItem(
-                      value: 'uncheck',
-                      enabled: items.any((item) => item.checked),
-                      child: const Text('Uncheck all'),
-                    ),
-                    PopupMenuItem(
-                      value: 'checked',
-                      enabled: items.any((item) => item.checked),
-                      child: const Text('Clear checked'),
-                    ),
-                    PopupMenuItem(
-                      value: 'save',
-                      enabled: items.isNotEmpty,
-                      child: const Text('Save list as text'),
-                    ),
-                    PopupMenuItem(
-                      value: 'clear',
-                      enabled: items.isNotEmpty,
-                      child: Text(
-                        'Clear entire list',
-                        style: TextStyle(
-                          color: mutedDeleteColor(
-                            Theme.of(context).colorScheme,
-                          ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final side = widePageSideInset(context, constraints.maxWidth);
+        final inset = side - 16;
+        return ScaffoldMessenger(
+          key: _messenger,
+          child: Scaffold(
+            key: _scaffold,
+            body: SafeArea(
+              bottom: false,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: inset),
+                    child: TabHeading(
+                      title: const Text('Shopping list'),
+                      subtitle: Text(
+                        '$remaining ${remaining == 1 ? 'item' : 'items'}',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
+                      action: PopupMenuButton<String>(
+                        icon: const Icon(Symbols.more_vert),
+                        tooltip: 'Shopping list options',
+                        enabled: !_editingLocked,
+                        onSelected: _menu,
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: 'recipes',
+                            child: Text('Recipes on this list'),
+                          ),
+                          const PopupMenuDivider(),
+                          const PopupMenuItem(
+                            value: 'staples',
+                            child: Text('Staples'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'categories',
+                            child: Text('Categories'),
+                          ),
+                          const PopupMenuDivider(),
+                          PopupMenuItem(
+                            value: 'check',
+                            enabled: items.any((item) => !item.checked),
+                            child: const Text('Check all'),
+                          ),
+                          PopupMenuItem(
+                            value: 'uncheck',
+                            enabled: items.any((item) => item.checked),
+                            child: const Text('Uncheck all'),
+                          ),
+                          PopupMenuItem(
+                            value: 'checked',
+                            enabled: items.any((item) => item.checked),
+                            child: const Text('Clear checked'),
+                          ),
+                          const PopupMenuDivider(),
+                          PopupMenuItem(
+                            value: 'save',
+                            enabled: items.isNotEmpty,
+                            child: const Text('Save list as text'),
+                          ),
+                          const PopupMenuDivider(),
+                          PopupMenuItem(
+                            value: 'clear',
+                            enabled: items.isNotEmpty,
+                            child: Text(
+                              'Clear entire list',
+                              style: TextStyle(
+                                color: mutedDeleteColor(
+                                  Theme.of(context).colorScheme,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Listener(
+                      onPointerMove: (_) {
+                        if (_draggedRow.value != null && !_landingDrop) {
+                          _gapMotion.forward(from: 0);
+                        }
+                      },
+                      onPointerCancel: (_) {
+                        _draggedRow.value = null;
+                      },
+                      child: PixelCustomScrollView(
+                        controller: widget.controller,
+                        slivers: [
+                          for (final sliver in <Widget>[
+                            if (items.isEmpty)
+                              SliverFillRemaining(
+                                hasScrollBody: false,
+                                child: Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const FaceliftIconTile(
+                                          Symbols.shopping_basket,
+                                          size: 56,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          'Add your first shopping item.',
+                                          textAlign: TextAlign.center,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (entries.isNotEmpty)
+                              _PinnedShoppingCategories(
+                                entries: entries,
+                                gapMotion: _gapMotion,
+                                liftedRow: _draggedRow,
+                                dragColor: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainer,
+                                bands: [
+                                  for (final entry in entries)
+                                    if (entry.item == null)
+                                      SliverToBoxAdapter(
+                                        key: ValueKey(
+                                          'pinned-shopping-${entry.categoryId}',
+                                        ),
+                                        child: _categoryHeading(
+                                          entry.categoryId,
+                                          entry.name,
+                                          entry.items,
+                                        ),
+                                      ),
+                                ],
+                                sliver: SliverReorderableList(
+                                  key: const ValueKey(
+                                    'unchecked-shopping-items',
+                                  ),
+                                  itemCount: entries.length,
+                                  onReorderStart: (index) {
+                                    _dragGeneration = widget.store.generation;
+                                    _landingDrop = false;
+                                    _gapMotion.stop();
+                                    _draggedRow.value = entries[index].item?.id;
+                                    HapticFeedback.lightImpact();
+                                  },
+                                  onReorderEnd: (_) {
+                                    // The proxy keeps landing after the finger lifts.
+                                    _landingDrop = true;
+                                    _gapMotion.forward(from: 0).then((_) {
+                                      if (mounted) _draggedRow.value = null;
+                                    });
+                                  },
+                                  proxyDecorator: (child, index, animation) {
+                                    final item = entries[index].item!;
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                      ),
+                                      child: Material(
+                                        key: const ValueKey(
+                                          'shopping-drag-proxy',
+                                        ),
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .surfaceContainerHigh,
+                                        elevation: 3,
+                                        borderRadius: BorderRadius.circular(
+                                          FaceliftTokens.groupRadius,
+                                        ),
+                                        clipBehavior: Clip.antiAlias,
+                                        child: _row(item, dragIndex: index),
+                                      ),
+                                    );
+                                  },
+                                  itemBuilder: buildRow,
+                                  onReorderItem: (oldIndex, newIndex) =>
+                                      _reorderShopping(
+                                        entries,
+                                        oldIndex,
+                                        newIndex,
+                                      ),
+                                ),
+                              ),
+                            if (_allDone != null &&
+                                entries.isEmpty &&
+                                checked.isNotEmpty)
+                              SliverToBoxAdapter(
+                                child: Container(
+                                  margin: const EdgeInsets.fromLTRB(
+                                    16,
+                                    8,
+                                    16,
+                                    0,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primaryContainer,
+                                    borderRadius: BorderRadius.circular(
+                                      FaceliftTokens.groupRadius,
+                                    ),
+                                  ),
+                                  child: Wrap(
+                                    alignment: WrapAlignment.spaceBetween,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
+                                    children: [
+                                      Semantics(
+                                        liveRegion: true,
+                                        child: Text(
+                                          'All done',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium
+                                              ?.copyWith(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onPrimaryContainer,
+                                              ),
+                                        ),
+                                      ),
+                                      TextButton(
+                                        onPressed: _editingLocked
+                                            ? null
+                                            : () => _menu('checked'),
+                                        child: const Text('Clear checked'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            if (checked.isNotEmpty)
+                              SliverToBoxAdapter(
+                                key: const ValueKey('checked-shopping-group'),
+                                child: Container(
+                                  margin: const EdgeInsets.fromLTRB(
+                                    16,
+                                    12,
+                                    16,
+                                    4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainer,
+                                    borderRadius: BorderRadius.circular(
+                                      FaceliftTokens.groupRadius,
+                                    ),
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: ExpansionTile(
+                                    key: const PageStorageKey(
+                                      'checked-shopping-items',
+                                    ),
+                                    onExpansionChanged: (expanded) =>
+                                        _checkedExpanded = expanded,
+                                    title: Text('Checked (${checked.length})'),
+                                    leading: Icon(
+                                      Symbols.check_circle,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary,
+                                    ),
+                                    shape: const Border(),
+                                    collapsedShape: const Border(),
+                                    initiallyExpanded: _checkedExpanded,
+                                    expansionAnimationStyle: AnimationStyle(
+                                      duration: _moveDuration,
+                                      reverseDuration: _moveDuration,
+                                      curve: Curves.easeInOutCubic,
+                                    ),
+                                    children: [
+                                      for (final item in checked)
+                                        _animatedRow(
+                                          item,
+                                          last: item.id == checked.last.id,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ])
+                            SliverPadding(
+                              padding: EdgeInsets.symmetric(horizontal: inset),
+                              sliver: sliver,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            bottomNavigationBar: SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  side,
+                  8,
+                  side,
+                  8 + MediaQuery.viewInsetsOf(context).bottom,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: PixelScrollScope(
+                        axis: Axis.horizontal,
+                        builder: (context) => TextField(
+                          scrollController: PrimaryScrollController.of(context),
+                          controller: _input,
+                          textCapitalization: TextCapitalization.none,
+                          decoration: InputDecoration(
+                            hintText: 'Add an item',
+                            errorText: _inputError,
+                          ),
+                          textInputAction: TextInputAction.done,
+                          onChanged: (_) {
+                            _inputRevision++;
+                            if (_inputError != null) {
+                              setState(() => _inputError = null);
+                            }
+                          },
+                          onSubmitted: (_) => _add(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filled(
+                      tooltip: 'Add item',
+                      onPressed: _add,
+                      icon: const Icon(Symbols.add),
                     ),
                   ],
                 ),
               ),
-              Expanded(
-                child: Listener(
-                  onPointerMove: (_) {
-                    if (_draggedRow.value != null && !_landingDrop) {
-                      _gapMotion.forward(from: 0);
-                    }
-                  },
-                  onPointerCancel: (_) {
-                    _draggedRow.value = null;
-                  },
-                  child: PixelCustomScrollView(
-                    controller: widget.controller,
-                    slivers: [
-                      if (items.isEmpty)
-                        SliverFillRemaining(
-                          hasScrollBody: false,
-                          child: Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const FaceliftIconTile(
-                                    Symbols.shopping_basket,
-                                    size: 56,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    'Add your first shopping item.',
-                                    textAlign: TextAlign.center,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      if (entries.isNotEmpty)
-                        _PinnedShoppingCategories(
-                          entries: entries,
-                          gapMotion: _gapMotion,
-                          liftedRow: _draggedRow,
-                          dragColor: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainer,
-                          bands: [
-                            for (final entry in entries)
-                              if (entry.item == null)
-                                SliverToBoxAdapter(
-                                  key: ValueKey(
-                                    'pinned-shopping-${entry.categoryId}',
-                                  ),
-                                  child: _categoryHeading(
-                                    entry.categoryId,
-                                    entry.name,
-                                    entry.items,
-                                  ),
-                                ),
-                          ],
-                          sliver: SliverReorderableList(
-                            key: const ValueKey('unchecked-shopping-items'),
-                            itemCount: entries.length,
-                            onReorderStart: (index) {
-                              _dragGeneration = widget.store.generation;
-                              _landingDrop = false;
-                              _gapMotion.stop();
-                              _draggedRow.value = entries[index].item?.id;
-                              HapticFeedback.lightImpact();
-                            },
-                            onReorderEnd: (_) {
-                              // The proxy keeps landing after the finger lifts.
-                              _landingDrop = true;
-                              _gapMotion.forward(from: 0).then((_) {
-                                if (mounted) _draggedRow.value = null;
-                              });
-                            },
-                            proxyDecorator: (child, index, animation) {
-                              final item = entries[index].item!;
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                ),
-                                child: Material(
-                                  key: const ValueKey('shopping-drag-proxy'),
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHigh,
-                                  elevation: 3,
-                                  borderRadius: BorderRadius.circular(
-                                    FaceliftTokens.groupRadius,
-                                  ),
-                                  clipBehavior: Clip.antiAlias,
-                                  child: _row(item, dragIndex: index),
-                                ),
-                              );
-                            },
-                            itemBuilder: buildRow,
-                            onReorderItem: (oldIndex, newIndex) =>
-                                _reorderShopping(entries, oldIndex, newIndex),
-                          ),
-                        ),
-                      if (_allDone != null &&
-                          entries.isEmpty &&
-                          checked.isNotEmpty)
-                        SliverToBoxAdapter(
-                          child: Container(
-                            margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .primaryContainer,
-                              borderRadius: BorderRadius.circular(
-                                FaceliftTokens.groupRadius,
-                              ),
-                            ),
-                            child: Wrap(
-                              alignment: WrapAlignment.spaceBetween,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                Semantics(
-                                  liveRegion: true,
-                                  child: Text(
-                                    'All done',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onPrimaryContainer,
-                                        ),
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: _editingLocked
-                                      ? null
-                                      : () => _menu('checked'),
-                                  child: const Text('Clear checked'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      if (checked.isNotEmpty)
-                        SliverToBoxAdapter(
-                          key: const ValueKey('checked-shopping-group'),
-                          child: Container(
-                            margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                            decoration: BoxDecoration(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .surfaceContainer,
-                              borderRadius: BorderRadius.circular(
-                                FaceliftTokens.groupRadius,
-                              ),
-                            ),
-                            clipBehavior: Clip.antiAlias,
-                            child: ExpansionTile(
-                              key: const PageStorageKey(
-                                'checked-shopping-items',
-                              ),
-                              onExpansionChanged: (expanded) =>
-                                  _checkedExpanded = expanded,
-                              title: Text('Checked (${checked.length})'),
-                              leading: Icon(
-                                Symbols.check_circle,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                              shape: const Border(),
-                              collapsedShape: const Border(),
-                              initiallyExpanded: _checkedExpanded,
-                              expansionAnimationStyle: AnimationStyle(
-                                duration: _moveDuration,
-                                reverseDuration: _moveDuration,
-                                curve: Curves.easeInOutCubic,
-                              ),
-                              children: [
-                                for (final item in checked)
-                                  _animatedRow(
-                                    item,
-                                    last: item.id == checked.last.id,
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        bottomNavigationBar: SafeArea(
-          top: false,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              8,
-              16,
-              8 + MediaQuery.viewInsetsOf(context).bottom,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: PixelScrollScope(
-                    axis: Axis.horizontal,
-                    builder: (context) => TextField(
-                      scrollController: PrimaryScrollController.of(context),
-                      controller: _input,
-                      textCapitalization: TextCapitalization.none,
-                      decoration: InputDecoration(
-                        hintText: 'Add an item',
-                        errorText: _inputError,
-                      ),
-                      textInputAction: TextInputAction.done,
-                      onChanged: (_) {
-                        _inputRevision++;
-                        if (_inputError != null) {
-                          setState(() => _inputError = null);
-                        }
-                      },
-                      onSubmitted: (_) => _add(),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  tooltip: 'Add item',
-                  onPressed: _add,
-                  icon: const Icon(Symbols.add),
-                ),
-              ],
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -1949,12 +2016,28 @@ Future<void> showShoppingSelection(
   Recipe recipe, {
   int scale = 2,
 }) async {
-  final undo = await showDialog<ShoppingUndo>(
+  final added = await showDialog<bool>(
     context: context,
     builder: (_) =>
-        _ShoppingSelection(store: store, recipe: recipe, scale: scale),
+        _ShoppingSelection(store: store, recipes: [recipe], scale: scale),
   );
-  if (undo != null && context.mounted) {
+  if (added == true && context.mounted) {
+    showFeedback(context, 'Added to shopping list');
+  }
+}
+
+Future<void> showBatchShoppingSelection(
+  BuildContext context,
+  RecipeStore store,
+  List<Recipe> recipes,
+) async {
+  if (recipes.isEmpty) return;
+  final added = await showDialog<bool>(
+    context: context,
+    builder: (_) =>
+        _ShoppingSelection(store: store, recipes: recipes, scale: 2),
+  );
+  if (added == true && context.mounted) {
     showFeedback(context, 'Added to shopping list');
   }
 }
@@ -1962,20 +2045,32 @@ Future<void> showShoppingSelection(
 class _ShoppingSelection extends StatefulWidget {
   const _ShoppingSelection({
     required this.store,
-    required this.recipe,
+    required this.recipes,
     required this.scale,
   });
   final int scale;
   final RecipeStore store;
-  final Recipe recipe;
+  final List<Recipe> recipes;
   @override
   State<_ShoppingSelection> createState() => _ShoppingSelectionState();
 }
 
 class _ShoppingSelectionState extends State<_ShoppingSelection> {
-  late final _selected = {
-    for (var i = 0; i < widget.recipe.fields.ingredients.length; i++) i,
+  late final _rows = [
+    for (final recipe in widget.recipes)
+      for (final (index, ingredient) in recipe.fields.ingredients.indexed)
+        (recipe: recipe, index: index, ingredient: ingredient),
+  ];
+  late final _staples = {
+    for (var i = 0; i < _rows.length; i++)
+      if (isStaple(_rows[i].ingredient.name, widget.store.preferences.staples))
+        i,
   };
+  late final _selected = {
+    for (var i = 0; i < _rows.length; i++)
+      if (!_staples.contains(i)) i,
+  };
+  final _added = <int>{};
   List<String>? _amounts;
   bool _busy = false;
   String? _error;
@@ -1987,14 +2082,18 @@ class _ShoppingSelectionState extends State<_ShoppingSelection> {
 
   Future<void> _loadAmounts() async {
     try {
-      final amounts = widget.scale == 2
-          ? await widget.store.repository.ingredientAmounts(
-              widget.recipe.fields.ingredients,
-            )
-          : (await (widget.store.repository as ScalingRepository).scaleRecipe(
-              widget.recipe.fields,
-              widget.scale,
-            )).quantities;
+      final amounts = <String>[];
+      for (final recipe in widget.recipes) {
+        amounts.addAll(
+          widget.scale == 2
+              ? await widget.store.repository.ingredientAmounts(
+                  recipe.fields.ingredients,
+                )
+              : (await (widget.store.repository as ScalingRepository)
+                        .scaleRecipe(recipe.fields, widget.scale))
+                    .quantities,
+        );
+      }
       if (mounted) setState(() => _amounts = amounts);
     } catch (_) {
       if (mounted) {
@@ -2010,13 +2109,19 @@ class _ShoppingSelectionState extends State<_ShoppingSelection> {
       _error = null;
     });
     try {
-      final indices = _selected.toList()..sort();
-      final undo = await widget.store.addShopping(
-        widget.recipe.id,
-        indices,
-        scale: widget.scale,
-      );
-      if (mounted) Navigator.pop(context, undo);
+      for (final recipe in widget.recipes) {
+        final selected =
+            _selected.where((i) => _rows[i].recipe.id == recipe.id).toList()
+              ..sort();
+        if (selected.isEmpty) continue;
+        await widget.store.addShopping(recipe.id, [
+          for (final i in selected) _rows[i].index,
+        ], scale: widget.scale);
+        // A failed later recipe can be retried without adding earlier ones twice.
+        _added.addAll(selected);
+        _selected.removeAll(selected);
+      }
+      if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (mounted) setState(() => _error = _message(error));
     } finally {
@@ -2026,7 +2131,17 @@ class _ShoppingSelectionState extends State<_ShoppingSelection> {
 
   @override
   Widget build(BuildContext context) {
-    final ingredients = widget.recipe.fields.ingredients;
+    final ingredients = _rows.map((row) => row.ingredient).toList();
+    String marker(int index, String label) {
+      final ingredient = ingredients[index];
+      final hasDetails =
+          (_amounts?[index].isNotEmpty ?? false) ||
+          (widget.scale == 2 && ingredient.unit.isNotEmpty) ||
+          ingredient.prepNote.isNotEmpty ||
+          ingredient.optional;
+      return '${hasDetails ? ' · ' : ''}$label';
+    }
+
     return PopScope(
       canPop: !_busy,
       child: AlertDialog(
@@ -2044,7 +2159,10 @@ class _ShoppingSelectionState extends State<_ShoppingSelection> {
                         ? null
                         : () => setState(
                             () => _selected.addAll(
-                              List.generate(ingredients.length, (i) => i),
+                              List.generate(
+                                ingredients.length,
+                                (i) => i,
+                              ).where((i) => !_added.contains(i)),
                             ),
                           ),
                     child: const Text('Select all'),
@@ -2065,6 +2183,13 @@ class _ShoppingSelectionState extends State<_ShoppingSelection> {
                     ),
                   ),
                 ),
+              if (_error != null && _added.isNotEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: Text(
+                    'Some items were added. Retry adds only the remaining selection.',
+                  ),
+                ),
               if (_amounts == null && _error == null)
                 const LinearProgressIndicator(),
               Flexible(
@@ -2072,8 +2197,19 @@ class _ShoppingSelectionState extends State<_ShoppingSelection> {
                   child: Column(
                     children: [
                       for (var i = 0; i < ingredients.length; i++) ...[
+                        if (widget.recipes.length > 1 && _rows[i].index == 0)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                              child: Text(
+                                _rows[i].recipe.fields.title,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ),
+                          ),
                         if (ingredients[i].section.isNotEmpty &&
-                            (i == 0 ||
+                            (_rows[i].index == 0 ||
                                 ingredients[i - 1].section !=
                                     ingredients[i].section))
                           Align(
@@ -2087,6 +2223,7 @@ class _ShoppingSelectionState extends State<_ShoppingSelection> {
                             ),
                           ),
                         CheckboxListTile(
+                          key: ValueKey('shopping-selection-$i'),
                           value: _selected.contains(i),
                           controlAffinity: ListTileControlAffinity.leading,
                           title: Text(ingredients[i].name),
@@ -2116,10 +2253,14 @@ class _ShoppingSelectionState extends State<_ShoppingSelection> {
                                           .map((s) => ' $s')
                                           .join(),
                                 ),
+                                if (_added.contains(i))
+                                  TextSpan(text: marker(i, 'Added'))
+                                else if (_staples.contains(i))
+                                  TextSpan(text: marker(i, 'Staple')),
                               ],
                             ),
                           ),
-                          onChanged: _busy
+                          onChanged: _busy || _added.contains(i)
                               ? null
                               : (value) => setState(() {
                                   value == true
@@ -2137,7 +2278,9 @@ class _ShoppingSelectionState extends State<_ShoppingSelection> {
         ),
         actions: [
           TextButton(
-            onPressed: _busy ? null : () => Navigator.pop(context),
+            onPressed: _busy
+                ? null
+                : () => Navigator.pop(context, _added.isNotEmpty),
             child: const Text('Cancel'),
           ),
           TextButton(

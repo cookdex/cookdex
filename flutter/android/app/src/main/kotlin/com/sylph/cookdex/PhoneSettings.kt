@@ -18,7 +18,7 @@ internal object PhoneSettings {
         "servings" to Kind.NUMBER, "extraIngredients" to Kind.NUMBER,
         "photoModel" to Kind.TEXT, "ideaModel" to Kind.TEXT, "recipeModel" to Kind.TEXT,
         "photoThinking" to Kind.TEXT, "ideaThinking" to Kind.TEXT, "recipeThinking" to Kind.TEXT,
-        "retiredModels" to Kind.OBJECT,
+        "retiredModels" to Kind.OBJECT, "modelChoices" to Kind.OBJECT,
     )
 
     fun kind(parent: String, field: String): Kind? = when (parent) {
@@ -26,7 +26,8 @@ internal object PhoneSettings {
         "smartCreate" -> create[field]
         "keptSeparate" -> if (field == "ingredients" || field == "tags") Kind.NAME_GROUPS else null
         "retiredModels" -> if (field in setOf("photo", "ideas", "recipe")) Kind.TEXT else null
-        "smart" -> if (field == "model" || field == "effort") Kind.TEXT else null
+        "modelChoices" -> if (field in setOf("photo", "ideas", "recipe")) Kind.BOOLEAN else null
+        "smart" -> if (field in setOf("model", "effort", "thinking")) Kind.TEXT else null
         "settings" -> if (field == "ui" || field == "smart") Kind.OBJECT else null
         else -> null
     }

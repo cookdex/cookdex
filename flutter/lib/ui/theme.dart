@@ -164,9 +164,14 @@ ThemeData cookdexTheme({
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: scheme.surfaceContainerLow,
+      backgroundColor: scheme.surfaceContainer,
       indicatorColor: scheme.primaryContainer,
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+    ),
+    navigationRailTheme: NavigationRailThemeData(
+      backgroundColor: scheme.surfaceContainer,
+      indicatorColor: scheme.primaryContainer,
+      minWidth: 80,
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: scheme.surfaceContainerHigh,

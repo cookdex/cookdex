@@ -133,13 +133,22 @@ pub fn parse_ingredients(text: &str, initial_section: &str) -> Result<Vec<Pasted
             }
             line = rx(r"(?i),?\s*to taste\b").replace(&line, "").trim().into();
         }
-        let (name, prep) = line
-            .split_once(',')
-            .map_or((line.as_str(), ""), |(a, b)| (a.trim(), b.trim()));
+        // Baker's percentages describe this ingredient, not a package or a
+        // second amount. Keep the annotation verbatim, including decimal commas.
+        let percentage = rx(r"\(\s*[0-9]+(?:[.,][0-9]+)?\s*%\s*\)");
+        let percentage_ranges: Vec<_> = percentage.find_iter(&line).map(|m| m.range()).collect();
+        let prep_comma = line
+            .char_indices()
+            .find(|(i, c)| *c == ',' && !percentage_ranges.iter().any(|range| range.contains(i)));
+        let (name, prep) = prep_comma.map_or((line.as_str(), ""), |(i, _)| {
+            (line[..i].trim(), line[i + 1..].trim())
+        });
         if amount == Amount::Unspecified && issue.is_none() {
             issue = Some("No quantity recognized — check this line.".into());
         }
-        if name.is_empty() || rx(r"^[\d(\-–]|\([^)]*\d").is_match(name) {
+        let name_without_percentages = percentage.replace_all(name, "");
+        let checked_name = name_without_percentages.trim();
+        if checked_name.is_empty() || rx(r"^[\d(\-–]|\([^)]*\d").is_match(checked_name) {
             issue = Some("Check the amount, package size, or ingredient name.".into());
         }
         // Ambiguous lines remain intact, never silently reinterpret packages/ranges.

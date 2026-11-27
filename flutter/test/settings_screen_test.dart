@@ -14,6 +14,7 @@ const _actions = [
   'Gemini key',
   'Smart Import settings',
   'Smart Create settings',
+  'Staples',
   'How cookdex works',
   'cookdex on GitHub',
   'Share cookdex',
@@ -50,6 +51,7 @@ SettingsScreen _screen({
     onGeminiKey: action('Gemini key'),
     onSmartCreateSettings: action('Smart Create settings'),
     onSmartImportSettings: action('Smart Import settings'),
+    onStaples: action('Staples'),
     onHowCookdexWorks: action('How cookdex works'),
     onGitHub: action('cookdex on GitHub'),
     onShareCookdex: action('Share cookdex'),
@@ -226,6 +228,26 @@ void main() {
       await tester.pump();
     }
     expect(calls, _actions);
+  });
+
+  testWidgets('Staples shares the centered Shopping list settings group', (
+    tester,
+  ) async {
+    await _pump(tester, _screen(onAction: (_) {}), size: const Size(1280, 800));
+    await _reveal(tester, 'Staples');
+    final stapleCard = find.ancestor(
+      of: find.text('Staples'),
+      matching: find.byType(Card),
+    );
+    expect(stapleCard, findsOneWidget);
+    expect(
+      find.descendant(
+        of: stapleCard,
+        matching: find.text('Keep shopping screen awake'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.getSize(stapleCard).width, 850);
   });
 
   testWidgets('missing callbacks and absent previous save disable actions', (

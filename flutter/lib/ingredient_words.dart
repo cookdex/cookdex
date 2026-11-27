@@ -11,6 +11,15 @@ const recipeSearchSynonyms = [
   ['powdered sugar', 'icing sugar', "confectioners' sugar"],
 ];
 
+const ingredientFoodAliases = [
+  ...recipeSearchSynonyms,
+  ['chickpea', 'garbanzo bean'],
+  ['cheddar', 'cheddar cheese'],
+  ['cilantro', 'coriander leaf'],
+  ['yogurt', 'yoghurt'],
+  ['scallion', 'green onion', 'spring onion'],
+];
+
 final _token = RegExp(
   r"[\p{L}\p{M}\p{N}]+(?:['’\p{Pd}][\p{L}\p{M}\p{N}]+)*['’]?|&",
   unicode: true,

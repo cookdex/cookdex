@@ -12,8 +12,7 @@ extension _SmartCreateIdeas on _SmartCreateScreenState {
                 if (!c.moodOnly) 'From $_ingredientCount',
                 if (!c.moodOnly && c.useFirst.isNotEmpty)
                   '${c.useFirst.length} to use up',
-                if (c.mood.trim().isNotEmpty)
-                  'In the mood for ${c.mood.trim()}',
+                if (c.mood.trim().isNotEmpty) 'Mood: ${c.mood.trim()}',
               ].join(' · '),
               style: FaceliftTokens.tileSubtitle(context),
             ),
@@ -251,11 +250,7 @@ extension _SmartCreateIdeas on _SmartCreateScreenState {
                           runSpacing: 5,
                           children: [
                             for (final name in idea.missing)
-                              _tag(
-                                name,
-                                leading: const Icon(Symbols.add),
-                                missing: true,
-                              ),
+                              _tag(name, missing: true),
                           ],
                         ),
                       ],
@@ -267,20 +262,6 @@ extension _SmartCreateIdeas on _SmartCreateScreenState {
                       key: const ValueKey('idea-actions'),
                       child: _ideaActions(idea),
                     ),
-                    if (_shoppingErrorTitle == idea.title)
-                      Padding(
-                        key: _shoppingErrorKey,
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Semantics(
-                          liveRegion: true,
-                          child: Text(
-                            'Could not add these ingredients to the shopping list.',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: colors.error,
-                            ),
-                          ),
-                        ),
-                      ),
                     if (_writingTitle == idea.title && c.error != null)
                       _message(),
                   ],
@@ -296,10 +277,6 @@ extension _SmartCreateIdeas on _SmartCreateScreenState {
 
   Widget _ideaActions(CreateIdea idea) {
     final saved = c.savedRecipes[idea.title];
-    final added = c.addedToList.contains(idea.title);
-    final addLabel = added
-        ? 'Added to list'
-        : 'Add ${idea.missing.length} to list';
     final writing = c.progressAction == 'recipe' && _writingTitle == idea.title;
     final recipeButton = saved != null
         ? TweenAnimationBuilder<double>(
@@ -325,99 +302,7 @@ extension _SmartCreateIdeas on _SmartCreateScreenState {
             },
             onPressed: _busy ? null : () => _run(() => _review(idea)),
           );
-    if (idea.missing.isEmpty) {
-      return SizedBox(width: double.infinity, child: recipeButton);
-    }
-    final addButton = ExcludeFocus(
-      excluding: writing,
-      child: ExcludeSemantics(
-        excluding: writing,
-        child: IgnorePointer(
-          ignoring: writing,
-          child: AnimatedOpacity(
-            duration: _createDuration(context, 200),
-            opacity: writing ? 0 : 1,
-            child: Semantics(
-              liveRegion: added,
-              excludeSemantics: added,
-              label: added ? addLabel : null,
-              button: added ? true : null,
-              enabled: added ? false : null,
-              child: OutlinedButton.icon(
-                style: added
-                    ? OutlinedButton.styleFrom(
-                        disabledForegroundColor: colors.onSurfaceVariant,
-                        disabledIconColor: colors.onSurfaceVariant,
-                      )
-                    : null,
-                onPressed: c.progressAction == 'more' || _addingToList || added
-                    ? null
-                    : () => _shop(idea),
-                icon: Icon(
-                  added ? Symbols.check : Symbols.add_shopping_cart,
-                  size: 17,
-                ),
-                label: Text(addLabel, textAlign: TextAlign.center),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final style = theme.textTheme.labelLarge;
-        double measure(String text) {
-          final painter = TextPainter(
-            text: TextSpan(text: text, style: style),
-            textDirection: Directionality.of(context),
-            textScaler: MediaQuery.textScalerOf(context),
-          )..layout();
-          final width = painter.width;
-          painter.dispose();
-          return width;
-        }
-
-        final half = (constraints.maxWidth - 8) / 2;
-        final stacked =
-            half < measure(addLabel) + 60 ||
-            half <
-                measure(saved == null ? 'Get the recipe' : 'Open recipe') + 60;
-        return TweenAnimationBuilder<double>(
-          duration: _createDuration(context, 340),
-          curve: Curves.ease,
-          tween: Tween(end: writing ? 0 : 1),
-          child: addButton,
-          builder: (_, t, shopping) {
-            if (stacked) {
-              return _StackedIdeaActions(
-                fraction: t,
-                shopping: shopping!,
-                recipe: recipeButton,
-              );
-            }
-            return Row(
-              children: [
-                SizedBox(
-                  width: half * t,
-                  child: ClipRect(
-                    child: OverflowBox(
-                      alignment: Alignment.centerLeft,
-                      minWidth: half,
-                      maxWidth: half,
-                      fit: OverflowBoxFit.deferToChild,
-                      child: shopping,
-                    ),
-                  ),
-                ),
-                SizedBox(width: 8 * t),
-                Expanded(child: recipeButton),
-              ],
-            );
-          },
-        );
-      },
-    );
+    return SizedBox(width: double.infinity, child: recipeButton);
   }
 
   Widget _ownedIngredients(List<String> names) {
@@ -499,71 +384,6 @@ extension _SmartCreateIdeas on _SmartCreateScreenState {
           ),
         ),
       );
-}
-
-class _StackedIdeaActions extends StatefulWidget {
-  const _StackedIdeaActions({
-    required this.fraction,
-    required this.shopping,
-    required this.recipe,
-  });
-  final double fraction;
-  final Widget shopping, recipe;
-
-  @override
-  State<_StackedIdeaActions> createState() => _StackedIdeaActionsState();
-}
-
-class _StackedIdeaActionsState extends State<_StackedIdeaActions> {
-  bool _following = false;
-
-  @override
-  void didUpdateWidget(_StackedIdeaActions previous) {
-    super.didUpdateWidget(previous);
-    if (widget.fraction <= previous.fraction) return;
-    final scroll = Scrollable.of(context).position;
-    final target = context.findRenderObject() as RenderBox?;
-    if (target == null || !target.attached || !scroll.hasContentDimensions) {
-      return;
-    }
-    final viewport = RenderAbstractViewport.of(target);
-    if (previous.fraction == 0) {
-      final bottom = viewport.getOffsetToReveal(target, 1).offset;
-      _following =
-          bottom - scroll.pixels < target.size.height &&
-          bottom + scroll.viewportDimension > scroll.pixels;
-    }
-    if (!_following) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !target.attached || !scroll.hasContentDimensions) return;
-      if (scroll.isScrollingNotifier.value) {
-        _following = false;
-        return;
-      }
-      final bottom = viewport.getOffsetToReveal(target, 1).offset + 8;
-      final offset = bottom.clamp(
-        scroll.minScrollExtent,
-        scroll.maxScrollExtent,
-      );
-      if (offset > scroll.pixels + .5) scroll.jumpTo(offset);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      ClipRect(
-        child: Align(
-          alignment: Alignment.topCenter,
-          heightFactor: widget.fraction,
-          child: SizedBox(width: double.infinity, child: widget.shopping),
-        ),
-      ),
-      SizedBox(height: 8 * widget.fraction),
-      widget.recipe,
-    ],
-  );
 }
 
 enum _BatchPhase { idle, leaving, waiting, arriving, restoring }

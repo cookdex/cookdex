@@ -7,6 +7,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/rendering.dart';
 
 import '../src/rust/api.dart';
+import '../frame_work_binding.dart';
 import '../tag_labels.dart';
 import '../yield_presentation.dart';
 import 'prepared_card_title.dart';
@@ -407,6 +408,9 @@ class CardPreparation {
   final _indices = HashMap<RecipeSummary, int>.identity();
   bool _configured = false;
   int _columns = 1, _topPrepareAt = 0, _topPrepareEnd = 0;
+  bool _simpleAndroidCards = false;
+  double? _fixedHeight;
+  double _observedHeight = 168;
   double _aheadStepUs = 700;
   void configure(
     BuildContext context,
@@ -417,6 +421,8 @@ class CardPreparation {
     int columns = 1,
   }) {
     _columns = columns;
+    _fixedHeight = fixedHeight;
+    _simpleAndroidCards = Theme.of(context).platform == TargetPlatform.android;
     geometry.configure(context, width, grid: grid, fixedHeight: fixedHeight);
     _configured = true;
     if (!identical(recipes, _recipes)) {
@@ -432,7 +438,7 @@ class CardPreparation {
   /// Top-return work uses the existing paragraph budget only during the rush.
   void prepareTopReturn(double extent) {
     _topPrepareAt = 0;
-    _topPrepareEnd = math.min(_recipes.length, (extent / 68).ceil() * _columns);
+    _topPrepareEnd = math.min(_recipes.length, _cardsInExtent(extent));
     _queue();
   }
 
@@ -440,6 +446,15 @@ class CardPreparation {
     jumping = false;
     _topPrepareAt = _topPrepareEnd = 0;
   }
+
+  int _cardsInExtent(double extent) =>
+      (extent / ((_fixedHeight ?? _observedHeight) + 10)).ceil() * _columns;
+
+  double get _viewportExtent =>
+      _controller?.hasClients == true &&
+          _controller!.position.hasViewportDimension
+      ? _controller!.position.viewportDimension
+      : viewport;
 
   // A scan is resumed across callbacks. Ancestors are resolved once per mounted
   // card; no paragraph step scans the mounted set or recomputes the viewport.
@@ -466,6 +481,9 @@ class CardPreparation {
       final card = _scan[_scanAt++];
       final index = _indices[card.widget.recipe];
       if (index != null && card._buildRect != null) {
+        if (_fixedHeight == null) {
+          _observedHeight = _observedHeight * .8 + card._buildRect!.height * .2;
+        }
         _scanLow = math.min(_scanLow, index);
         _scanHigh = math.max(_scanHigh, index);
         if (card._automatic && (card._stage ?? 4) < 4) _pending.add(card);
@@ -495,10 +513,10 @@ class CardPreparation {
     // fit in the title cache; reversing does not require rewarming their union.
     final capacity = math.max(0, 48 - (_high - _low + 1));
     final ahead = math.min(
-      (viewport * 3 / 68).ceil(),
+      _cardsInExtent(_viewportExtent * 3),
       (capacity * .75).floor(),
     );
-    final behind = math.min((viewport / 68).ceil(), capacity - ahead);
+    final behind = math.min(_cardsInExtent(_viewportExtent), capacity - ahead);
     var start = math.max(0, _low - (direction >= 0 ? behind : ahead));
     var end = math.min(
       _recipes.length - 1,
@@ -549,6 +567,8 @@ class CardPreparation {
   BuildContext? _context;
   ScrollController? _controller;
   bool _visible = true, _contact = false, _moving = false;
+  bool _enabled = true;
+  int _scheduleGeneration = 0;
   bool jumping = false;
   double speed = 0, direction = 1, viewport = 800;
   int? _callback;
@@ -558,10 +578,42 @@ class CardPreparation {
   int _recentLongUntilUs = 0, _previousStage = 0;
   final _stageCosts = <double>[0, 1800, 1800, 2600, 2300];
   double _baseCostUs = 1000;
+  int _buildFrame = -1, _fullMounts = 0;
+  int _previousFullCards = 0;
+  double _fullCardCostUs = 1800;
+
+  bool get _completeMovingCards =>
+      _configured && _simpleAndroidCards && _columns > 1;
+
+  // The live frame clock, not delayed FrameTimings, decides whether a new card
+  // can be complete. Multiple siblings share the allowance and reserve their
+  // estimated cost before their descendants have built or laid out.
+  bool _admitFullCard() {
+    if (!_completeMovingCards ||
+        !_active ||
+        !_inMotion ||
+        _buildFrame !=
+            SchedulerBinding.instance.currentFrameTimeStamp.inMicroseconds ||
+        _fullMounts >= _columns ||
+        dev.Timeline.now < _recentLongUntilUs) {
+      return false;
+    }
+    final binding = WidgetsBinding.instance;
+    final started = binding is FrameWorkReporting
+        ? binding.currentFrameStartUs
+        : null;
+    if (started == null) return false;
+    final elapsed = dev.Timeline.now - started;
+    if (elapsed + (_fullMounts + 1) * _fullCardCostUs > _budgetUs * .65) {
+      return false;
+    }
+    _fullMounts++;
+    return true;
+  }
 
   bool get fast => speed > viewport * 1.35;
   bool get accessible => SemanticsBinding.instance.semanticsEnabled;
-  bool get _active => _visible && !paused.value;
+  bool get _active => _enabled && _visible && !paused.value;
   double get _budgetUs {
     final hz = _context == null ? 60.0 : View.of(_context!).display.refreshRate;
     return 1000000 / (hz > 0 ? hz : 60);
@@ -617,12 +669,24 @@ class CardPreparation {
             _scanMotion == _motionRevision)) {
       return;
     }
+    final generation = _scheduleGeneration;
     _callback = SchedulerBinding.instance.scheduleFrameCallback((_) {
+      if (generation != _scheduleGeneration) return;
       _callback = null;
       if (!_active) return;
-      final started = dev.Timeline.now;
+      var started = dev.Timeline.now;
+      if (_completeMovingCards) {
+        final binding = WidgetsBinding.instance;
+        if (binding is FrameWorkReporting) {
+          started = binding.currentFrameStartUs ?? started;
+        }
+        _buildFrame =
+            SchedulerBinding.instance.currentFrameTimeStamp.inMicroseconds;
+      }
+      _fullMounts = 0;
       _frameEndPending = true;
       SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (generation != _scheduleGeneration) return;
         _frameEndPending = false;
         if (!_active) return;
         final callbackStart = dev.Timeline.now;
@@ -634,10 +698,21 @@ class CardPreparation {
   void _runFrame(int frameStarted, int callbackStarted) {
     final elapsed = callbackStarted - frameStarted;
     final moving = _inMotion;
-    final previousCost = _previousStage == 0
+    final fullCount = _completeMovingCards
+        ? _previousFullCards + _fullMounts
+        : 0;
+    final previousCost = fullCount > 0
+        ? fullCount * _fullCardCostUs
+        : _previousStage == 0
         ? 0.0
         : _stageCosts[_previousStage];
-    if (_previousStage != 0) {
+    if (fullCount > 0) {
+      final sample = ((elapsed - _baseCostUs) / fullCount).clamp(
+        500.0,
+        _budgetUs * .5,
+      );
+      _fullCardCostUs = _fullCardCostUs * .75 + sample * .25;
+    } else if (_previousStage != 0) {
       // A pause is not a new permanent price for the stage. Clamp the sample
       // before smoothing so a single GC/preemption cannot make every future
       // reservation exceed the remaining budget and starve moving fill.
@@ -653,6 +728,7 @@ class CardPreparation {
       );
     }
     _previousStage = 0;
+    _previousFullCards = 0;
     // All bookkeeping shares this deadline. Work resumes next frame, with an
     // extra 1.5ms ceiling even when a very cheap UI frame leaves more spare time.
     final deadline = math.min(
@@ -695,18 +771,24 @@ class CardPreparation {
       }
     }
     if (best != null && _room(deadline)) {
-      final next = (best._stage ?? 0) + 1;
+      final complete = _completeMovingCards;
+      final next = complete ? 4 : (best._stage ?? 0) + 1;
+      final cost = complete ? _fullCardCostUs : _stageCosts[next];
       final liveBase = math.max(_baseCostUs, elapsed - previousCost);
       final remaining =
           _budgetUs * .85 - liveBase - (dev.Timeline.now - callbackStarted);
       final visibleAtRest = !moving && bestPriority < 100000;
       if (visibleAtRest ||
-          (remaining >= _stageCosts[next] &&
+          (remaining >= cost &&
               (!moving ||
                   (dev.Timeline.now >= _recentLongUntilUs &&
                       elapsed <= _budgetUs * .7)))) {
-        best._advance();
-        _previousStage = next;
+        best._advance(complete: complete);
+        if (complete) {
+          _previousFullCards = 1;
+        } else {
+          _previousStage = next;
+        }
       }
     }
     _sleepingForTouch =
@@ -715,12 +797,19 @@ class CardPreparation {
     _queue();
   }
 
+  void _cancelScheduled() {
+    _scheduleGeneration++;
+    if (_callback case final id?) {
+      SchedulerBinding.instance.cancelFrameCallbackWithId(id);
+      _callback = null;
+    }
+    _frameEndPending = false;
+  }
+
   void dispose() {
     _visible = false;
     _lists.remove(this);
-    if (_callback case final id?) {
-      SchedulerBinding.instance.cancelFrameCallbackWithId(id);
-    }
+    _cancelScheduled();
     _pending.clear();
     _scan = const [];
     _measured.clear();
@@ -736,7 +825,9 @@ class ProgressiveCards extends StatefulWidget {
     required this.preparation,
     required this.controller,
     required this.child,
+    this.enabled = true,
   });
+  final bool enabled;
   final CardPreparation preparation;
   final ScrollController controller;
   final Widget child;
@@ -746,16 +837,14 @@ class ProgressiveCards extends StatefulWidget {
 
 class _ProgressiveCardsState extends State<ProgressiveCards> {
   final _motion = <(int, double)>[];
+  bool _listening = false;
   CardPreparation get work => widget.preparation;
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_scroll);
     work._controller = widget.controller;
-    SchedulerBinding.instance.addTimingsCallback(work._timings);
-
+    _setEnabled(widget.enabled);
     SemanticsBinding.instance.addSemanticsEnabledListener(_semantics);
-    CardPreparation._watch(work);
     if (CardShellMetrics.enabled) {
       CardShellMetrics.refresh = () {
         if (mounted) {
@@ -776,8 +865,50 @@ class _ProgressiveCardsState extends State<ProgressiveCards> {
     }
   }
 
+  void _setEnabled(bool enabled) {
+    work._enabled = enabled;
+    if (enabled) {
+      if (!_listening) {
+        widget.controller.addListener(_scroll);
+        SchedulerBinding.instance.addTimingsCallback(work._timings);
+        _listening = true;
+      }
+      CardPreparation._watch(work);
+      work._motionRevision++;
+      work._aheadDirty = true;
+      _scroll();
+      work._queue();
+    } else {
+      if (_listening) {
+        widget.controller.removeListener(_scroll);
+        SchedulerBinding.instance.removeTimingsCallback(work._timings);
+        _listening = false;
+      }
+      CardPreparation._lists.remove(work);
+      work._cancelScheduled();
+      _motion.clear();
+      work.speed = 0;
+      work._moving = false;
+      work._pending.clear();
+      work._topPrepareAt = work._topPrepareEnd = 0;
+      work._previousStage = 0;
+      work._previousFullCards = work._fullMounts = 0;
+      work._buildFrame = -1;
+      work._scan = const [];
+      work._scanAt = 0;
+      work._scanMotion = -1;
+      work._aheadDirty = true;
+    }
+  }
+
+  @override
+  void didUpdateWidget(ProgressiveCards oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.enabled != widget.enabled) _setEnabled(widget.enabled);
+  }
+
   void _semantics() {
-    if (work.accessible) {
+    if (widget.enabled && work.accessible) {
       for (final state in work._pending.toList()) {
         state._advance(complete: true);
       }
@@ -785,7 +916,7 @@ class _ProgressiveCardsState extends State<ProgressiveCards> {
   }
 
   void _scroll() {
-    if (!widget.controller.hasClients) return;
+    if (!widget.enabled || !widget.controller.hasClients) return;
     final position = widget.controller.position;
     final now = dev.Timeline.now;
     work._moving = position.isScrollingNotifier.value;
@@ -821,15 +952,9 @@ class _ProgressiveCardsState extends State<ProgressiveCards> {
 
   @override
   void dispose() {
-    widget.controller.removeListener(_scroll);
-    SchedulerBinding.instance.removeTimingsCallback(work._timings);
-    // The owner may retain this preparation object beyond the viewport. Stop
-    // both queued work and an already pending post-frame continuation on detach.
+    _setEnabled(false);
+    // Cancelled post-frame continuations cannot resume after a later reattach.
     work._visible = false;
-    if (work._callback case final id?) {
-      SchedulerBinding.instance.cancelFrameCallbackWithId(id);
-      work._callback = null;
-    }
     work._controller = null;
     SemanticsBinding.instance.removeSemanticsEnabledListener(_semantics);
     CardPreparation._lists.remove(work);
@@ -902,6 +1027,7 @@ class _ProgressiveCardState extends State<ProgressiveCard> {
   final _testGeometry = CardGeometryCache();
   bool _counted = false;
   bool _nativeOnly = false;
+  bool _preparedNative = false;
   bool _automatic = false;
   void _sample() {
     if (!mounted) return;
@@ -1021,6 +1147,11 @@ class _ProgressiveCardState extends State<ProgressiveCard> {
       _stage = 4;
       _nativeOnly = true;
     }
+    if (_stage == null && forced == null && _work?._admitFullCard() == true) {
+      _stage = 4;
+      _nativeOnly = true;
+      _preparedNative = true;
+    }
     if (_nativeOnly) {
       if (!_counted) {
         _counted = true;
@@ -1030,7 +1161,9 @@ class _ProgressiveCardState extends State<ProgressiveCard> {
       final child = widget.builder(
         context,
         4,
-        _work?.jumping == true ? _work!.geometry.prepared(widget.recipe) : null,
+        _work?.jumping == true || _preparedNative
+            ? _work?.geometry.prepared(widget.recipe)
+            : null,
       );
       return child;
     }

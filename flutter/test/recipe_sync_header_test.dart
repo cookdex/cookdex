@@ -137,7 +137,13 @@ void main() {
             final before = tester.getRect(indicator);
             expect(before.top, greaterThanOrEqualTo(0));
             expect(before.bottom, lessThanOrEqualTo(80));
-            expect(before.right, closeTo(width - 8, 1));
+            final view = tester.getRect(find.byKey(const Key('recipe-view')));
+            if (view.top < before.bottom && view.bottom > before.top) {
+              expect(before.right, closeTo(view.left, 1));
+              expect(view.right, closeTo(width - 16, 1));
+            } else {
+              expect(before.right, closeTo(width - 8, 1));
+            }
             expect(tester.takeException(), isNull);
 
             expect(scroll.position.maxScrollExtent, greaterThan(1000));

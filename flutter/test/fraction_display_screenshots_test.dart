@@ -165,7 +165,7 @@ void main() {
         scaled.textSpan!.toPlainText(includeSemanticsLabels: false),
         '⅔–1⅓ cups berries',
       );
-      await tester.tap(find.text('Shopping list').last);
+      await tester.tap(find.textContaining(RegExp(r'^Shopping\s+list$')).last);
       await tester.pumpAndSettle();
       final shopping = tester.widget<Text>(
         find.byKey(const ValueKey('shopping-item-label-fraction-item-1')),
@@ -192,7 +192,7 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       store.dispose();
       prefs.dispose();
-    semantics.dispose();
+      semantics.dispose();
     },
   );
   testWidgets('fraction display rendered matrix', (tester) async {

@@ -128,10 +128,14 @@ void main() {
         tester.getRect(sort),
         tester.getRect(view),
       ];
-      expect(initial[0].center.dy, initial[1].center.dy);
-      expect(initial[0].center.dy, initial[2].center.dy);
       if (config.$1 == 'normal') {
+        expect(initial[0].center.dy, initial[1].center.dy);
+        expect(initial[0].center.dy, initial[2].center.dy);
         expect(initial[2].right, lessThanOrEqualTo(config.$2.width - 16));
+      }
+      for (final rect in initial) {
+        expect(rect.left, greaterThanOrEqualTo(16));
+        expect(rect.right, lessThanOrEqualTo(config.$2.width - 16));
       }
       expect(tester.widget<FilterChip>(favorites).showCheckmark, isFalse);
       for (final selectedView in RecipeView.values) {

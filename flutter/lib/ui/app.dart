@@ -3,7 +3,9 @@ import 'backup_feedback.dart';
 import 'design_lab.dart';
 import 'facelift_motion.dart';
 import 'pixel_scroll.dart';
+import 'phone_orientation.dart';
 import 'retained_screen.dart';
+import 'interaction_idle_scope.dart';
 
 import 'dart:async';
 
@@ -11,6 +13,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app_platform.dart';
+import '../frame_performance_hints.dart';
+import '../interaction_idle.dart';
 import '../app_identity.dart';
 import '../local_preferences.dart';
 import 'window_size.dart';
@@ -33,6 +37,7 @@ import 'recipes_screen.dart';
 import 'theme.dart';
 import 'navigation_feedback.dart';
 import 'shopping_screen.dart';
+import 'staples_screen.dart';
 import '../export_service.dart';
 import '../sync_controller.dart';
 import '../settings_platform.dart';
@@ -167,6 +172,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   }
 
   bool _snapshotCheckRunning = false;
+  final _frameHints = FramePerformanceHints();
   Timer? _snapshotTimer;
   bool _openingEditor = false;
   late final DraftStorage _drafts = widget.drafts ?? MemoryDraftStorage();
@@ -202,6 +208,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    unawaited(_frameHints.setActive(true));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _updates.afterFirstFrame();
     });
@@ -375,6 +382,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _resumed = state == AppLifecycleState.resumed;
+    unawaited(_frameHints.setActive(_resumed));
     _updates.setActive(_resumed);
     if (_resumed) {
       _drainShares();
@@ -704,6 +712,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     service: _smart,
     lastDiagnostic: _create.lastDiagnostic,
     clearDiagnostic: _create.clearDiagnostic,
+    onStaples: (c) => openStaples(c, store: widget.store),
   );
 
   Future<void> _openKey(BuildContext context) => openGeminiKey(
@@ -723,8 +732,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
             controller: _create,
             onKey: _openKey,
             onSettings: _createSettings,
-            onStaples: (c) =>
-                openCreateStaples(c, preferences: widget.store.preferences),
+            onStaples: (c) => openStaples(c, store: widget.store),
             onViewRecipe: (id) =>
                 _pushRecipe(routeContext, id, fromIdeas: true),
             onReview: (c, candidate) async {
@@ -739,9 +747,6 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
                 },
               );
             },
-            onShop: (names) => widget.store.editShopping(
-              ShoppingEdit.addManualItems(names: names),
-            ),
           ),
         ),
       );
@@ -940,27 +945,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
       }
       if (!context.mounted) return;
       if (shopping) {
-        var added = 0;
-        try {
-          for (final recipe in recipes) {
-            await widget.store.addShopping(
-              recipe.id,
-              List.generate(recipe.fields.ingredients.length, (i) => i),
-            );
-            added++;
-            _selection?.remove(recipe.id);
-          }
-        } catch (_) {
-          throw StateError(
-            'Added $added of ${recipes.length} recipes. The remaining recipes are still selected.',
-          );
-        }
-        if (context.mounted) {
-          showFeedback(
-            context,
-            'Added ${recipes.length} recipes to shopping list',
-          );
-        }
+        await showBatchShoppingSelection(context, widget.store, recipes);
         if (mounted) setState(() => _selection = null);
       } else {
         final action = await showShareOptions(
@@ -1137,9 +1122,18 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
 
   Future<void> _maintainSnapshots() async {
     if (_snapshotCheckRunning || _session == null) return;
+    if (InteractionIdle.instance.busy) {
+      InteractionIdle.instance.runWhenIdle(this, () {
+        if (mounted && _resumed) unawaited(_maintainSnapshots());
+      });
+      return;
+    }
     _snapshotCheckRunning = true;
     try {
-      final failing = await _session!.rollingSnapshotMaintenance();
+      final failing = await InteractionIdle.asynchronous(
+        'snapshot-maintenance',
+        _session!.rollingSnapshotMaintenance,
+      );
       if (mounted && _snapshotsFailing != failing) {
         setState(() => _snapshotsFailing = failing);
       }
@@ -1270,6 +1264,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _frameHints.dispose();
     _cook.removeListener(_updateCookInset);
     _activeTab.removeListener(_updateCookInset);
     _cookInset.dispose();
@@ -1278,6 +1273,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
     _updates.dispose();
     _incoming.dispose();
     _snapshotTimer?.cancel();
+    InteractionIdle.instance.cancel(this);
     _sync?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     widget.store.preferences.removeListener(_preferencesChanged);
@@ -1290,9 +1286,12 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildContext context) => isDevelopment
-      ? FaceliftMotion(settings: _motion!, child: _app())
-      : _app();
+  Widget build(BuildContext context) => PhoneOrientation(
+    isAndroid: widget.platform.isAndroid,
+    child: isDevelopment
+        ? FaceliftMotion(settings: _motion!, child: _app())
+        : _app(),
+  );
 
   Widget _app() => MaterialApp(
     scrollBehavior: const CookdexScrollBehavior(),
@@ -1334,7 +1333,11 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
                 },
               ),
         },
-        child: child!,
+        child: InteractionIdleScope(
+          onScrollWorkload: (increased) =>
+              unawaited(_frameHints.scrollWorkload(increased)),
+          child: child!,
+        ),
       ),
     ),
     home: RetainedScreen(
@@ -1417,7 +1420,10 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
                               store: widget.store,
                               selected: _tab,
                               onSelect: _selectTab,
-                              cooking: _tab == 0 && _selected != null && _cook.active,
+                              cooking:
+                                  _tab == 0 &&
+                                  _selected != null &&
+                                  _cook.active,
                             ),
                         ],
                       ),
@@ -1583,6 +1589,7 @@ class _CookdexAppState extends State<CookdexApp> with WidgetsBindingObserver {
       ),
       onGeminiKey: () => _openKey(context),
       onSmartCreateSettings: () => _createSettings(context),
+      onStaples: () => openStaples(context, store: widget.store),
       shoppingKeepAwake: widget.store.preferences.shoppingKeepAwake,
       onShoppingKeepAwake: widget.store.preferences.setShoppingKeepAwake,
       recipeTextScale: widget.store.preferences.recipeTextSize.factor,

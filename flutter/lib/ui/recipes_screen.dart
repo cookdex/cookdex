@@ -7,6 +7,9 @@ import 'pixel_scroll.dart';
 import 'idle_build_ahead.dart';
 import 'progressive_cards.dart';
 import 'prepared_card_title.dart';
+import 'prepared_compact_text.dart';
+import 'compact_touch_target.dart';
+import 'recipe_favorite_button.dart';
 import 'recipe_top_button.dart';
 import 'facelift_motion.dart';
 import 'facelift_tokens.dart';
@@ -31,6 +34,7 @@ import 'recipe_grid.dart';
 import 'recipe_metadata.dart';
 import '../sync_presentation.dart';
 import 'sync_indicator.dart';
+import 'window_size.dart';
 
 class RecipesScreen extends StatefulWidget {
   const RecipesScreen({
@@ -121,8 +125,9 @@ class RecipesScreenState extends State<RecipesScreen> {
   double _topLow = 0, _topHigh = 0;
   Timer? _topIdle;
   final Map<String, _RecipeRow> _rows = {};
-  final _builtCards = BuiltRowBudget(32);
+  final _builtRows = BuiltRowBudget(32);
   final _cardPreparation = CardPreparation();
+  final _compactPreparation = CompactTextPreparation();
   Widget? _list;
   List<RecipeSummary>? _listRecipes;
   int? _listColumns;
@@ -176,64 +181,98 @@ class RecipesScreenState extends State<RecipesScreen> {
       for (var i = 0; i < groups.length; i++)
         'group-${recipes[groups[i].start].id}': i,
     };
-    return _list = SliverPadding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 112),
-      sliver: TopReturnSliverList.builder(
-        key: _topSliver,
-        itemCount: groups.length,
-        findChildIndexCallback: (key) =>
-            key is ValueKey<String> ? rowIndices[key.value] : null,
-        itemBuilder: (context, row) {
-          Widget child = Padding(
-            padding: EdgeInsets.only(bottom: view == RecipeView.cards ? 10 : 0),
-            child: RecipeGridRow(
-              columns: columns,
-              fixedHeight: cardHeight,
-              children: [
-                for (
-                  var index = groups[row].start;
-                  index < groups[row].end;
-                  index++
-                )
-                  _row(recipes[index], grid: grid),
-              ],
-            ),
-          );
-          if (groups[row].start == _listPartialStart) {
-            child = Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 20, bottom: 8),
-                  child: Semantics(
-                    container: true,
-                    header: true,
-                    child: Text(
-                      _listPartialStart == 0
-                          ? 'No recipes match every word.\nThese match some of them.'
-                          : 'Partial matches',
-                      key: const Key('partial-matches'),
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.w500,
-                      ),
+    final simpleCompact =
+        view == RecipeView.compact &&
+        Theme.of(context).platform == TargetPlatform.android;
+    final list = TopReturnSliverList.builder(
+      key: _topSliver,
+      itemCount: groups.length,
+      findChildIndexCallback: (key) =>
+          key is ValueKey<String> ? rowIndices[key.value] : null,
+      itemBuilder: (context, row) {
+        Widget child = view == RecipeView.compact
+            ? _row(recipes[groups[row].start], grid: false)
+            : Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: RecipeGridRow(
+                  columns: columns,
+                  fixedHeight: cardHeight,
+                  children: [
+                    for (
+                      var index = groups[row].start;
+                      index < groups[row].end;
+                      index++
+                    )
+                      _row(recipes[index], grid: grid),
+                  ],
+                ),
+              );
+        if (groups[row].start == _listPartialStart) {
+          child = Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 20, bottom: 8),
+                child: Semantics(
+                  container: true,
+                  header: true,
+                  child: Text(
+                    _listPartialStart == 0
+                        ? 'No recipes match every word.\nThese match some of them.'
+                        : 'Partial matches',
+                    key: const Key('partial-matches'),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
-                child,
-              ],
-            );
-          }
-          return KeepBuilt(
-            key: ValueKey('group-${recipes[groups[row].start].id}'),
-            enabled: view == RecipeView.cards,
-            budget: _builtCards,
-            weight: columns,
-            child: child,
+              ),
+              child,
+            ],
           );
-        },
-      ),
+        }
+        if (view == RecipeView.compact && !simpleCompact) {
+          child = Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: recipeContentMaxWidth,
+              ),
+              child: child,
+            ),
+          );
+        }
+        return KeepBuilt(
+          key: ValueKey('group-${recipes[groups[row].start].id}'),
+          budget: _builtRows,
+          weight: columns,
+          child: child,
+        );
+      },
     );
+    return _list = simpleCompact
+        ? SliverLayoutBuilder(
+            builder: (context, constraints) => SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                math.max(
+                  16,
+                  (constraints.crossAxisExtent - recipeContentMaxWidth) / 2,
+                ),
+                0,
+                math.max(
+                  16,
+                  (constraints.crossAxisExtent - recipeContentMaxWidth) / 2,
+                ),
+                112,
+              ),
+              sliver: list,
+            ),
+          )
+        : SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 112),
+            sliver: list,
+          );
   }
 
   Widget _row(RecipeSummary recipe, {required bool grid}) {
@@ -466,6 +505,7 @@ class RecipesScreenState extends State<RecipesScreen> {
     _query.dispose();
     _showTop.dispose();
     _cardPreparation.dispose();
+    _compactPreparation.dispose();
     super.dispose();
   }
 
@@ -501,7 +541,12 @@ class RecipesScreenState extends State<RecipesScreen> {
         children: [
           // Reserve the widest option so selecting another sort never moves
           // the neighboring controls or changes the horizontal scroll extent.
-          SizedBox(width: labelWidth, child: Text(label)),
+          Flexible(
+            child: SizedBox(
+              width: labelWidth,
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+          ),
           const SizedBox(width: 4),
           const Icon(Symbols.arrow_drop_down, size: 18),
         ],
@@ -602,21 +647,74 @@ class RecipesScreenState extends State<RecipesScreen> {
     },
   );
 
-  Widget _controls() {
+  ({double sort, double row}) _controlWidths() {
     final theme = Theme.of(context);
+    final style = theme.chipTheme.labelStyle ?? theme.textTheme.labelLarge;
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    Size measure(String text) {
+      final painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textScaler: scaler,
+        textDirection: direction,
+      )..layout();
+      final size = painter.size;
+      painter.dispose();
+      return size;
+    }
+
     var sortWidth = 0.0;
     for (final sort in RecipeSort.values) {
-      final painter = TextPainter(
-        text: TextSpan(
-          text: _sortLabel(sort),
-          style: theme.chipTheme.labelStyle ?? theme.textTheme.labelLarge,
-        ),
-        textScaler: MediaQuery.textScalerOf(context),
-        textDirection: Directionality.of(context),
-      )..layout();
-      if (painter.width > sortWidth) sortWidth = painter.width;
-      painter.dispose();
+      sortWidth = math.max(sortWidth, measure(_sortLabel(sort)).width);
     }
+    sortWidth = sortWidth.ceilToDouble();
+    final favorites = measure('Favorites');
+    final padding = (theme.chipTheme.padding ?? const EdgeInsets.all(8))
+        .resolve(direction);
+    final labelPadding =
+        (theme.chipTheme.labelPadding ??
+                EdgeInsets.lerp(
+                  const EdgeInsets.symmetric(horizontal: 8),
+                  const EdgeInsets.symmetric(horizontal: 4),
+                  (scaler.scale(14) / 14 - 1).clamp(0, 1),
+                )!)
+            .resolve(direction);
+    // Material chips size the avatar slot from their natural content height.
+    // Use the same label metrics and padding so View moves before any control
+    // needs an extra row, including when the system uses nonlinear text sizes.
+    final avatarWidth = math.max(
+      32 - padding.vertical + labelPadding.vertical,
+      favorites.height + labelPadding.vertical,
+    );
+    final chipsWidth =
+        favorites.width +
+        avatarWidth +
+        sortWidth +
+        22 +
+        2 * (padding.horizontal + labelPadding.horizontal);
+    return (sort: sortWidth, row: chipsWidth + 48 + 16);
+  }
+
+  Widget _viewButton() => IconButton(
+    key: const Key('recipe-view'),
+    tooltip: widget.preferences.view == RecipeView.cards
+        ? 'Switch to Compact view'
+        : 'Switch to Cards view',
+    constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+    onPressed: () => widget.preferences.setView(
+      widget.preferences.view == RecipeView.cards
+          ? RecipeView.compact
+          : RecipeView.cards,
+    ),
+    icon: Icon(
+      widget.preferences.view == RecipeView.cards
+          ? Symbols.view_list
+          : Symbols.view_agenda,
+    ),
+  );
+
+  Widget _controls({bool wrap = false, bool includeView = true}) {
+    final theme = Theme.of(context);
     final controls = <Widget>[
       FilterChip(
         shape: RoundedRectangleBorder(
@@ -635,7 +733,7 @@ class RecipesScreenState extends State<RecipesScreen> {
         onSelected: widget.preferences.setFavoritesOnly,
       ),
       _choiceMenu<RecipeSort>(
-        labelWidth: sortWidth.ceilToDouble(),
+        labelWidth: _controlWidths().sort,
         tooltip: 'Sort recipes',
         label: _sortLabel(widget.preferences.sort),
         values: RecipeSort.values,
@@ -643,24 +741,16 @@ class RecipesScreenState extends State<RecipesScreen> {
         labelFor: _sortLabel,
         onSelected: widget.preferences.setSort,
       ),
-      IconButton(
-        key: const Key('recipe-view'),
-        tooltip: widget.preferences.view == RecipeView.cards
-            ? 'Switch to Compact view'
-            : 'Switch to Cards view',
-        constraints: const BoxConstraints.tightFor(width: 48, height: 48),
-        onPressed: () => widget.preferences.setView(
-          widget.preferences.view == RecipeView.cards
-              ? RecipeView.compact
-              : RecipeView.cards,
-        ),
-        icon: Icon(
-          widget.preferences.view == RecipeView.cards
-              ? Symbols.view_list
-              : Symbols.view_agenda,
-        ),
-      ),
+      if (includeView) _viewButton(),
     ];
+    if (wrap) {
+      return Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: controls,
+      );
+    }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -698,6 +788,20 @@ class RecipesScreenState extends State<RecipesScreen> {
     search: _search(),
     controls: _controls(),
   );
+
+  Widget _headerColumn({required Widget child, required bool centered}) =>
+      centered
+      ? Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            // Both the search and heading supply their own 16 dp side inset.
+            constraints: const BoxConstraints(
+              maxWidth: recipeContentMaxWidth + 32,
+            ),
+            child: child,
+          ),
+        )
+      : child;
 
   Widget _emptyLibrary(BuildContext context, double width) {
     final theme = Theme.of(context);
@@ -883,7 +987,9 @@ class RecipesScreenState extends State<RecipesScreen> {
             .map((recipe) => recipe.id)
             .toSet();
         _rows.removeWhere((id, _) => !currentIds.contains(id));
-        final columns = recipeGridColumns(constraints.maxWidth - 32);
+        final columns = widget.preferences.view == RecipeView.compact
+            ? 1
+            : recipeGridColumns(constraints.maxWidth - 32);
         final grid =
             columns > 1 &&
             widget.preferences.view == RecipeView.cards &&
@@ -898,10 +1004,23 @@ class RecipesScreenState extends State<RecipesScreen> {
             fixedHeight: cardHeight,
             columns: columns,
           );
+        } else {
+          _compactPreparation.configure(
+            context,
+            recipes,
+            math.min(constraints.maxWidth - 32, recipeContentMaxWidth) - 48,
+          );
         }
         final scale = MediaQuery.textScalerOf(context).scale(1);
         final searchHeight = 64.0 + (scale - 1).clamp(0, 3) * 24;
-        final wide = MediaQuery.sizeOf(context).width >= 600;
+        final window = MediaQuery.sizeOf(context);
+        final wide = window.width >= 600;
+        final centeredHeader = usesWidePageColumn(context);
+        final viewInHeading =
+            !wide &&
+            widget.selectedIds == null &&
+            widget.store.summaries.isNotEmpty &&
+            _controlWidths().row > constraints.maxWidth - 32;
         return Stack(
           children: [
             Focus(
@@ -919,6 +1038,7 @@ class RecipesScreenState extends State<RecipesScreen> {
                   onRefresh: widget.onSync ?? () async {},
                   child: _RecipeScrollView(
                     preparation: _cardPreparation,
+                    compactPreparation: _compactPreparation,
                     enabled: widget.preferences.view == RecipeView.cards,
                     controller: _scroll,
                     slivers: [
@@ -933,52 +1053,77 @@ class RecipesScreenState extends State<RecipesScreen> {
                               PageHeadings.gap,
                           child: ColoredBox(
                             color: Theme.of(context).scaffoldBackgroundColor,
-                            child: widget.selectedIds != null
-                                ? Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                    ),
-                                    child: _selectionBar(),
-                                  )
-                                : TabHeading(
-                                    title: _heading(
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Symbols.skillet, size: 28),
-                                          const SizedBox(width: 8),
-                                          const Flexible(
-                                            child: Text(
-                                              'cookdex',
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
+                            child: _headerColumn(
+                              centered: centeredHeader,
+                              child: widget.selectedIds != null
+                                  ? Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                      ),
+                                      child: _selectionBar(),
+                                    )
+                                  : Padding(
+                                      padding: EdgeInsets.only(
+                                        right: centeredHeader || viewInHeading
+                                            ? 8
+                                            : 0,
+                                      ),
+                                      child: TabHeading(
+                                        title: _heading(
+                                          Row(
+                                            key: const Key(
+                                              'recipe-library-brand',
                                             ),
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Symbols.skillet,
+                                                size: 28,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              const Flexible(
+                                                child: Text(
+                                                  'cookdex',
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                        ],
+                                        ),
+                                        action: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            if (widget.syncStatus != null ||
+                                                widget.syncController != null)
+                                              VisibleListenableBuilder(
+                                                listenable:
+                                                    widget.syncController,
+                                                builder: (_) => SyncIndicator(
+                                                  status:
+                                                      widget.syncController ==
+                                                          null
+                                                      ? widget.syncStatus!
+                                                      : syncPresentation(
+                                                          widget
+                                                              .syncController!,
+                                                          widget
+                                                              .store
+                                                              .conflicts
+                                                              .length,
+                                                        ),
+                                                  onTap:
+                                                      widget.onSyncStatus ??
+                                                      () {},
+                                                ),
+                                              ),
+                                            if (viewInHeading) _viewButton(),
+                                          ],
+                                        ),
                                       ),
                                     ),
-                                    action:
-                                        widget.syncStatus != null ||
-                                            widget.syncController != null
-                                        ? VisibleListenableBuilder(
-                                            listenable: widget.syncController,
-                                            builder: (_) => SyncIndicator(
-                                              status:
-                                                  widget.syncController == null
-                                                  ? widget.syncStatus!
-                                                  : syncPresentation(
-                                                      widget.syncController!,
-                                                      widget
-                                                          .store
-                                                          .conflicts
-                                                          .length,
-                                                    ),
-                                              onTap:
-                                                  widget.onSyncStatus ?? () {},
-                                            ),
-                                          )
-                                        : null,
-                                  ),
+                            ),
                           ),
                         ),
                       ),
@@ -989,14 +1134,17 @@ class RecipesScreenState extends State<RecipesScreen> {
                             height: searchHeight,
                             child: ColoredBox(
                               color: Theme.of(context).scaffoldBackgroundColor,
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  0,
-                                  16,
-                                  8,
+                              child: _headerColumn(
+                                centered: centeredHeader,
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    0,
+                                    16,
+                                    8,
+                                  ),
+                                  child: wide ? _wideToolbar() : _search(),
                                 ),
-                                child: wide ? _wideToolbar() : _search(),
                               ),
                             ),
                           ),
@@ -1005,10 +1153,9 @@ class RecipesScreenState extends State<RecipesScreen> {
                         SliverToBoxAdapter(
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                            child: PixelSingleChildScrollView(
-                              key: const Key('recipe-controls-scroll'),
-                              scrollDirection: Axis.horizontal,
-                              child: _controls(),
+                            child: _controls(
+                              wrap: true,
+                              includeView: !viewInHeading,
                             ),
                           ),
                         ),
@@ -1036,39 +1183,59 @@ class RecipesScreenState extends State<RecipesScreen> {
                         const SliverFillRemaining(
                           child: Center(child: CircularProgressIndicator()),
                         )
+                      else if (recipes.isEmpty &&
+                          widget.store.error == null &&
+                          widget.store.summaries.isEmpty)
+                        SliverLayoutBuilder(
+                          builder: (context, sliver) => SliverToBoxAdapter(
+                            child: ConstrainedBox(
+                              // Use the real laid-out welcome height. Filling
+                              // from intrinsic height undercounts wrapped
+                              // actions at large text sizes on short windows.
+                              constraints: BoxConstraints(
+                                minHeight: math.max(
+                                  0,
+                                  sliver.viewportMainAxisExtent -
+                                      sliver.precedingScrollExtent,
+                                ),
+                              ),
+                              child: _emptyLibrary(
+                                context,
+                                constraints.maxWidth,
+                              ),
+                            ),
+                          ),
+                        )
                       else if (recipes.isEmpty && widget.store.error == null)
                         SliverFillRemaining(
                           hasScrollBody: false,
-                          child: widget.store.summaries.isEmpty
-                              ? _emptyLibrary(context, constraints.maxWidth)
-                              : Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(24),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const FaceliftIconTile(
-                                          Symbols.search_off,
-                                          size: 56,
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Text(
-                                          'No matching recipes',
-                                          textAlign: TextAlign.center,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleLarge,
-                                        ),
-                                        const SizedBox(height: 16),
-                                        TextButton(
-                                          onPressed:
-                                              widget.preferences.resetSearch,
-                                          child: const Text('Reset'),
-                                        ),
-                                      ],
-                                    ),
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const FaceliftIconTile(
+                                    Symbols.search_off,
+                                    size: 56,
                                   ),
-                                ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'No matching recipes',
+                                    textAlign: TextAlign.center,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleLarge,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  TextButton(
+                                    onPressed: widget.preferences.resetSearch,
+                                    child: const Text('Reset'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                       if (recipes.isNotEmpty)
                         _recipeList(recipes, columns, cardHeight),
@@ -1152,6 +1319,7 @@ class RecipesScreenState extends State<RecipesScreen> {
 class _RecipeScrollView extends StatelessWidget {
   const _RecipeScrollView({
     required this.preparation,
+    required this.compactPreparation,
     required this.enabled,
     required this.controller,
     required this.slivers,
@@ -1160,21 +1328,28 @@ class _RecipeScrollView extends StatelessWidget {
   final ScrollController controller;
   final List<Widget> slivers;
   final CardPreparation preparation;
+  final CompactTextPreparation compactPreparation;
 
   @override
-  Widget build(BuildContext context) => ProgressiveCards(
-    preparation: preparation,
+  Widget build(BuildContext context) => PreparedCompactText(
+    work: compactPreparation,
+    enabled: !enabled,
     controller: controller,
-    child: IdleBuildAhead(
+    child: ProgressiveCards(
       enabled: enabled,
+      preparation: preparation,
       controller: controller,
-      paused: preparation.paused,
-      builder: (context, cache) => PixelCustomScrollView(
-        key: const PageStorageKey('recipes-scroll'),
-        scrollCacheExtent: ScrollCacheExtent.pixels(cache),
+      child: IdleBuildAhead(
+        enabled: enabled,
         controller: controller,
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: slivers,
+        paused: preparation.paused,
+        builder: (context, cache) => PixelCustomScrollView(
+          key: const PageStorageKey('recipes-scroll'),
+          scrollCacheExtent: ScrollCacheExtent.pixels(cache),
+          controller: controller,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: slivers,
+        ),
       ),
     ),
   );
@@ -1215,6 +1390,7 @@ class _RecipeRow extends StatelessWidget {
   Widget _build(BuildContext context, int stage, CardGeometry? geometry) {
     final theme = Theme.of(context);
     final compact = view == RecipeView.compact;
+    final simpleTouch = theme.platform == TargetPlatform.android;
     final star = selecting
         ? SizedBox(
             width: 48,
@@ -1225,23 +1401,41 @@ class _RecipeRow extends StatelessWidget {
               onChanged: (_) => onOpen(recipe.id),
             ),
           )
-        : IconButton(
-            tooltip: recipe.favorite
-                ? 'Unfavorite ${recipe.title}'
-                : 'Favorite ${recipe.title}',
+        : simpleTouch
+        ? CompactTouchTarget(
+            key: ValueKey('${compact ? 'compact' : 'card'}-star-${recipe.id}'),
+            favoriteLabel:
+                '${recipe.favorite ? 'Unfavorite' : 'Favorite'} ${recipe.title}',
+            onTap: () {
+              popCardStar(context, !recipe.favorite);
+              onFavorite();
+            },
+            child: SizedBox.square(
+              dimension: 48,
+              child: Center(
+                child: Icon(
+                  Symbols.star,
+                  size: 24,
+                  fill: recipe.favorite ? 1 : 0,
+                  color: recipe.favorite
+                      ? theme.colorScheme.tertiary
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          )
+        : RecipeFavoriteButton(
+            title: recipe.title,
+            favorite: recipe.favorite,
             onPressed: () {
               popCardStar(context, !recipe.favorite);
               onFavorite();
             },
-            icon: Icon(
-              Symbols.star,
-              fill: recipe.favorite ? 1 : 0,
-              color: recipe.favorite
-                  ? theme.colorScheme.tertiary
-                  : theme.colorScheme.onSurfaceVariant,
-            ),
           );
-    final prepared = geometry?.title;
+    final compactText = compact
+        ? PreparedCompactText.maybeOf(context)?.lookup(recipe)
+        : null;
+    final prepared = compactText?.title ?? geometry?.title;
     final title = prepared != null
         ? PreparedCardTitle(recipe.title, prepared: prepared)
         : Text(
@@ -1260,150 +1454,198 @@ class _RecipeRow extends StatelessWidget {
       singleLine: grid,
       optimizeItems: !compact,
     );
-    final row = InkWell(
-      onTap: () => onOpen(recipe.id),
-      onLongPress: () => onActions(recipe),
-      onSecondaryTap: () => onActions(recipe),
-      child: compact
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            title,
-                            if (recipe.tags.isNotEmpty)
-                              Text(
-                                normalizeTags(recipe.tags).join(' · '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(width: 48, child: star),
-                    ],
-                  ),
+    final gridBody = grid
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(right: 44),
+                child: RecipeCardTextBudget(
+                  title: recipe.title,
+                  preparedTitle: prepared == null ? null : title,
+                  preparedTitleLines: prepared?.painter
+                      .computeLineMetrics()
+                      .length
+                      .clamp(1, 2),
+                  description: stage >= 1 ? recipe.description : '',
                 ),
-                const Divider(height: 1),
-              ],
-            )
-          : grid
-          ? Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Stack(
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 44),
-                        child: RecipeCardTextBudget(
-                          title: recipe.title,
-                          preparedTitle: prepared == null ? null : title,
-                          preparedTitleLines: prepared?.painter
-                              .computeLineMetrics()
-                              .length
-                              .clamp(1, 2),
-                          description: stage >= 1 ? recipe.description : '',
-                        ),
-                      ),
-                      const Spacer(),
-                      SizedBox(
-                        height: recipeMetadataLineHeight(context),
-                        child: stage >= 2 ? metadata : null,
-                      ),
-                      const SizedBox(height: 8),
-                      // Empty tags reserve the same footer slot as populated cards.
-                      SizedBox(
-                        height: recipeGridTagHeight(context),
-                        child: stage >= 3
-                            ? RecipeTagLine(
-                                recipe.tags,
-                                preparedValues: geometry?.tagLabels,
-                                preparedVisible: geometry?.visibleTags,
-                                preparedWidth: geometry?.tagWidth,
-                              )
-                            : null,
-                      ),
-                    ],
-                  ),
-                  if (stage >= 4 || selecting)
-                    Positioned(right: -10, top: 0, child: star),
-                ],
               ),
-            )
-          : Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 48),
-                child: Stack(
-                  fit: StackFit.passthrough,
+              const Spacer(),
+              SizedBox(
+                height: recipeMetadataLineHeight(context),
+                child: stage >= 2 ? metadata : null,
+              ),
+              const SizedBox(height: 8),
+              // Empty tags reserve the same footer slot as populated cards.
+              SizedBox(
+                height: recipeGridTagHeight(context),
+                child: stage >= 3
+                    ? RecipeTagLine(
+                        recipe.tags,
+                        preparedValues: geometry?.tagLabels,
+                        preparedVisible: geometry?.visibleTags,
+                        preparedWidth: geometry?.tagWidth,
+                      )
+                    : null,
+              ),
+            ],
+          )
+        : null;
+    final contents = compact
+        ? Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.only(right: 54),
-                      child: RecipeCardContent(
-                        title: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            title,
-                            if (recipe.description.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 4),
-                                child: stage < 1
-                                    ? SizedBox(
-                                        height: geometry!.descriptionHeight,
-                                      )
-                                    : Text(
-                                        recipe.description,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: theme.textTheme.bodySmall
-                                            ?.copyWith(
-                                              color: theme
-                                                  .colorScheme
-                                                  .onSurfaceVariant,
-                                            ),
-                                      ),
-                              ),
-                          ],
-                        ),
-                        metadata: stage < 2
-                            ? SizedBox(height: geometry!.metadataHeight)
-                            : metadata.isEmpty
-                            ? const SizedBox.shrink()
-                            : metadata,
-                        tags: stage < 3
-                            ? SizedBox(height: geometry!.tagsHeight)
-                            : recipe.tags.isEmpty
-                            ? const SizedBox.shrink()
-                            : RecipeTagLine(
-                                recipe.tags,
-                                preparedValues: geometry?.tagLabels,
-                                preparedVisible: geometry?.visibleTags,
-                                preparedWidth: geometry?.tagWidth,
-                              ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          title,
+                          if (recipe.tags.isNotEmpty)
+                            compactText?.tags != null
+                                ? PreparedCardTitle(
+                                    compactText!.tagLabel,
+                                    prepared: compactText.tags!,
+                                  )
+                                : Text(
+                                    normalizeTags(recipe.tags).join(' · '),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                        ],
                       ),
                     ),
-                    if (stage >= 4 || selecting)
-                      Positioned(right: 0, top: 0, child: star),
+                    SizedBox(width: 48, child: star),
                   ],
                 ),
               ),
+              const Divider(height: 1),
+            ],
+          )
+        : grid
+        ? simpleTouch
+              ? Stack(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      child: gridBody,
+                    ),
+                    if (stage >= 4 || selecting)
+                      Positioned(right: 4, top: 10, child: star),
+                  ],
+                )
+              : Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  child: Stack(
+                    children: [
+                      gridBody!,
+                      if (stage >= 4 || selecting)
+                        Positioned(right: -10, top: 0, child: star),
+                    ],
+                  ),
+                )
+        : Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Stack(
+                fit: StackFit.passthrough,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 54),
+                    child: RecipeCardContent(
+                      title: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          title,
+                          if (recipe.description.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: stage < 1
+                                  ? SizedBox(
+                                      height: geometry!.descriptionHeight,
+                                    )
+                                  : Text(
+                                      recipe.description,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    ),
+                            ),
+                        ],
+                      ),
+                      metadata: stage < 2
+                          ? SizedBox(height: geometry!.metadataHeight)
+                          : metadata.isEmpty
+                          ? const SizedBox.shrink()
+                          : metadata,
+                      tags: stage < 3
+                          ? SizedBox(height: geometry!.tagsHeight)
+                          : recipe.tags.isEmpty
+                          ? const SizedBox.shrink()
+                          : RecipeTagLine(
+                              recipe.tags,
+                              preparedValues: geometry?.tagLabels,
+                              preparedVisible: geometry?.visibleTags,
+                              preparedWidth: geometry?.tagWidth,
+                            ),
+                    ),
+                  ),
+                  if (stage >= 4 || selecting)
+                    Positioned(right: 0, top: 0, child: star),
+                ],
+              ),
             ),
-    );
+          );
+    final row = simpleTouch
+        ? CompactTouchTarget(
+            key: ValueKey('${compact ? 'compact' : 'card'}-row-${recipe.id}'),
+            trailingControl: compact || stage >= 4 || selecting,
+            card: !compact,
+            cornerRadius: compact ? 4 : FaceliftTokens.cardRadius,
+            onTap: () => onOpen(recipe.id),
+            onLongPress: () => onActions(recipe),
+            child: contents,
+          )
+        : InkWell(
+            onTap: () => onOpen(recipe.id),
+            onLongPress: () => onActions(recipe),
+            onSecondaryTap: () => onActions(recipe),
+            child: contents,
+          );
     if (compact) return row;
+    if (simpleTouch) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(FaceliftTokens.cardRadius),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(FaceliftTokens.cardRadius),
+          child: row,
+        ),
+      );
+    }
     return Material(
       color: theme.colorScheme.surfaceContainer,
       borderRadius: BorderRadius.circular(FaceliftTokens.cardRadius),

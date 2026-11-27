@@ -8,6 +8,7 @@ import 'package:cookdex/src/rust/api.dart';
 import 'package:cookdex/ui/recipe_detail.dart';
 import 'package:cookdex/ui/theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
@@ -210,7 +211,7 @@ void main() {
         matching: find.byType(TextButton),
       );
       expect(button, opens ? findsOneWidget : findsNothing);
-      expect(find.text('Source'), opens ? findsNothing : findsOneWidget);
+      expect(find.text('Source'), findsOneWidget);
       await tester.ensureVisible(value);
       await tester.pumpAndSettle();
       await tester.tap(value);
@@ -390,9 +391,9 @@ void main() {
       findsOneWidget,
     );
     Rect overviewRect() =>
-        tester.getRect(find.byKey(const Key('recipe-overview-pane')));
+        tester.getRect(find.byKey(const Key('recipe-readable-overview')));
     Rect directionsRect() =>
-        tester.getRect(find.byKey(const Key('recipe-directions-pane')));
+        tester.getRect(find.byKey(const Key('recipe-readable-directions')));
     void expectGutterAndAlignment() {
       expect(directionsRect().left - overviewRect().right, 24);
       expect(tester.getTopLeft(find.text('Steps')).dx, directionsRect().left);
@@ -534,6 +535,97 @@ void main() {
     expect(tester.widget<AnimatedOpacity>(_barTitleOpacity()).opacity, 0);
   });
 
+  for (final (name, size, platform) in [
+    ('Windows', const Size(1800, 1000), TargetPlatform.windows),
+    ('landscape tablet', const Size(1280, 800), TargetPlatform.android),
+  ]) {
+    for (final scale in [1.0, 1.5]) {
+      testWidgets(
+        '$name $scale Recipe and Cook margins scroll only the nearest pane',
+        (tester) async {
+          final cook = await _mount(
+            tester,
+            size,
+            scale: scale,
+            platform: platform,
+          );
+          final overview = tester
+              .widget<SingleChildScrollView>(_overview())
+              .controller!;
+          final directions = tester
+              .widget<SingleChildScrollView>(_directions())
+              .controller!;
+          final leftContent = tester.getRect(
+            find.byKey(const Key('recipe-readable-overview')),
+          );
+          final rightContent = tester.getRect(
+            find.byKey(const Key('recipe-readable-directions')),
+          );
+          final leftViewport = tester.getRect(_overview());
+          final rightViewport = tester.getRect(_directions());
+          expect(leftViewport.left, closeTo(0, 1e-6));
+          expect(rightViewport.right, closeTo(size.width, 1e-6));
+          expect(leftContent.width, closeTo(420, 1e-6));
+          expect(rightContent.left - leftContent.right, closeTo(24, 1e-6));
+          expect(
+            leftContent.left,
+            closeTo(size.width - rightContent.right, 1e-6),
+          );
+          final leftPoint = Offset(
+            leftContent.left / 2,
+            leftViewport.center.dy,
+          );
+          final rightPoint = Offset(
+            (rightContent.right + size.width) / 2,
+            rightViewport.center.dy,
+          );
+          for (final cooking in [false, true]) {
+            if (cooking) {
+              cook.toggle();
+              await tester.pumpAndSettle();
+            }
+            final controls = cooking
+                ? tester.getRect(find.byType(CookNavigation))
+                : null;
+            if (controls != null) {
+              expect(controls.left, closeTo(rightContent.left, 1e-6));
+              expect(controls.right, closeTo(rightContent.right, 1e-6));
+              expect(controls.bottom, closeTo(rightViewport.bottom, 1e-6));
+            }
+            for (final (point, active, other) in [
+              (leftPoint, overview, directions),
+              (rightPoint, directions, overview),
+            ]) {
+              overview.jumpTo(0);
+              directions.jumpTo(0);
+              await tester.pumpAndSettle();
+              await tester.dragFrom(point, const Offset(0, -200));
+              await tester.pumpAndSettle();
+              expect(active.offset, greaterThan(100));
+              expect(other.offset, 0);
+              final afterTouch = active.offset;
+              await tester.sendEventToBinding(
+                PointerScrollEvent(
+                  kind: PointerDeviceKind.mouse,
+                  position: point,
+                  scrollDelta: const Offset(0, 140),
+                ),
+              );
+              await tester.pumpAndSettle();
+              expect(active.offset, greaterThan(afterTouch));
+              expect(other.offset, 0);
+              if (controls != null) {
+                expect(tester.getRect(find.byType(CookNavigation)), controls);
+              }
+            }
+          }
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+  }
+
   testWidgets(
     'toolbar title waits for the whole title and tracks pane resize',
     (tester) async {
@@ -580,7 +672,10 @@ void main() {
       find.byKey(const Key('recipe-directions-pane')),
     );
     expect(controls.left, right.left);
-    expect(controls.right, right.right);
+    expect(
+      controls.right,
+      tester.getRect(find.byKey(const Key('recipe-readable-directions'))).right,
+    );
     expect(controls.bottom, right.bottom);
     expect(measuredHeights.last, controls.height);
     expect(

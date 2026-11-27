@@ -80,7 +80,7 @@ Uint8List youtubeDescriptionRequest(
       },
       'generation_config': {
         'max_output_tokens': 8192,
-        'thinking_level': settings.effort == 'thorough' ? 'high' : 'minimal',
+        if (settings.thinking != 'default') 'thinking_level': settings.thinking,
       },
     }),
   ),
@@ -245,7 +245,7 @@ Uint8List youtubePartialRequest(
       },
       'generation_config': {
         'max_output_tokens': 8192,
-        'thinking_level': settings.effort == 'thorough' ? 'high' : 'minimal',
+        if (settings.thinking != 'default') 'thinking_level': settings.thinking,
       },
     }),
   ),

@@ -30,6 +30,7 @@ internal fun cameraPermissionAnswer(result: Int?, showRationale: Boolean): Strin
 
 class MainActivity : FlutterFragmentActivity() {
     private var platformChannel: MethodChannel? = null
+    private var frameHints: FramePerformanceHints? = null
     private val startupSplash = StartupSplash(this)
     private val firstFrame = object : FlutterUiDisplayListener {
         override fun onFlutterUiDisplayed() = startupSplash.firstFrame()
@@ -79,6 +80,7 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        frameHints = FramePerformanceHints(this, flutterEngine)
         if (packageName == "com.sylph.cookdex.dev.profile") {
             // The implementation exists only in the isolated profile source set.
             Class.forName("com.sylph.cookdex.ProfileTouchInput")
@@ -239,7 +241,13 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
+    override fun onResume() {
+        frameHints?.setResumed(true)
+        super.onResume()
+    }
+
     override fun onPause() {
+        frameHints?.setResumed(false)
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         super.onPause()
     }
@@ -258,6 +266,7 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun onDestroy() {
+        frameHints?.close()
         flutterEngine?.renderer?.removeIsDisplayingFlutterUiListener(firstFrame)
         startupSplash.close()
         platformChannel?.setMethodCallHandler(null)

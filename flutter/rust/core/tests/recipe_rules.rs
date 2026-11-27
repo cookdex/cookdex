@@ -372,6 +372,65 @@ fn ingredient_paste_retains_components_quantities_preparation_and_review_lines()
     );
 }
 #[test]
+fn ingredient_paste_preserves_bakers_percentages_without_weakening_package_checks() {
+    for (line, amount, unit, name, prep) in [
+        (
+            "500 g bread flour (100%)",
+            "500",
+            "g",
+            "bread flour (100%)",
+            "",
+        ),
+        ("375 g water (75%)", "375", "g", "water (75%)", ""),
+        ("12.5 g salt (2.5%)", "12.5", "g", "salt (2.5%)", ""),
+        ("12,5 g salt (2,5%)", "12.5", "g", "salt (2,5%)", ""),
+        (
+            "80 grams of starter (16 %), active",
+            "80",
+            "g",
+            "of starter (16 %)",
+            "active",
+        ),
+        (
+            "500 g (100%) bread flour, sifted",
+            "500",
+            "g",
+            "(100%) bread flour",
+            "sifted",
+        ),
+        (
+            "600 g water (120%), warm",
+            "600",
+            "g",
+            "water (120%)",
+            "warm",
+        ),
+        ("15 g salt, fine (3%)", "15", "g", "salt", "fine (3%)"),
+    ] {
+        let row = paste::parse_ingredients(line, "Dough").unwrap().remove(0);
+        assert!(row.issue.is_none(), "{line}: {:?}", row.issue);
+        assert_eq!(row.original, line);
+        assert_eq!(row.ingredient.amount, Amount::parse_new(amount).unwrap());
+        assert_eq!(row.ingredient.unit, unit);
+        assert_eq!(row.ingredient.name, name);
+        assert_eq!(row.ingredient.prep_note, prep);
+        assert_eq!(row.ingredient.section, "Dough");
+    }
+    for line in [
+        "2 (400 g) cans tomatoes",
+        "500 g flour (100)",
+        "500 g flour (100% or 400 g)",
+        "500 g flour (100%) (400 g)",
+        "500 g (100%)",
+    ] {
+        let row = paste::parse_ingredients(line, "").unwrap().remove(0);
+        assert!(row.issue.is_some(), "{line}");
+        assert_eq!(row.ingredient.name, line);
+        assert_eq!(row.ingredient.amount, Amount::Unspecified);
+    }
+}
+
+#[test]
 fn ordinary_recipe_preserves_unknown_text_and_invalid_attribution() {
     let result=paste::parse_recipe_input("Soup\nServes: 4\nPrep time: 10 minutes\nA family recipe\nSource: Grandma\nIngredients:\nSauce:\n1/3 cup oil\n2 tomatoes, diced\nMethod:\n1. Mix.\n2. Simmer.\nNotes:\nTaste before serving.",NOW).unwrap();
     let r = &result.candidates[0].recipe.content;

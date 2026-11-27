@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show PlatformException;
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../app_platform.dart';
+import '../create_preferences.dart';
 import '../help_content.dart';
 import '../settings_platform.dart';
 import '../import_diagnostics.dart';
@@ -14,6 +15,7 @@ import '../local_preferences.dart';
 import '../src/rust/api.dart' show ProviderMode, ServiceError;
 import 'components.dart';
 import 'feedback.dart';
+import 'gemini_model_dialog.dart';
 import 'how_cookdex_works_screen.dart';
 import 'navigation_feedback.dart';
 import 'smart_record_dialog.dart';
@@ -74,12 +76,10 @@ class SmartSettingsScreen extends StatefulWidget {
 }
 
 class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
-  static const _recommendedModel = 'gemini-3.5-flash-lite';
   final _key = TextEditingController();
   final _model = TextEditingController();
   String _effort = 'standard';
-  late YoutubeWatchModel _watchModel;
-  bool _customModel = false;
+  String _thinking = SmartImportSettings.recommendedThinking;
   SmartImportSettings? _saved;
   bool _busy = true;
   String? _error;
@@ -92,8 +92,6 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _watchModel =
-        widget.preferences?.youtubeWatchModel ?? YoutubeWatchModel.flash;
     _key.addListener(_changed);
     _model.addListener(_changed);
     _load();
@@ -121,7 +119,7 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
       _saved = settings;
       _model.text = settings.model;
       _effort = settings.effort;
-      _customModel = settings.model != _recommendedModel;
+      _thinking = settings.thinking;
     } catch (_) {
       if (mounted) {
         _error = widget.keyPage
@@ -175,15 +173,6 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
         effort: _effort,
       );
       if (!mounted) return;
-      final prefs = widget.preferences;
-      if (!widget.keyPage && prefs != null) {
-        prefs.setYoutubeWatchModel(_watchModel);
-        await prefs.flush();
-        if (!mounted) return;
-        if (prefs.persistenceError != null) {
-          throw StateError(prefs.persistenceError!);
-        }
-      }
       // Clear immediately after the successful write, before refreshing state.
       _key.clear();
       final saved = await widget.service.platform.settings();
@@ -191,7 +180,7 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
       _saved = saved;
       _model.text = saved.model;
       _effort = saved.effort;
-      _customModel = saved.model != _recommendedModel;
+      _thinking = saved.thinking;
     },
     failure: widget.keyPage
         ? 'Could not save the Gemini key.'
@@ -211,6 +200,27 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
         : _save,
     child: const Text('Save'),
   );
+
+  Future<void> _editModel() async {
+    if (_busy || _saved == null) return;
+    final result = await showDialog<GeminiModelSelection>(
+      context: context,
+      builder: (_) => GeminiModelDialog(
+        title: 'Recipe import',
+        model: _model.text,
+        thinking: _thinking,
+        recommendedModel: SmartImportSettings.recommendedModel,
+        recommendedThinking: SmartImportSettings.recommendedThinking,
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _model.text = result.model;
+      _effort = result.thinking;
+      _thinking = result.thinking;
+    });
+    await _save();
+  }
 
   Future<void> _remove() async {
     if (_busy || _saved?.hasKey != true) return;
@@ -389,128 +399,32 @@ class _SmartSettingsScreenState extends State<SmartSettingsScreen> {
                 ),
                 const SizedBox(height: 16),
               ],
-              if (!widget.keyPage)
-                ExpansionTile(
-                  title: const Text('Advanced'),
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: const EdgeInsets.only(top: 8, bottom: 16),
-                  children: [
-                    DropdownButtonFormField<String>(
-                      key: ValueKey('effort-$_effort'),
-                      initialValue: _effort,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Effort'),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'standard',
-                          child: Text('Standard'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'thorough',
-                          child: Text('Thorough'),
-                        ),
-                      ],
-                      onChanged: _busy || _saved == null
-                          ? null
-                          : (value) => setState(() => _effort = value!),
-                    ),
-                    const SizedBox(height: 8),
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Thorough is slower and uses more of your free daily limit.',
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<bool>(
-                      key: ValueKey('model-$_customModel'),
-                      initialValue: _customModel,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Model'),
-                      items: const [
-                        DropdownMenuItem(
-                          value: false,
-                          child: Text('Gemini 3.5 Flash-Lite (recommended)'),
-                        ),
-                        DropdownMenuItem(
-                          value: true,
-                          child: Text('Custom model ID'),
-                        ),
-                      ],
-                      onChanged: _busy || _saved == null
-                          ? null
-                          : (value) => setState(() {
-                              _customModel = value!;
-                              _model.text = _customModel
-                                  ? ''
-                                  : _recommendedModel;
-                            }),
-                    ),
-                    SizedBox(height: _customModel ? 16 : 8),
-                    if (_customModel)
-                      PixelScrollScope(
-                        axis: Axis.horizontal,
-                        builder: (context) => TextField(
-                          scrollController: PrimaryScrollController.of(context),
-                          controller: _model,
-                          enabled: !_busy && _saved != null,
-                          autocorrect: false,
-                          enableSuggestions: false,
-                          enableIMEPersonalizedLearning: false,
-                          textCapitalization: TextCapitalization.none,
-                          maxLength: 100,
-                          decoration: const InputDecoration(
-                            labelText: 'Custom model ID',
-                            counterText: '',
+              if (!widget.keyPage) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'Model and thinking',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                Card(
+                  child: ListTile(
+                    title: const Text('Recipe import'),
+                    subtitle: _saved == null
+                        ? null
+                        : Text(
+                            '${CreatePreferences.modelName(_model.text)} · ${CreatePreferences.thinkingName(_thinking)}',
                           ),
-                        ),
-                      ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<YoutubeWatchModel>(
-                      key: ValueKey('youtube-${_watchModel.name}'),
-                      initialValue: _watchModel,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'YouTube watching model',
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: YoutubeWatchModel.flash,
-                          child: Text('Gemini 3.8 Flash'),
-                        ),
-                        DropdownMenuItem(
-                          value: YoutubeWatchModel.followImport,
-                          child: Text('Follow Smart Import'),
-                        ),
-                        DropdownMenuItem(
-                          value: YoutubeWatchModel.lite,
-                          child: Text('Gemini 3.5 Flash-Lite'),
-                        ),
-                      ],
-                      onChanged: _busy || _saved == null
-                          ? null
-                          : (value) => setState(() => _watchModel = value!),
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton(
-                        onPressed: _busy || _saved == null
-                            ? null
-                            : () => setState(() {
-                                _effort = 'standard';
-                                _customModel = false;
-                                _model.text = _recommendedModel;
-                                _watchModel = YoutubeWatchModel.flash;
-                              }),
-                        child: const Text('Reset to recommended'),
-                      ),
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: _saveButton(),
-                    ),
-                  ],
+                    trailing: const Icon(Symbols.edit),
+                    enabled: !_busy && _saved != null,
+                    onTap: _busy || _saved == null ? null : _editModel,
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              if (!widget.keyPage)
+                Text(
+                  'Watching YouTube videos uses Gemini 3.8 Flash. '
+                  'This setting does not change it.',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               if (widget.keyPage) ...[
                 const SizedBox(height: 16),

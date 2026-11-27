@@ -1,5 +1,5 @@
 /// All reader-facing help copy lives here. Update this when typical users need new guidance.
-/// Google setup/data-use sources verified 2026-11-12.
+/// Google setup/data-use sources verified 2026-11-12; model availability 2026-11-22.
 class HelpLink {
   const HelpLink(this.label, this.url);
   final String label;
@@ -145,7 +145,7 @@ const helpSections = <HelpSection>[
         '• For a public YouTube video or Short, Gemini checks the title and whole description first. It can use a written recipe there or a recipe page linked in the description.',
         '• If those don’t give a full recipe, Gemini can watch videos up to 15 minutes long using a Google feature still in preview. If cookdex can’t confirm the length or whether the video is public, it offers Watch anyway. Check amounts marked AI guess.',
         '• For a longer video with enough written ingredients, Gemini can fill in missing directions, marked AI-written. Fill in missing amounts before saving.',
-        '• To change the model that watches videos, open Smart Import settings > Advanced.',
+        '• Watching uses Gemini 3.8 Flash and may need a paid key. Changing the model in Smart Import settings doesn’t change video watching.',
       ]),
       HelpGroup('Photos', [
         '• Include every page of the recipe. Hold a thumbnail and drag it to put the pages in order.',
@@ -167,19 +167,20 @@ const helpSections = <HelpSection>[
       'Smart Create suggests dishes from what you have, what you’re in the mood for, or both. It needs a Gemini key.',
       '1. On What you have, list ingredients, add kitchen photos, or say what you’re in the mood for. Options sets the meal, effort and servings.',
       '2. With ingredients or photos, Check lets you review ingredients and staples, tap foods to use up first, and include uncertain finds. A mood on its own goes straight to ideas.',
-      '3. Get ideas shows what you can make now and what needs a few more ingredients.',
+      '3. With ingredients or photos, Get ideas shows what you can make now and what needs a few more ingredients. With a mood alone, it suggests varied home-cooked dishes for that mood, meal and effort, without limiting the shopping list.',
       '4. Get the recipe writes the full recipe. Check the amounts and times before saving. A note flags ingredient or amount changes cookdex finds when it compares the recipe with the idea.',
       '• Calories on an idea are a rough estimate per serving. The calories and any suggested labels, like High protein, aren’t saved with the recipe.',
       '• To aim for a calorie range, high protein or meal prep, say so in your mood or in Other preferences.',
       '• New ideas avoids repeating earlier titles. You can keep browsing ideas while a recipe is on its way.',
+      '• You’ll need lists what you’d have to buy. To shop for an idea, get the recipe, save it, and add to your shopping list from there.',
       '• You can leave Smart Create and come back to your ideas during the same session. Changing your inputs or asking for new ideas can replace them.',
     ],
     groups: [
       HelpGroup('Smart Create settings', [
         '• Foods to avoid blocks ideas and recipes when cookdex recognizes a food you listed. For allergies, check the ingredients yourself. For example, pesto may contain nuts even if the recipe never mentions them.',
         '• Use Other preferences for guidance, like “no egg-heavy dishes”. Gemini tries to follow it, but cookdex doesn’t check the result against it.',
-        '• Staples are things you always keep, like salt and oil. They don’t count toward Items to buy per idea, which limits how many extra items an idea can need when you start with ingredients or photos.',
-        '• You can choose a model for each step. In a step’s settings, Reset to recommended, then Save, restores its model and thinking level. If a model needs billing, Use Flash switches that step to the recommended choice and retries it.',
+        '• Staples are things you always keep, like salt and oil. Smart Create and the shopping list use the same Staples list. They don’t count toward Items to buy per idea, which limits how many extra items an idea can need when you start with ingredients or photos.',
+        '• Model and thinking lets you choose a model for each step. The recommended choice is Gemini 3.5 Flash-Lite with High thinking. Reset to recommended, then Save, restores it. If a model needs billing, Use Flash-Lite switches that step to the recommended choice and retries it.',
       ]),
     ],
   ),
@@ -191,9 +192,10 @@ const helpSections = <HelpSection>[
       '1. Open Google AI Studio with the button below and sign in with your Google account.',
       '2. Open API Keys and create a key, or copy the one that’s already there.',
       '3. In cookdex, open Settings > Smart features > Gemini key, paste the key and choose Save. Test key checks that it works.',
-      'The free tier has usage limits. If you reach one, try again later. Google’s unpaid data-use terms allow it to use requests and replies to improve products, including through human review. See What’s kept and what’s sent for regional differences.',
+      'A free key works with the default models in Smart Import and Smart Create. A paid key unlocks stronger models, which help most with photos, and YouTube watching. The free tier has usage limits; if you reach one, try again later. Google’s unpaid data-use terms allow it to use requests and replies to improve products, including through human review. See What’s kept and what’s sent for regional differences.',
       'Add the key on each device where you want AI help. It’s never included in backups, exports or sync.',
-      'In Smart Import settings > Advanced, choose Standard or Thorough, use the usual Smart Import model or enter a custom model ID. For YouTube watching, choose Gemini 3.8 Flash, Follow Smart Import or Gemini 3.5 Flash-Lite. Thorough can take longer and use more of your quota. Reset to recommended, then Save, restores the defaults. Android backup and phone transfer can restore these choices. Recipe ZIPs and sync don’t include them.',
+      'In Smart Import settings, Model and thinking chooses how Gemini reads text, websites and photos. The recommended choice is Gemini 3.5 Flash-Lite with Low thinking. YouTube’s written recipes use that choice too; watching stays on Gemini 3.8 Flash. More thinking can take longer and use more of your quota.',
+      'Both Smart features let you enter a custom model ID. If it can’t handle a request, choose a model that can. Reset to recommended, then Save, restores the recommended model and thinking. Android backup and phone transfer can restore Smart feature choices. Recipe ZIPs and sync don’t include them.',
     ],
     links: [
       HelpLink('Open Google AI Studio', 'https://aistudio.google.com/apikey'),
@@ -206,11 +208,12 @@ const helpSections = <HelpSection>[
   HelpSection('finding', 'Finding recipes', [
     '• With several words, search shows recipes matching the most words first. It also handles accents, plurals, punctuation, common ingredient names and small typos.',
     '• Search in lets you choose which parts of a recipe to search. Reset restores the usual fields and keeps your search words and filters.',
-    '• The view button switches between Cards and Compact.',
+    '• The view button switches between Cards and Compact, a simple one-column list.',
     '• Tap Recipes or the cookdex heading to jump to the top of your list. While you’re reading a recipe, the first tap on Recipes returns to the list where you were, and the second goes to the top.',
     '• cookdex remembers your place in the last two recipes you opened.',
   ]),
   HelpSection('cooking', 'Reading and cooking', [
+    'On Android, phone-size screens stay in portrait. Larger screens can rotate.',
     'To make more or less, tap the 1× circle beside Ingredients and choose from 0.5× to 5× in half steps. Cook mode and Add to shopping list use the new amounts. Steps, times and temperatures stay as written, so adjust those yourself. Reopening the recipe sets it back to 1×.',
     'In Cook mode, tap each ingredient as you use it. On Android, the screen stays awake while you cook.',
     '• Tap a step to jump to it. If you scroll away, tap the step counter in the middle to bring the current step back into view.',
@@ -219,20 +222,22 @@ const helpSections = <HelpSection>[
   ]),
   HelpSection('shopping', 'Shopping list', [
     'In a recipe, choose Add to shopping list under its ingredients, or Add to list in its menu, then pick what you need.',
-    '• cookdex combines amounts for the same ingredient when it can. Different package sizes and amounts like “to taste” stay on separate lines.',
+    '• Adding something that’s already on the list adds to its unchecked line, in familiar kitchen measures. If that line is checked off, the new amount gets its own line. Different package sizes and amounts like “to taste” stay on separate lines.',
+    '• Staples start unticked when you pick ingredients to add. Tick one if you need it. Open Staples from the shopping list menu or Settings to change the list, or to put one you’ve run out of on your shopping list.',
+    '• Recipes on this list, in the shopping list menu, lets you take off one recipe’s items. Review what will come off, get smaller or stay as it is before removing. Checked items, hand-typed or edited lines, and older lines stay. You can Undo the removal.',
     '• Common ingredients find their aisle automatically. Anything else goes to Other until you move it, and cookdex remembers where you put it.',
     '• After a pause, checked items move into Checked. Tap one there to put it back.',
     '• Long-press an item, or right-click it on Windows, to see its source recipes, edit it, move it to another category or delete it.',
     '• Hold the handle on an unchecked item and drag it to another spot or aisle. To reorder, add, rename or delete aisles, open the shopping list menu and choose Categories.',
-    'Each device keeps its own shopping list. On Android, turn on Keep shopping screen awake in Settings to keep the list in view.',
+    'Each device keeps its own shopping list and Staples. On Android, turn on Keep shopping screen awake in Settings to keep the list in view.',
   ]),
   HelpSection('sharing', 'Sharing recipes', [
     'When you share a recipe from its menu:',
     '• Use Recipe file to send a cookdex recipe that someone can import.',
-    '• Plain text is for a message, or anywhere you want to paste the whole recipe.',
+    '• Plain text gives you a readable recipe to send in a message or paste anywhere.',
     'To share several at once, long-press a recipe, choose Select, pick the others, then choose Share.',
-    'Shared recipes are plain text anyone can read, even without cookdex. Favorites and your shopping list aren’t included. Someone on an older version of cookdex won’t see a Source that isn’t a web address.',
-    'To add a recipe someone sent you, choose Open .txt file on Smart Import’s Text tab, or paste the recipe there. No AI is needed. If the file has several recipes, you’ll get a checklist, and recipes you already have start unchecked.',
+    'Plain text uses the recipe’s saved amounts, even if you changed the multiplier while cooking. Tags, favorites, photos and cook history aren’t included. Use Recipe file to keep the recipe’s saved details for another cookdex user.',
+    'To add a cookdex recipe file someone sent you, choose Open .txt file on Smart Import’s Text tab, or paste the file’s contents there. No AI is needed for recipe files. If the file has several recipes, you’ll get a checklist, and recipes you already have start unchecked. A recipe sent as plain text can be pasted into Smart Import’s Text tab like any other recipe.',
   ]),
   HelpSection('sync', 'Syncing your devices', [
     'Sync keeps the same recipe book on your own devices, directly over your home Wi-Fi, without an account or a cloud service.',
@@ -254,7 +259,7 @@ const helpSections = <HelpSection>[
     '• Recipe ZIP: in Settings > Backup & restore, Download recipe ZIP saves your recipes, favorites and aisles, and Restore recipe ZIP brings them back. Your Gemini key, pairings and shopping list aren’t included.',
     '• Snapshots: while cookdex is open, it saves a copy once a day when something has changed, keeping about a week of daily copies and a month of weekly ones. Find them in Settings > Backup & restore > Snapshots. Restoring a snapshot adds missing recipes and can update a recipe if the copy in the snapshot is newer. It never deletes a recipe. Snapshots stay with this device’s cookdex data.',
     '• Readable cookbook: Save readable cookbook makes a copy you can read outside cookdex.',
-    '• Android backup: on Android 9 or later, with backup on and a screen lock set, your Google account can keep an encrypted copy of your recipes, shopping list, aisles and everyday settings. Your Gemini key, pairings, drafts and snapshots are left out.',
+    '• Android backup: on Android 9 or later, with backup on and a screen lock set, your Google account can keep an encrypted copy of your recipes, shopping list, Staples, aisles and everyday settings. Your Gemini key, pairings, drafts and snapshots are left out.',
     'Moving to a new phone:',
     '1. On your old phone, download a recipe ZIP and keep it somewhere you can reach.',
     '2. After Android setup, install cookdex from GitHub. Android’s standard transfer skips apps installed outside Google Play.',

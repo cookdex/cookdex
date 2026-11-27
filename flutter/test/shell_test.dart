@@ -453,7 +453,15 @@ void main() {
       await gesture('cancelBackGesture');
       await tester.pumpAndSettle();
       expect(find.byType(RecipeDetail), findsOneWidget);
-      await tester.tap(find.text('Shopping list').last);
+      await tester.tap(
+        find
+            .byWidgetPredicate(
+              (widget) =>
+                  widget is Text &&
+                  (widget.semanticsLabel ?? widget.data) == 'Shopping list',
+            )
+            .last,
+      );
       await tester.pumpAndSettle();
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();

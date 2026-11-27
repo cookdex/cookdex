@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'interaction_idle.dart';
+
 import 'local_preferences.dart';
 import 'ingredient_words.dart';
 export 'ingredient_words.dart' show recipeSearchSynonyms;
@@ -112,6 +114,7 @@ class RecipeSearchIndex {
   int _capacity = 0;
   int _longestWord = 0;
   Timer? _warm;
+  bool _disposed = false;
 
   void queue(RecipeSummary recipe) => _pending[recipe.id] = recipe;
 
@@ -177,22 +180,31 @@ class RecipeSearchIndex {
   }
 
   void warm() {
-    if (_warm != null) return;
+    if (_disposed || _warm != null) return;
     if (_pending.isEmpty) {
       onReady();
       return;
     }
     _warm = Timer(Duration.zero, () {
       _warm = null;
-      final watch = Stopwatch()..start();
-      while (_pending.isNotEmpty && watch.elapsedMicroseconds < 1800) {
-        _indexNext();
-      }
-      warm();
+      InteractionIdle.instance.runWhenIdle(this, () {
+        if (_disposed) return;
+        InteractionIdle.synchronous('search-index', () {
+          final watch = Stopwatch()..start();
+          while (_pending.isNotEmpty && watch.elapsedMicroseconds < 1800) {
+            _indexNext();
+          }
+        });
+        warm();
+      });
     });
   }
 
-  void dispose() => _warm?.cancel();
+  void dispose() {
+    _disposed = true;
+    _warm?.cancel();
+    InteractionIdle.instance.cancel(this);
+  }
 
   // A joined word must start and end on word boundaries in one source value.
   Iterable<_Text> _joined(String word) sync* {

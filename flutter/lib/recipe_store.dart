@@ -105,6 +105,18 @@ abstract interface class ShoppingRepository {
   );
 }
 
+abstract interface class ShoppingRemovalRepository {
+  Future<List<core.ShoppingRecipe>> shoppingRecipes(int generation);
+  Future<core.ShoppingRemovalPreview> previewShoppingRemoval(
+    int generation,
+    String recipeId,
+  );
+  Future<core.ShoppingResult> removeShoppingRecipe(
+    int generation,
+    String recipeId,
+  );
+}
+
 abstract interface class ScalingRepository {
   Future<core.ScaledRecipeView> scaleRecipe(
     core.RecipeFields fields,
@@ -125,6 +137,7 @@ class RustRecipeRepository
         SnapshotSubscriptionRepository,
         EditorRecipeRepository,
         ShoppingRepository,
+        ShoppingRemovalRepository,
         ImportRecipeRepository,
         SetAsideRepository,
         BatchDeleteRepository,
@@ -132,6 +145,23 @@ class RustRecipeRepository
         ScalingRepository {
   RustRecipeRepository(this.session);
   final core.CoreSession session;
+  @override
+  Future<List<core.ShoppingRecipe>> shoppingRecipes(int generation) =>
+      session.shoppingRecipes(generation: generation);
+  @override
+  Future<core.ShoppingRemovalPreview> previewShoppingRemoval(
+    int generation,
+    String recipeId,
+  ) => session.previewShoppingRemoval(generation: generation, id: recipeId);
+  @override
+  Future<core.ShoppingResult> removeShoppingRecipe(
+    int generation,
+    String recipeId,
+  ) => session.removeShoppingRecipe(
+    generation: generation,
+    id: recipeId,
+    operation: core.Operation(),
+  );
   @override
   Future<LibraryChangeResult> addLibraryTag(
     int generation,
@@ -329,6 +359,7 @@ class FavoriteUndo {
 
 class RecipeStore extends ChangeNotifier {
   RecipeStore(this.repository, this.preferences) {
+    _observedQuery = preferences.query;
     preferences.addListener(_preferencesChanged);
   }
   final RecipeRepository repository;
@@ -345,6 +376,8 @@ class RecipeStore extends ChangeNotifier {
   final Map<String, List<String>> _amounts = {};
   RecipeSearchIndex? _search;
   bool _waitingForFirstIndex = false;
+  bool _searchFramePainted = false;
+  String _observedQuery = '';
   bool get preparingRecipeSearch =>
       _waitingForFirstIndex &&
       preferences.query.trim().isNotEmpty &&
@@ -355,9 +388,7 @@ class RecipeStore extends ChangeNotifier {
   int _fullMatchCount = 0;
   int get fullMatchCount => _fullMatchCount;
   int? get partialMatchStart =>
-      _fullMatchCount < visibleRecipes.length
-      ? _fullMatchCount
-      : null;
+      _fullMatchCount < visibleRecipes.length ? _fullMatchCount : null;
   String? _visibleQuery;
   RecipeSort? _visibleSort;
   Set<SearchField> _visibleFields = const {};
@@ -444,6 +475,22 @@ class RecipeStore extends ChangeNotifier {
       _snapshot?.shoppingCategories ?? const [];
 
   List<core.ShoppingItem> get shopping => _snapshot?.shopping ?? const [];
+  Future<List<core.ShoppingRecipe>> shoppingRecipes() =>
+      (repository as ShoppingRemovalRepository).shoppingRecipes(generation);
+  Future<core.ShoppingRemovalPreview> previewShoppingRemoval(String recipeId) =>
+      (repository as ShoppingRemovalRepository).previewShoppingRemoval(
+        generation,
+        recipeId,
+      );
+  Future<core.ShoppingUndo> removeShoppingRecipe(
+    core.ShoppingRemovalPreview preview,
+  ) => _mutate(() async {
+    final result = await (repository as ShoppingRemovalRepository)
+        .removeShoppingRecipe(preview.generation, preview.recipeId);
+    _apply(result.snapshot);
+    error = null;
+    return result.undo;
+  });
   List<core.Conflict> get conflicts => _snapshot?.conflicts ?? const [];
   int get setAsideCount => _snapshot?.setAsideCount ?? 0;
   Future<void> discardSetAside(int expectedGeneration) => _mutate(() async {
@@ -582,6 +629,7 @@ class RecipeStore extends ChangeNotifier {
   /// rows and prepared in short event-loop slices while the library is idle.
   void prepareRecipeSearch() {
     if (_disposed) return;
+    _searchFramePainted = true;
     (_search ??= _startSearchIndex()).warm();
   }
 
@@ -1060,6 +1108,12 @@ class RecipeStore extends ChangeNotifier {
       e is core.ServiceError ? e.message : e.toString();
   void _preferencesChanged() {
     if (!_disposed) {
+      if (_observedQuery != preferences.query) {
+        _observedQuery = preferences.query;
+        // A typed search is foreground work. Finish its index synchronously,
+        // even when optional preparation is waiting for scrolling to end.
+        if (_searchFramePainted) _waitingForFirstIndex = false;
+      }
       _refreshVisible();
       notifyListeners();
     }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:cookdex/export_service.dart';
+import 'package:cookdex/recipe_share_text.dart';
 import 'package:cookdex/src/rust/api.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -63,30 +64,46 @@ void main() {
       expect(platform.calls.single, ('copy', cookdexDownloadUrl, null));
     },
   );
-  test('selected recipes use cookbook text and count filenames', () async {
-    final platform = _Platform();
-    final service = ExportService(
-      platform: platform,
-      exporter: (value) async => 'Recipe ${value.id}',
-    );
-    final values = [recipe('first'), recipe('second')];
-    await service.cookbook(values);
-    for (final action in ExportAction.values) {
-      await service.recipes(values, action);
-    }
-    expect(platform.calls.map((call) => call.$2).toSet(), {
-      'Recipe first\n\nRecipe second',
-    });
-    expect(platform.calls[2].$3, '2 cookdex recipes.txt');
-    await service.recipes([recipe('one', title: 'Cake')], ExportAction.save);
-    expect(platform.calls.last.$3, 'Cake.txt');
-    await expectLater(service.recipes([], ExportAction.copy), throwsStateError);
-    await service.recipes(
-      List.generate(51, (i) => recipe('$i')),
-      ExportAction.copy,
-    );
-    expect(platform.calls.last.$2.split('Recipe ').length, 52);
-  });
+  test(
+    'selected recipes separate readable messages from exact files',
+    () async {
+      final platform = _Platform();
+      final service = ExportService(
+        platform: platform,
+        exporter: (value) async => 'Recipe ${value.id}',
+      );
+      final values = [
+        recipe('first', title: 'First recipe'),
+        recipe('second', title: 'Second recipe'),
+      ];
+      await service.cookbook(values);
+      for (final action in ExportAction.values) {
+        await service.recipes(values, action);
+      }
+      final readable =
+          '${recipeShareText(values.first)}\n\n────────────\n\n'
+          '${recipeShareText(values.last)}';
+      expect(platform.calls.map((call) => call.$2), [
+        'Recipe first\n\nRecipe second',
+        readable,
+        'Recipe first\n\nRecipe second',
+        readable,
+        'Recipe first\n\nRecipe second',
+      ]);
+      expect(platform.calls[2].$3, '2 cookdex recipes.txt');
+      await service.recipes([recipe('one', title: 'Cake')], ExportAction.save);
+      expect(platform.calls.last.$3, 'Cake.txt');
+      await expectLater(
+        service.recipes([], ExportAction.copy),
+        throwsStateError,
+      );
+      await service.recipes(
+        List.generate(51, (i) => recipe('$i')),
+        ExportAction.copy,
+      );
+      expect(platform.calls.last.$2.split('────────────').length, 51);
+    },
+  );
 
   test('recipe and cookbook text stay within re-import limits', () async {
     final platform = _Platform();
@@ -106,10 +123,28 @@ void main() {
     expect(platform.calls, isEmpty);
   });
 
+  test(
+    'readable messages enforce the text size limit before platform dispatch',
+    () async {
+      final platform = _Platform();
+      final service = ExportService(platform: platform);
+      final oversized = recipe('large', notes: 'é' * (3 * 1024 * 1024));
+      await expectLater(
+        service.recipe(oversized, ExportAction.share),
+        throwsStateError,
+      );
+      await expectLater(
+        service.recipes([oversized], ExportAction.copy),
+        throwsStateError,
+      );
+      expect(platform.calls, isEmpty);
+    },
+  );
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'recipe actions use the exact core text for message, file, copy and save',
+    'recipe messages and copy are readable while files use exact core text',
     () async {
       final platform = _Platform();
       final exports = <Recipe>[];
@@ -125,14 +160,19 @@ void main() {
       for (final action in ExportAction.values) {
         outcomes.add(await service.recipe(value, action));
       }
-      expect(exports, List.filled(4, value));
+      expect(exports, List.filled(2, value));
       expect(platform.calls.map((call) => call.$1), [
         'shareText',
         'shareFile',
         'copy',
         'save',
       ]);
-      expect(platform.calls.map((call) => call.$2).toSet().length, 1);
+      expect(platform.calls[0].$2, recipeShareText(value));
+      expect(platform.calls[2].$2, recipeShareText(value));
+      const exact =
+          'Lemon cake\nIngredients:\n- 33/100 cup cream\nSteps:\n1. Mix';
+      expect(platform.calls[1].$2, exact);
+      expect(platform.calls[3].$2, exact);
       expect(platform.calls.first.$3, 'Lemon cake');
       expect(platform.calls[1].$3, 'Lemon cake.txt');
       expect(platform.calls[3].$3, 'Lemon cake.txt');
@@ -181,7 +221,7 @@ void main() {
         ExportOutcome.copiedFallback,
       );
       expect(platform.calls.map((call) => call.$1), ['shareText', 'copy']);
-      expect(platform.calls.last.$2, 'exact text');
+      expect(platform.calls.last.$2, recipeShareText(recipe('a')));
       platform.calls.clear();
       platform.shareError = MissingPluginException();
       expect(
@@ -189,6 +229,8 @@ void main() {
         ExportOutcome.copiedFallback,
       );
       expect(platform.calls.map((call) => call.$1), ['shareFile', 'copy']);
+      expect(platform.calls.first.$2, 'exact text');
+      expect(platform.calls.last.$2, recipeShareText(recipe('a')));
       platform.calls.clear();
       platform.shareError = PlatformException(
         code: 'share',

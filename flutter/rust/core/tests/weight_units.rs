@@ -41,13 +41,13 @@ fn scaling_keeps_original_weight_units_for_counts_and_ranges() {
 }
 
 #[test]
-fn same_weight_units_stay_and_mixed_units_choose_largest_in_either_order() {
+fn combined_metric_weights_promote_and_imperial_choose_largest_in_either_order() {
     for (rows, expected) in [
         ([("16", "oz"), ("16", "oz")], "32 oz"),
-        ([("750", "g"), ("750", "g")], "1500 g"),
+        ([("750", "g"), ("750", "g")], "1.5 kg"),
         ([("8", "oz"), ("1", "lb")], "1 1/2 lb"),
-        ([("500", "g"), ("1", "kg")], "1 1/2 kg"),
-        ([("1", "g"), ("1/2", "kg")], "501/1000 kg"),
+        ([("500", "g"), ("1", "kg")], "1.5 kg"),
+        ([("1", "g"), ("1/2", "kg")], "501 g"),
         ([("8–16", "oz"), ("1–2", "lb")], "1 1/2–3 lb"),
         ([("8", "tbsp"), ("1", "cup")], "1 1/2 cups"),
     ] {
@@ -79,6 +79,7 @@ fn legacy_separate_weight_measures_consolidate_into_largest_present_unit() {
     for reverse in [false, true] {
         let old = recipe(&[("1", "g")]);
         let mut items = shopping::add(&[], &old, &[0]).unwrap();
+        items[0].contributions = None;
         items[0].measures.push(shopping::Measure {
             amount: Amount::parse_exact("1").unwrap(),
             unit: "lb".into(),

@@ -547,9 +547,9 @@ fn pre_a3_local_rows_get_categories_without_recipe_rewrite() {
             names: names.map(String::from).to_vec(),
         },
     );
-    assert_eq!(after.shopping.len(), 10);
-    assert_eq!(after.shopping[0].id, before.shopping[0].id);
-    assert!(!after.shopping[0].checked);
+    assert_eq!(after.shopping.len(), 11);
+    assert_eq!(after.shopping[0], before.shopping[0]);
+    assert!(!after.shopping[1].checked);
     assert_eq!(after.shopping[1].category_id, "produce");
     assert_eq!(after.shopping[2].category_id, "produce");
     for names in [

@@ -95,6 +95,28 @@ pub struct ShoppingItem {
     pub category_id: String,
 }
 #[derive(Clone, Debug, PartialEq)]
+pub struct ShoppingRecipe {
+    pub recipe_id: String,
+    pub title: String,
+    pub item_count: u32,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShoppingRemovalLine {
+    pub id: String,
+    pub name: String,
+    pub before: String,
+    pub after: Option<String>,
+    pub action: String,
+    pub reason: String,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShoppingRemovalPreview {
+    pub generation: i64,
+    pub recipe_id: String,
+    pub title: String,
+    pub lines: Vec<ShoppingRemovalLine>,
+}
+#[derive(Clone, Debug, PartialEq)]
 pub struct ConflictVersion {
     pub id: String,
     pub recipe: Option<Recipe>,
@@ -677,6 +699,55 @@ impl CoreSession {
             .recover(generation, &operation.inner)?
             .into())
     }
+    pub fn shopping_recipes(&self, generation: i64) -> Result<Vec<ShoppingRecipe>, ServiceError> {
+        Ok(self
+            .service()?
+            .shopping_recipes(generation)?
+            .into_iter()
+            .map(|r| ShoppingRecipe {
+                recipe_id: r.recipe_id.0,
+                title: r.title,
+                item_count: r.item_count,
+            })
+            .collect())
+    }
+    pub fn preview_shopping_removal(
+        &self,
+        generation: i64,
+        id: String,
+    ) -> Result<ShoppingRemovalPreview, ServiceError> {
+        let p = self
+            .service()?
+            .preview_shopping_removal(generation, &core::recipe::RecipeId(id))?;
+        Ok(ShoppingRemovalPreview {
+            generation: p.generation,
+            recipe_id: p.recipe_id.0,
+            title: p.title,
+            lines: p
+                .lines
+                .into_iter()
+                .map(|l| ShoppingRemovalLine {
+                    id: l.id,
+                    name: l.name,
+                    before: l.before,
+                    after: l.after,
+                    action: l.action,
+                    reason: l.reason,
+                })
+                .collect(),
+        })
+    }
+    pub fn remove_shopping_recipe(
+        &self,
+        generation: i64,
+        id: String,
+        operation: &Operation,
+    ) -> Result<ShoppingResult, ServiceError> {
+        Ok(self
+            .service()?
+            .remove_shopping_recipe(generation, &core::recipe::RecipeId(id), &operation.inner)?
+            .into())
+    }
     pub fn add_shopping(
         &self,
         generation: i64,
@@ -1055,7 +1126,9 @@ mod smart_import_tests {
     }
     #[test]
     fn recitation_fallback_preserves_selected_effort_and_forces_all_step_markers() {
-        for effort in ["standard", "thorough"] {
+        for effort in [
+            "standard", "thorough", "default", "minimal", "low", "medium", "high",
+        ] {
             let task = task();
             task.set_effort(effort.into()).unwrap();
             let first: serde_json::Value =
@@ -1376,10 +1449,7 @@ impl ProviderTask {
     pub fn set_effort(&self, effort: String) -> Result<(), ServiceError> {
         self.operation.check()?;
         let state = self.state.lock().unwrap();
-        if state.attempts != 0
-            || state.inflight
-            || !["standard", "thorough"].contains(&effort.as_str())
-        {
+        if state.attempts != 0 || state.inflight || !core::provider::valid_thinking(&effort) {
             return Err(services::Error::Validation.into());
         }
         *self.effort.lock().unwrap() = effort;

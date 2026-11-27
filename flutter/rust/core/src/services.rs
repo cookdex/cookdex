@@ -1010,6 +1010,52 @@ impl Service {
             })
         })
     }
+    pub fn shopping_recipes(&self, generation: i64) -> Result<Vec<shopping::RecipeOnList>> {
+        let view = self.snapshot()?;
+        if view.generation != generation {
+            return Err(Error::StaleWrite);
+        }
+        let recipes = view
+            .summaries
+            .into_iter()
+            .map(|s| (s.id, s.title))
+            .collect::<Vec<_>>();
+        Ok(shopping::recipes_on_list(&view.shopping, &recipes))
+    }
+    pub fn preview_shopping_removal(
+        &self,
+        generation: i64,
+        id: &RecipeId,
+    ) -> Result<shopping::RemovalPreview> {
+        let view = self.snapshot()?;
+        if view.generation != generation {
+            return Err(Error::StaleWrite);
+        }
+        let recipe = view
+            .summaries
+            .iter()
+            .find(|s| &s.id == id)
+            .ok_or(Error::StaleWrite)?;
+        let live = view.summaries.iter().map(|s| s.id.clone()).collect();
+        let (lines, _) = shopping::remove_recipe(&view.shopping, id, &live)?;
+        Ok(shopping::RemovalPreview {
+            generation,
+            recipe_id: id.clone(),
+            title: recipe.title.clone(),
+            lines,
+        })
+    }
+    pub fn remove_shopping_recipe(
+        &self,
+        generation: i64,
+        id: &RecipeId,
+        operation: &Operation,
+    ) -> Result<ShoppingResult> {
+        self.shopping_mutate(generation, operation, |items, book, _| {
+            let live = Self::recipes(book)?.into_iter().map(|r| r.id).collect();
+            Ok(shopping::remove_recipe(items, id, &live)?.1)
+        })
+    }
     pub fn add_shopping(
         &self,
         generation: i64,
@@ -1056,6 +1102,10 @@ impl Service {
                     let mut item = shopping::Item::manual(text)?;
                     item.id = id;
                     item.checked = old.checked;
+                    // Keep a private receipt for the removal preview, while
+                    // retaining the existing manual row/source presentation.
+                    item.contributions = old.contributions.clone();
+                    item.edited = item.contributions.is_some();
                     *old = item;
                 }
                 ShoppingEdit::Check { ids, checked } => {

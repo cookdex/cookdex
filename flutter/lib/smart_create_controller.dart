@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'create_preferences.dart';
 import 'draft_storage.dart';
+import 'gemini_error_messages.dart';
 import 'import_diagnostics.dart';
 import 'import_platform.dart';
 import 'local_preferences.dart';
@@ -96,6 +97,7 @@ class SmartCreateController extends ChangeNotifier {
         step,
         CreatePreferences.suggestedModel,
         CreatePreferences.suggestedThinking,
+        useRecommended: true,
       ),
     );
     _clearMessage();
@@ -385,7 +387,9 @@ class SmartCreateController extends ChangeNotifier {
         if (reply.status < 200 || reply.status >= 300) {
           final errorBody = _providerProblem(reply.bytes);
           final paidModel = const {
+            'gemini-3.8-flash',
             'gemini-4-argon',
+            'gemini-4-hydrogen',
             'gemini-3.1-pro-preview',
           }.contains(model);
           if (paidModel &&
@@ -397,7 +401,7 @@ class SmartCreateController extends ChangeNotifier {
               ).hasMatch(errorBody)) {
             _paidStep = step;
             throw const _CreateError(
-              'This model needs a paid Gemini API key. You can use Flash with your current key.',
+              'This model needs a paid Gemini API key. You can use Flash-Lite with your current key.',
             );
           }
           if (reply.status == 404 &&
@@ -418,6 +422,13 @@ class SmartCreateController extends ChangeNotifier {
             );
             break;
           }
+          final capability = geminiCapabilityMessage(
+            reply.status,
+            reply.bytes,
+            settings: 'Smart Create settings',
+            photos: stage == 'photos',
+          );
+          if (capability != null) throw _CreateError(capability);
           throw _CreateError(switch (reply.status) {
             401 || 403 => 'Google did not accept the key or model. Check your Gemini settings.',
             429 => 'Gemini reached its request limit. Try again later.',
@@ -613,8 +624,9 @@ class SmartCreateController extends ChangeNotifier {
                 ...kitchen.input,
                 'count': count,
                 'previousTitles': previous,
-                if (pass > 0) 'alreadyReady': ready,
-                if (pass > 0) 'alreadyShopping': fresh.length - ready,
+                if (pass > 0 && !kitchen.moodOnly) 'alreadyReady': ready,
+                if (pass > 0 && !kitchen.moodOnly)
+                  'alreadyShopping': fresh.length - ready,
               },
               (j) {
                 suppliedFullBatch =

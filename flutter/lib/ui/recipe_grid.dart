@@ -102,9 +102,8 @@ class RecipeCardTextBudget extends StatelessWidget {
   );
 }
 
-/// Add columns once another comfortably readable recipe fits.
-int recipeGridColumns(double width) =>
-    math.max(1, ((width + 12) / 332).floor());
+/// Add columns once another comfortably readable recipe fits, up to three.
+int recipeGridColumns(double width) => ((width + 12) / 332).floor().clamp(1, 3);
 
 /// Search takes the remaining toolbar width, capped for comfortable reading.
 /// Oversized controls scroll horizontally without adding another pinned row.
@@ -407,6 +406,13 @@ class _RenderRecipeGridRow extends RenderBox
       child.layout(BoxConstraints.tightFor(width: width), parentUsesSize: true);
       height = math.max(height, child.size.height);
       child = childAfter(child);
+    }
+    // A LayoutBuilder can replace a card's contents during the natural pass
+    // (for example when a retained route returns). Compare live footer slots,
+    // not the detached contents that were reset before that pass.
+    if (_columns != 1 || contents.length != 1 || !contents.single.attached) {
+      contents.clear();
+      visitChildren(findContents);
     }
     if (contents.isNotEmpty) {
       final metadataSlot = contents.fold(

@@ -521,7 +521,9 @@ class _RecipeDetailState extends State<RecipeDetail>
                       child: RepaintBoundary(
                         child: Center(
                           child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 850),
+                            constraints: const BoxConstraints(
+                              maxWidth: recipeContentMaxWidth,
+                            ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
@@ -550,52 +552,53 @@ class _RecipeDetailState extends State<RecipeDetail>
     animation: _controls,
     builder: (_, _) => SizedBox(height: _bottomSpaceHeight),
   );
-  Widget _cookPane(Widget scroll, {Key? key}) => Stack(
-    key: key,
-    fit: StackFit.expand,
-    children: [
-      scroll,
-      if (widget.showControls)
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: AnimatedBuilder(
-            animation: _controls,
-            builder: (context, child) {
-              if (_controls.isDismissed) return const SizedBox.shrink();
-              final progress = Easing.emphasizedDecelerate.transform(
-                _controls.value,
-              );
-              return FractionalTranslation(
-                translation: Offset(0, 1 - progress),
-                child: IgnorePointer(
-                  ignoring: !widget.cook.active,
-                  child: ExcludeFocus(
-                    excluding: !widget.cook.active,
-                    child: child!,
+  Widget _cookPane(Widget scroll, {Key? key, double controlsRightInset = 0}) =>
+      Stack(
+        key: key,
+        fit: StackFit.expand,
+        children: [
+          scroll,
+          if (widget.showControls)
+            Positioned(
+              left: 0,
+              right: controlsRightInset,
+              bottom: 0,
+              child: AnimatedBuilder(
+                animation: _controls,
+                builder: (context, child) {
+                  if (_controls.isDismissed) return const SizedBox.shrink();
+                  final progress = Easing.emphasizedDecelerate.transform(
+                    _controls.value,
+                  );
+                  return FractionalTranslation(
+                    translation: Offset(0, 1 - progress),
+                    child: IgnorePointer(
+                      ignoring: !widget.cook.active,
+                      child: ExcludeFocus(
+                        excluding: !widget.cook.active,
+                        child: child!,
+                      ),
+                    ),
+                  );
+                },
+                child: MeasureHeight(
+                  onChanged: (height) {
+                    if (!mounted) return;
+                    if (_controlsHeight != height) {
+                      setState(() => _controlsHeight = height);
+                    }
+                    widget.onControlsHeight?.call(height);
+                  },
+                  child: CookNavigation(
+                    cook: widget.cook,
+                    onRevealStep: _revealStep,
+                    systemBottomInset: widget.systemBottomInset,
                   ),
                 ),
-              );
-            },
-            child: MeasureHeight(
-              onChanged: (height) {
-                if (!mounted) return;
-                if (_controlsHeight != height) {
-                  setState(() => _controlsHeight = height);
-                }
-                widget.onControlsHeight?.call(height);
-              },
-              child: CookNavigation(
-                cook: widget.cook,
-                onRevealStep: _revealStep,
-                systemBottomInset: widget.systemBottomInset,
               ),
             ),
-          ),
-        ),
-    ],
-  );
+        ],
+      );
 
   Widget _expandedContent(BuildContext context, Recipe recipe) => LayoutBuilder(
     builder: (context, constraints) {
@@ -606,62 +609,60 @@ class _RecipeDetailState extends State<RecipeDetail>
         0.0,
         _readableWidth(context),
       );
-      return Center(
-        child: SizedBox(
-          width: overviewWidth + gutter + directionsWidth,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(
-                key: const Key('recipe-overview-pane'),
-                width: overviewWidth,
-                child: Scrollbar(
-                  controller: _overviewScroll,
-                  child: PixelSingleChildScrollView(
-                    key: PageStorageKey('recipe-overview-${recipe.id}'),
-                    controller: _overviewScroll,
-                    padding: const EdgeInsets.only(top: 12, bottom: 32),
-                    child: RepaintBoundary(
+      final margin =
+          (constraints.maxWidth - overviewWidth - gutter - directionsWidth) / 2;
+      // The content keeps its existing centered geometry. Each outer margin
+      // belongs to its nearest pane's viewport, so touch and wheel scrolling
+      // reach the same controller without forwarding pointer gestures.
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            key: const Key('recipe-overview-pane'),
+            width: margin + overviewWidth,
+            child: Scrollbar(
+              controller: _overviewScroll,
+              child: PixelSingleChildScrollView(
+                key: PageStorageKey('recipe-overview-${recipe.id}'),
+                controller: _overviewScroll,
+                padding: EdgeInsets.fromLTRB(margin, 12, 0, 32),
+                child: RepaintBoundary(
+                  key: const Key('recipe-readable-overview'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: _overview(context, recipe),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: gutter),
+          SizedBox(
+            width: directionsWidth + margin,
+            child: _cookPane(
+              Scrollbar(
+                controller: _directionsScroll,
+                child: PixelSingleChildScrollView(
+                  key: PageStorageKey('recipe-directions-${recipe.id}'),
+                  controller: _directionsScroll,
+                  padding: EdgeInsets.only(top: 12, right: margin),
+                  child: RepaintBoundary(
+                    child: SizedBox(
+                      key: const Key('recipe-readable-directions'),
+                      width: directionsWidth,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: _overview(context, recipe),
+                        children: _directions(context, recipe, expanded: true),
                       ),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: gutter),
-              SizedBox(
-                width: directionsWidth,
-                child: _cookPane(
-                  Scrollbar(
-                    controller: _directionsScroll,
-                    child: PixelSingleChildScrollView(
-                      key: PageStorageKey('recipe-directions-${recipe.id}'),
-                      controller: _directionsScroll,
-                      padding: const EdgeInsets.only(top: 12),
-                      child: RepaintBoundary(
-                        child: SizedBox(
-                          key: const Key('recipe-readable-directions'),
-                          width: directionsWidth,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: _directions(
-                              context,
-                              recipe,
-                              expanded: true,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  key: const Key('recipe-directions-pane'),
-                ),
-              ),
-            ],
+              key: const Key('recipe-directions-pane'),
+              controlsRightInset: margin,
+            ),
           ),
-        ),
+        ],
       );
     },
   );
@@ -788,11 +789,11 @@ class _RecipeDetailState extends State<RecipeDetail>
       ],
       if (recipe.fields.source.isNotEmpty) ...[
         const SizedBox(height: 24),
-        if (webSourceUri(recipe.fields.source) == null) ...[
-          _heading(context, 'Source'),
-          const SizedBox(height: 8),
-          Text(recipe.fields.source),
-        ] else
+        _heading(context, 'Source'),
+        const SizedBox(height: 8),
+        if (webSourceUri(recipe.fields.source) == null)
+          Text(recipe.fields.source)
+        else
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(

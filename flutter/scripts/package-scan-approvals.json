@@ -1,6 +1,160 @@
 [
   {
     "classification": "false-positive",
+    "reason": "Reviewed 1.10.5 production Dart private constructor symbols for Flutter pan/zoom and persistent hash-map nodes against the installed SDK source. Numeric compiler library suffixes are not email addresses. Exact member and compiled context fingerprints only.",
+    "fingerprints": [
+      "0426e969f2ca52bbb238d7c21fd87657d2e17e7b4730322fbeabb96963ca6838",
+      "cae4cda15ace390d297766d4c80b0849d723f5533f996591918886221db7ef2c",
+      "884b35fd3ab5fe79d696045d1cfde75fcbbcbec87b5632accc3f9797a10e2dd8",
+      "8b9b8b41f5de943b1ef1c6423dd21d2cd039fd0926b677c8d5954057edc6f2e4",
+      "88642942500e80676f142086491810dda26238b1b432a4b5ef32d41ac8934f25",
+      "50a4108cb1d1a057e3042d729603e76f45a04d9d96ef2b6bdd34b1e3696db894",
+      "def7523542b17fe6eeb7975712f2e8dd87e8ba97c6b795a64eff79451efb610b",
+      "c04ef2c5cc7699b28e1dd904cc1e3528b527e1768a0c7319d39a540196f73d82"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed 1.10.5 production socket error-message constants adjacent to separate Flutter or application symbol/key constants in the AOT pool. NUL padding and object headers separate the strings; no recorded hostname is present. Exact compiled contexts only.",
+    "fingerprints": [
+      "0abd725a69692a877d171fd5940eb0c0e5a7b323b1c2ca7ffa0740f62da353a9",
+      "7a0080cc774005b44498491d50f74cb90e56aeacaeef3b17df4a24047e27dc6a",
+      "fc6f76118a98d2d806dddb3eff3a115c6855b57c850445452b3cc9659c182f8c"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed a short path-shaped pattern in nontext Windows production AOT table bytes, including surrounding bytes. It is not a stored filesystem path. Exact compiled fingerprint only.",
+    "fingerprints": [
+      "e1690fbd3ada3073efabb8eff5fc10a7fc2bdda883d5ef05fbe5830adb0de665"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed the Android production colon pattern within nontext bytes and opposite-endian Windows readings of the same binary-data span. None is a stored network address. Exact member and context fingerprints only.",
+    "fingerprints": [
+      "bd00d492f831b73daddc7e623467274674b9adb824d776057a0085e021ff6376",
+      "8566e7c3bb76f5f4fea692002d21734b089529dcd8f23159f87e6e624891f58b",
+      "4dd1348709a8b40c5a4c106b157b605b4ae042d028d2a43c5017d0293ba44db7"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed two short path-like byte patterns in Windows Dart AOT instruction and metadata bytes, with adjacent bytes inspected. They are not stored filesystem paths. Exact compiled fingerprints only.",
+    "fingerprints": [
+      "3fcabfa1dda0254957bb781994433f06d8337414b4591be0d4eebbe4b16ebffc",
+      "690a6607a5de2596ae6d3c5b9d4e41c790c97628b4fdf338c9870e8e6263ecd5"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed private Flutter constructor symbols for semantics geometry, pointer pan/zoom, navigation restoration and persistent hash-map nodes. The numeric @ suffix identifies the Dart compiler library, not an email address. Exact compiled fingerprints only.",
+    "fingerprints": [
+      "07c8f3167f3706a72a0695762d99b883cd43e15205f533cdbe0c7b9883b36449",
+      "cc8034ab643a84751b21561936a7c0ccb6804c6fdd6fdac740904e82625a099c",
+      "87fd35c0f386befd687d405aaf75ef8ae0f62e514846a5365c0d750530d993c8",
+      "c402c0fce0f9062fcb8d01a46d8562b0e237b02964f63677f53be5b9f24c1324",
+      "61d3e7b54acc7973c444e9ca5390c0ae01ced85991a60a7a0de0cdc52fe4c105",
+      "a6ae7c33976f2b82310f7aaad4cfeaaa96cfdc4fac8c32b2bcb341a9a2945e13",
+      "aa2e809b1b4632d9e3967a4513a6f0f6173f4812c964c58a1a1c3e139b299475",
+      "01f5db5c55833b9b8dd80e3dfe4e33ed047c34b09d79ff29f4501e6caa185ea6"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed Dart socket error-message constants ending in host: beside unrelated private Flutter symbols in the AOT constant pool. These are static code strings, not recorded host names. Exact compiled contexts only.",
+    "fingerprints": [
+      "ebeb37cff7076eb9a78f8eef0d1725e35e8900ea770e9d4d4a802d399e725c93",
+      "a11ebbbf18f67164f77e3da6a3fb231a1fb8b4e791528ed49240fbf3878c026e"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed both endian readings of the same adjacent colon bytes in Windows Dart AOT binary data; the surrounding bytes do not encode a stored network address. Exact compiled contexts only.",
+    "fingerprints": [
+      "19c0bf79e03e26a0f736895b5bc304c1e9dcd051f3244121bef6a62e1fcd5566",
+      "46a3b79394730f7a4efc3160242f0a883694c2d3f5a549c5bb00ead341eed85e"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed exact classes.dex constant /proc/self/task: Android's public per-process task directory, used to identify this app's raster thread for performance hints. It is not an owner filesystem path or recorded device data. Exact compiled fingerprint only.",
+    "fingerprints": [
+      "f6d26dd1f595b8af2c25ef74309e8c0bbccb0dfd7461ac2bf32b080c175758b4"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed Flutter scale-gesture private constructor symbol with the Dart compiler library suffix; the SDK declares PointerPanZoomData.fromStartEvent. This exact compiled symbol is not an email address.",
+    "fingerprints": [
+      "07a659271005f46436d8c51972835eec52ee2e9fd03295474e649d4d5eaa24af"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed adjacent constant suffixes in the Rust provider URL safety filter: localhost, local, internal, lan, home and home.arpa. These are blocked suffix rules, not recorded host names. Exact compiled context only.",
+    "fingerprints": [
+      "d1326284bcbf08e236d3c56e2c6bbf8c456d272440517a416ee8a8fd29eb7b3f",
+      "b6642c31c264fff4e963bcd3b2031a2f7f0f704c07761787b32347431805a7b4"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed both endian readings of the same adjacent colon bytes in Windows Dart AOT binary rodata. Exact scanner contexts were reproduced at adjacent byte offsets in the same binary span; these are not stored network addresses.",
+    "fingerprints": [
+      "7ce729442cd8e6395a243124ebd55415cb0cd93a62fd0d31502886285a22ac4f",
+      "10fa48bbd55f76578ea5dfd659b0b7eb246faad2ab97c363bf967fc25fd78f84"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed 1.10.5 Dart AOT private constructor symbols for Flutter pointer pan/zoom and collection collision/compressed nodes; these are SDK class names with compiler library suffixes, not email addresses.",
+    "fingerprints": [
+      "92a117f3bf19222870100c7572d44c5d7457bd127aa8b0ffb0e01989268cf2b6",
+      "13519e8d37037a773f95cc4e3c98a9c209bfa2895eff73eacc34c39b8d1de137",
+      "4fb49b5017dd143dbc87ed753e7660640851157361d600e9fcb86c8d83a328e5",
+      "1e09ab3c25ea90a3d82043d0cdee11ac7b76708ef77b8f2fdb6cd43551542ddb",
+      "0504d8ed7d898ab0b8de62676dccead145af49167b741b0e3df371f5e6bce020",
+      "5545f51ec733fb3e33cfa0b77100faf251dd4acdfeff238f53af01660e96f26a",
+      "4e92a297ff0ca5b676ff99a5259ed052df7c3d1fcc77bc467eebf5875a184665",
+      "ed9f25b67156c714d21383c14e0715afd55d47a4415aba1a564f13e1ef8a481c"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The provider's literal prohibited domain suffixes are concatenated beside public thinking-level strings in optimized native binaries. They are static SSRF exclusions, not discovered hosts.",
+    "fingerprints": [
+      "beb2f9bade94703cea4f13c1f7344387b7dcd3b6e734037f9a328fc734abbbfa",
+      "af1029814b6423e775c3a7074833011f74019696f68441fda56a58bfade1356f",
+      "3d1f9023acd8207ed5f31f433e9c0b717034b66c57ecfa86fefdf7b531bfc832"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed exact Windows Dart snapshot matches: short slash/colon runs amid binary table or object-header bytes at offsets 85111, 86959 and 2429605; no filesystem path or network address is stored there.",
+    "fingerprints": [
+      "d7bdd7e7337973eae7654690c1a5717c03836fc2d73a59364a35ae94d0dc55ec",
+      "023e0001861123a2bcd46a1ff623c2852c9fc4f56fe3dad965659820630fd090",
+      "e7e64fec7c162d1473654d8bd29da51232d790b276dc6253f4dd37c5f44c8f94"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "A generic socket host label and the separate timestamps string occupy distinct padded Dart string objects. The scanner joins printable runs across the object header; no host value is present.",
+    "fingerprints": [
+      "62daf428b409c8b77a8c7c04dec235cd1057f566febdfbf2f4761522ca261a99"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The two UTF-16 views read the same colon code units amid binary snapshot tables at offsets 1726176 and 1726177. The surrounding nontext bytes confirm these are not IP literals.",
+    "fingerprints": [
+      "a08be9e2c0cd0c87a7b904392834b5376f0047979088231abec764b992fccba7",
+      "095f58ca922b1e4d29b155a0f09cf9b69821bb114e6b69c8e31b81a77137a4a2"
+    ]
+  },
+  {
+    "classification": "false-positive",
     "reason": "Reviewed Android View listener and AndroidX lifecycle class descriptors, Flutter scale/persistent-hash-map private symbols, and two four-byte matches inside binary rodata. No personal identifier or filesystem location. Exact member/string/context only.",
     "fingerprints": [
       "63d0aa68b3892378c78956a1889f7d1cd25feda8aa3c17de88110f4b9e91a03b",
@@ -2136,6 +2290,37 @@
     "reason": "The utf-16be view of the Windows Dart AOT read-only snapshot reads the same two colon code units at offset 1882657 amid binary table data.",
     "fingerprints": [
       "d5b8283e3bbc97e687075e5aca9c04f8b32effc0d06af7d300c5e4a359396639"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The utf-16le:1 interpretation of Windows Dart AOT read-only snapshot bytes at offset 1909905 produces two colons amid binary table data; the ELF section is .rodata and this is not a device address.",
+    "fingerprints": [
+      "7023d99cf04f8e76259eedf8a13f2ae1ba5f3c255f587311b7e622e72369f2e9"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "The utf-16be:0 interpretation of Windows Dart AOT read-only snapshot bytes at offset 1909904 produces two colons amid binary table data; the ELF section is .rodata and this is not a device address.",
+    "fingerprints": [
+      "8e11109a41f59589119a5ea100c7c537f1a76f29f1cf4d3badce37bf7a6a2713"
+    ]
+  },
+  {
+    "classification": "false-positive",
+    "reason": "Reviewed exact Android AOT snapshot matches: Flutter semantics, persistent-map, pan/zoom and restoration constructor names verified in pinned SDK source; short path/address-shaped bytes within binary rodata; and the Dart socket-cancellation prefix adjacent to the app allowModelSwitch symbol, separated by snapshot object bytes. None contains a personal path, email, address or host. Exact member/string/context fingerprints only.",
+    "fingerprints": [
+      "553203ed4309b98b361b9c2601e11314e0681f8701d57a30058ab2c55d7e151f",
+      "6c10db45235521e7ffd53aa3a4e88fd74e3ca98cd931d56459f1c46fb91d9ab2",
+      "cee655e48a10735ddad5e6580a44f8a3e8143bbc9ed89a47731a6da003f17708",
+      "1fc03b1f983bfe2ebb29c5a2b7987cc7feb2b2dc8bf1ea39d85012049f07efaf",
+      "d11969e447e396a37b93a43f3f2361bae2caa75e89017c4161029a5fc02ce3b7",
+      "7e25beec102fd9041af1ac6a7f9a85aa53dee162655a097220955d0c8258fd26",
+      "a18cd380466a503856a33f158d7fe1b0061748f7e1cc15ddb5743df0797af812",
+      "52783d88f33f562058417dc7a8e14c756a57e5fcbd80a346faaa2a16aa681bc0",
+      "ffe90d2d6c5c7358da0e5b4b72c121fb23b090277432369e04e77a90f928cb54",
+      "ed6b29a34c6b2fb1a14d566dcb8967d5abfe6af58a86cc5d1113eec92d5daa3e",
+      "573d5f6fa646aefd8a0729c9e17e9246f6068a5d3a1209f254be611829827cb2"
     ]
   }
 ]

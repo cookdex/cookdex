@@ -297,7 +297,15 @@ void main() {
             await host(tester, width);
             await tester.tap(find.text('Family pork supper').first);
             await tester.pumpAndSettle();
-            await tester.tap(find.text(tab).last);
+            await tester.tap(
+              find
+                  .text(
+                    tab == 'Shopping list' && width >= 600
+                        ? 'Shopping\nlist'
+                        : tab,
+                  )
+                  .last,
+            );
             await tester.pumpAndSettle();
             await back(tester, predictive);
             expect(find.byType(RecipeDetail), findsOneWidget);

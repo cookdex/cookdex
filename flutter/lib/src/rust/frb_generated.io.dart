@@ -306,6 +306,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ShoppingItem> dco_decode_list_shopping_item(dynamic raw);
 
   @protected
+  List<ShoppingRecipe> dco_decode_list_shopping_recipe(dynamic raw);
+
+  @protected
+  List<ShoppingRemovalLine> dco_decode_list_shopping_removal_line(dynamic raw);
+
+  @protected
   List<SyncPeer> dco_decode_list_sync_peer(dynamic raw);
 
   @protected
@@ -388,6 +394,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ShoppingItem dco_decode_shopping_item(dynamic raw);
+
+  @protected
+  ShoppingRecipe dco_decode_shopping_recipe(dynamic raw);
+
+  @protected
+  ShoppingRemovalLine dco_decode_shopping_removal_line(dynamic raw);
+
+  @protected
+  ShoppingRemovalPreview dco_decode_shopping_removal_preview(dynamic raw);
 
   @protected
   ShoppingResult dco_decode_shopping_result(dynamic raw);
@@ -708,6 +723,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<ShoppingRecipe> sse_decode_list_shopping_recipe(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<ShoppingRemovalLine> sse_decode_list_shopping_removal_line(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<SyncPeer> sse_decode_list_sync_peer(SseDeserializer deserializer);
 
   @protected
@@ -796,6 +821,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ShoppingItem sse_decode_shopping_item(SseDeserializer deserializer);
+
+  @protected
+  ShoppingRecipe sse_decode_shopping_recipe(SseDeserializer deserializer);
+
+  @protected
+  ShoppingRemovalLine sse_decode_shopping_removal_line(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ShoppingRemovalPreview sse_decode_shopping_removal_preview(
+    SseDeserializer deserializer,
+  );
 
   @protected
   ShoppingResult sse_decode_shopping_result(SseDeserializer deserializer);
@@ -1188,6 +1226,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_shopping_recipe(
+    List<ShoppingRecipe> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_shopping_removal_line(
+    List<ShoppingRemovalLine> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_sync_peer(List<SyncPeer> self, SseSerializer serializer);
 
   @protected
@@ -1300,6 +1350,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_shopping_item(ShoppingItem self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_shopping_recipe(
+    ShoppingRecipe self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_shopping_removal_line(
+    ShoppingRemovalLine self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_shopping_removal_preview(
+    ShoppingRemovalPreview self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_shopping_result(

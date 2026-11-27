@@ -129,7 +129,7 @@ class PhoneBackupTest {
     @Test fun settingsFilterDeniesUnknownPrivateAndTransientValuesAtEveryLevel() {
         val forbidden = listOf("key", "encryptedKey", "secret", "peer", "pairing", "query", "recentRecipeOffsets",
             "scrollOffset", "beforeSearch", "steps", "checks", "lastUpdateCheckMs", "draft", "lastImport", "snapshots")
-        for (scope in listOf("settings", "ui", "smartCreate", "keptSeparate", "retiredModels", "smart")) {
+        for (scope in listOf("settings", "ui", "smartCreate", "keptSeparate", "retiredModels", "modelChoices", "smart")) {
             for (key in forbidden) assertNull("Unexpected $scope/$key", PhoneSettings.kind(scope, key))
         }
         for (key in listOf("view", "themeMode", "recipeTextSize", "keptSeparate", "smartCreate", "youtubeWatchModel")) {
@@ -141,7 +141,24 @@ class PhoneBackupTest {
         }
         assertNotNull(PhoneSettings.kind("smart", "model"))
         assertNotNull(PhoneSettings.kind("smart", "effort"))
+        assertNotNull(PhoneSettings.kind("smart", "thinking"))
+        assertEquals(PhoneSettings.Kind.OBJECT, PhoneSettings.kind("smartCreate", "modelChoices"))
+        for (step in listOf("photo", "ideas", "recipe")) {
+            assertEquals(PhoneSettings.Kind.BOOLEAN, PhoneSettings.kind("modelChoices", step))
+        }
         assertNull(PhoneSettings.kind("smart", "hasKey"))
+    }
+
+    @Test fun importThinkingBackupsKeepLegacyReadersAndExactNewChoices() {
+        for (value in listOf(null, "standard", "thorough", "default", "minimal", "low", "medium", "high")) {
+            val (legacy, extension) = ImportThinking.backup(value)
+            assertTrue(legacy == null || legacy in setOf("standard", "thorough"))
+            assertEquals(value, ImportThinking.restore(legacy, extension))
+            assertEquals(legacy, ImportThinking.restore(legacy, null))
+        }
+        assertThrows(IOException::class.java) { ImportThinking.backup("unsupported") }
+        assertThrows(IOException::class.java) { ImportThinking.restore("low", null) }
+        assertThrows(IOException::class.java) { ImportThinking.restore("standard", "unsupported") }
     }
 
     @Test fun manifestAndBothRuleFormatsOnlyOptInOurStagedArtifacts() {

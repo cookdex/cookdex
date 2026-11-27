@@ -5,6 +5,7 @@ import 'package:cookdex/ui/recipe_grid.dart';
 import 'package:cookdex/ui/recipe_metadata_item.dart';
 import 'package:cookdex/ui/recipes_screen.dart';
 import 'package:cookdex/ui/theme.dart';
+import 'package:cookdex/ui/window_size.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -127,18 +128,28 @@ void main() {
   }
   for (final view in RecipeView.values) {
     for (final entry in <double, int>{
+      320: 1,
       390: 1,
       800: 2,
       1280: 3,
-      1800: 5,
+      1800: 3,
     }.entries) {
       testWidgets(
-        '${view.name} adds ${entry.value} columns at ${entry.key}dp',
+        '${view.name} uses ${view == RecipeView.compact ? 1 : entry.value} columns at ${entry.key}dp',
         (tester) async {
           await _screen(tester, entry.key, view);
           final first = tester.getRect(find.byKey(const ValueKey('recipe-0')));
-          expect(first.width, inInclusiveRange(320, 420));
-          for (var i = 1; i < entry.value; i++) {
+          final columns = view == RecipeView.compact ? 1 : entry.value;
+          if (view == RecipeView.compact) {
+            expect(
+              first.width,
+              (entry.key - 32).clamp(0, recipeContentMaxWidth),
+            );
+            expect(first.center.dx, entry.key / 2);
+          } else {
+            expect(first.width, inInclusiveRange(288, 420));
+          }
+          for (var i = 1; i < columns; i++) {
             final next = tester.getRect(find.byKey(ValueKey('recipe-$i')));
             expect(next.top, first.top);
             expect(next.height, first.height);
@@ -146,9 +157,13 @@ void main() {
             expect(next.left, greaterThan(first.left));
           }
           final following = tester.getRect(
-            find.byKey(ValueKey('recipe-${entry.value}')),
+            find.byKey(ValueKey('recipe-$columns')),
           );
           expect(following.top, greaterThan(first.top));
+          if (view == RecipeView.compact) {
+            expect(following.left, first.left);
+            expect(following.width, first.width);
+          }
           if (view == RecipeView.cards && entry.value > 1) {
             expect(following.height, first.height);
           }

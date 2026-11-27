@@ -369,7 +369,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       final first = tester.getRect(find.text('Recipe 00'));
-      final star = tester.getRect(find.byTooltip('Favorite Recipe 00'));
+      final star = tester.getRect(find.bySemanticsLabel('Favorite Recipe 00'));
       expect(
         tester
             .renderObject<RenderBox>(find.text('Recipe 00'))
@@ -379,7 +379,7 @@ void main() {
       );
       expect(first.left + 310, star.left);
       expect(
-        tester.getRect(find.byTooltip('Favorite Recipe 01')).right,
+        tester.getRect(find.bySemanticsLabel('Favorite Recipe 01')).right,
         star.right,
       );
       expect(tester.getSize(find.byKey(const ValueKey('0'))).height, 53);
@@ -400,11 +400,13 @@ void main() {
       expect(find.byType(Divider), findsWidgets);
       await tester.binding.setSurfaceSize(const Size(1000, 760));
       await tester.pumpAndSettle();
-      expect(
-        tester.getTopLeft(find.byKey(const ValueKey('0'))).dy,
-        tester.getTopLeft(find.byKey(const ValueKey('1'))).dy,
-      );
-      expect(tester.getTopLeft(find.text('Recipe 01')).dx, greaterThan(500));
+      final wideFirst = tester.getRect(find.byKey(const ValueKey('0')));
+      final wideSecond = tester.getRect(find.byKey(const ValueKey('1')));
+      expect(wideSecond.top, greaterThanOrEqualTo(wideFirst.bottom));
+      expect(wideSecond.left, wideFirst.left);
+      expect(wideSecond.right, wideFirst.right);
+      expect(wideFirst.center.dx, closeTo(500, 1));
+      expect(wideFirst.width, lessThanOrEqualTo(850));
     },
   );
 
@@ -635,7 +637,7 @@ void main() {
     );
     expect(actions, ['one', 'one']);
     final unaffectedRow = tester.widget(find.byKey(const ValueKey('two')));
-    await tester.tap(find.byTooltip('Favorite Green soup one'));
+    await tester.tap(find.bySemanticsLabel('Favorite Green soup one'));
     await tester.pumpAndSettle();
     expect(store.summaries.firstWhere((r) => r.id == 'one').favorite, isTrue);
     expect(
@@ -646,7 +648,7 @@ void main() {
       isTrue,
     );
     expect(find.byType(SnackBar), findsNothing);
-    await tester.tap(find.byTooltip('Unfavorite Green soup one'));
+    await tester.tap(find.bySemanticsLabel('Unfavorite Green soup one'));
     await tester.pumpAndSettle();
     expect(store.summaries.firstWhere((r) => r.id == 'one').favorite, isFalse);
     expect(find.byType(SnackBar), findsNothing);
@@ -921,7 +923,7 @@ void main() {
       await tester.pumpAndSettle();
     }
     final last = store.visibleRecipes.last;
-    final star = find.byTooltip('Favorite ${last.title}');
+    final star = find.bySemanticsLabel('Favorite ${last.title}');
     final fab = find.byKey(const Key('add-recipe'));
     expect(star, findsOneWidget);
     expect(fab, findsOneWidget);

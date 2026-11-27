@@ -73,7 +73,7 @@ class ImportHost(private val activity: Activity) {
                 val model = call.argument<String>("model")?.trim() ?: ""
                 val key = call.argument<String>("key")?.trim() ?: ""
                 val effort = call.argument<String>("effort") ?: "standard"
-                require(effort == "standard" || effort == "thorough")
+                require(effort in setOf("standard", "thorough", "default", "minimal", "low", "medium", "high"))
                 require(model.matches(Regex("[A-Za-z0-9._-]{1,120}")))
                 require(key.length <= 1024 && key.none { it.code < 33 || it.code > 126 })
                 val editor = prefs.edit().putString("model", model).putString("effort", effort)

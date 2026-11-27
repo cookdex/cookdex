@@ -34,8 +34,8 @@ class PhoneBackupAgent : BackupAgent() {
             val model = if (importPrefs.has("model")) importPrefs.getString("model") else null
             if (model != null && !model.matches(Regex("[A-Za-z0-9._-]{1,120}"))) throw IOException("Invalid import model.")
             val effort = if (importPrefs.has("effort")) importPrefs.getString("effort") else null
-            if (effort != null && effort !in setOf("standard", "thorough")) throw IOException("Invalid import effort.")
-            return model to effort
+            val thinking = if (importPrefs.has("thinking")) importPrefs.getString("thinking") else null
+            return model to ImportThinking.restore(effort, thinking)
         }
 
         fun finishRestore(context: Context) {
@@ -139,9 +139,10 @@ class PhoneBackupAgent : BackupAgent() {
     private fun exportSettings(): ByteArray {
         val ui = if (settingsFile.isFile) settings(settingsFile.reader(Charsets.UTF_8), "ui") else JSONObject()
         val importPrefs = JSONObject()
-        for (key in listOf("model", "effort")) {
-            smart.getString(key, null)?.let { importPrefs.put(key, it) }
-        }
+        smart.getString("model", null)?.let { importPrefs.put("model", it) }
+        val (effort, thinking) = ImportThinking.backup(smart.getString("effort", null))
+        effort?.let { importPrefs.put("effort", it) }
+        thinking?.let { importPrefs.put("thinking", it) }
         return JSONObject().put("ui", ui).put("smart", importPrefs).toString().toByteArray(Charsets.UTF_8)
     }
 

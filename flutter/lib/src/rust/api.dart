@@ -11,7 +11,7 @@ part 'api.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `prompt_tags`, `service`, `sync_error`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderState`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`
 
 Future<Amount> parseAmount({required String written}) =>
@@ -189,8 +189,19 @@ abstract class CoreSession implements RustOpaqueInterface {
     required Operation operation,
   });
 
+  Future<ShoppingRemovalPreview> previewShoppingRemoval({
+    required int generation,
+    required String id,
+  });
+
   Future<CollectionSnapshot> recover({
     required int generation,
+    required Operation operation,
+  });
+
+  Future<ShoppingResult> removeShoppingRecipe({
+    required int generation,
+    required String id,
     required Operation operation,
   });
 
@@ -217,6 +228,8 @@ abstract class CoreSession implements RustOpaqueInterface {
     required RecipeFields fields,
     required Operation operation,
   });
+
+  Future<List<ShoppingRecipe>> shoppingRecipes({required int generation});
 
   Future<CollectionSnapshot> snapshot();
 
@@ -1154,6 +1167,97 @@ class ShoppingItem {
           checked == other.checked &&
           quantityText == other.quantityText &&
           categoryId == other.categoryId;
+}
+
+class ShoppingRecipe {
+  final String recipeId;
+  final String title;
+  final int itemCount;
+
+  const ShoppingRecipe({
+    required this.recipeId,
+    required this.title,
+    required this.itemCount,
+  });
+
+  @override
+  int get hashCode => recipeId.hashCode ^ title.hashCode ^ itemCount.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ShoppingRecipe &&
+          runtimeType == other.runtimeType &&
+          recipeId == other.recipeId &&
+          title == other.title &&
+          itemCount == other.itemCount;
+}
+
+class ShoppingRemovalLine {
+  final String id;
+  final String name;
+  final String before;
+  final String? after;
+  final String action;
+  final String reason;
+
+  const ShoppingRemovalLine({
+    required this.id,
+    required this.name,
+    required this.before,
+    this.after,
+    required this.action,
+    required this.reason,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      name.hashCode ^
+      before.hashCode ^
+      after.hashCode ^
+      action.hashCode ^
+      reason.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ShoppingRemovalLine &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          before == other.before &&
+          after == other.after &&
+          action == other.action &&
+          reason == other.reason;
+}
+
+class ShoppingRemovalPreview {
+  final int generation;
+  final String recipeId;
+  final String title;
+  final List<ShoppingRemovalLine> lines;
+
+  const ShoppingRemovalPreview({
+    required this.generation,
+    required this.recipeId,
+    required this.title,
+    required this.lines,
+  });
+
+  @override
+  int get hashCode =>
+      generation.hashCode ^ recipeId.hashCode ^ title.hashCode ^ lines.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ShoppingRemovalPreview &&
+          runtimeType == other.runtimeType &&
+          generation == other.generation &&
+          recipeId == other.recipeId &&
+          title == other.title &&
+          lines == other.lines;
 }
 
 class ShoppingResult {

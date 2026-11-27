@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 
+import 'recipe_share_text.dart';
 import 'src/rust/api.dart' as core;
 
 enum ExportAction { share, shareFile, copy, save }
@@ -80,7 +81,10 @@ class ExportService {
   }
 
   Future<ExportOutcome> recipe(core.Recipe recipe, ExportAction action) async {
-    final text = await _exporter(recipe);
+    final readable = recipeShareText(recipe);
+    final text = action == ExportAction.share || action == ExportAction.copy
+        ? readable
+        : await _exporter(recipe);
     if (utf8.encode(text).length > recipeTextMaxBytes) {
       throw StateError('Recipe text exceeds the 5 MiB import limit.');
     }
@@ -89,6 +93,7 @@ class ExportService {
       action,
       title: recipe.fields.title,
       filename: _filename(recipe.fields.title),
+      copyFallback: readable,
     );
   }
 
@@ -96,11 +101,20 @@ class ExportService {
     List<core.Recipe> recipes,
     ExportAction action,
   ) async {
-    final text = await _recipeText(recipes);
+    final readable = _readableRecipeText(recipes);
+    final text = action == ExportAction.share || action == ExportAction.copy
+        ? readable
+        : await _recipeText(recipes);
     final title = recipes.length == 1
         ? recipes.single.fields.title
         : '${recipes.length} cookdex recipes';
-    return _dispatch(text, action, title: title, filename: _filename(title));
+    return _dispatch(
+      text,
+      action,
+      title: title,
+      filename: _filename(title),
+      copyFallback: readable,
+    );
   }
 
   Future<ExportOutcome> _dispatch(
@@ -108,6 +122,7 @@ class ExportService {
     ExportAction action, {
     required String title,
     required String filename,
+    required String copyFallback,
   }) async {
     try {
       return await switch (action) {
@@ -120,20 +135,29 @@ class ExportService {
       if (action != ExportAction.share && action != ExportAction.shareFile) {
         rethrow;
       }
-      await platform.copy(text);
+      await platform.copy(copyFallback);
       return ExportOutcome.copiedFallback;
     } on PlatformException catch (error) {
       if (error.code != 'unavailable' ||
           (action != ExportAction.share && action != ExportAction.shareFile)) {
         rethrow;
       }
-      await platform.copy(text);
+      await platform.copy(copyFallback);
       return ExportOutcome.copiedFallback;
     }
   }
 
   Future<ExportOutcome> cookbook(List<core.Recipe> recipes) async => platform
       .save(await _recipeText(recipes), filename: 'cookdex-cookbook.txt');
+
+  String _readableRecipeText(List<core.Recipe> recipes) {
+    if (recipes.isEmpty) throw StateError('There are no recipes to export.');
+    final text = recipes.map(recipeShareText).join('\n\n────────────\n\n');
+    if (utf8.encode(text).length > recipeTextMaxBytes) {
+      throw StateError('Recipe text exceeds 5 MiB.');
+    }
+    return text;
+  }
 
   Future<String> _recipeText(List<core.Recipe> recipes) async {
     if (recipes.isEmpty) throw StateError('There are no recipes to export.');

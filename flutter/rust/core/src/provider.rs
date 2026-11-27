@@ -141,7 +141,7 @@ pub fn request_with_options(
     effort: &str,
     rewrite: bool,
 ) -> Result<Vec<u8>> {
-    if !["standard", "thorough"].contains(&effort) {
+    if !valid_thinking(effort) {
         return Err(Error::Validation);
     }
     if model.is_empty()
@@ -203,13 +203,13 @@ pub fn request_with_options(
         instruction.push_str(REWRITE_STEPS);
     }
     let mut payload = json!({"model":model,"input":parts,"system_instruction":instruction,"response_format":{"type":"text","mime_type":"application/json","schema":schema(&input.mode)},"generation_config":{"max_output_tokens":MAX_OUTPUT_TOKENS},"store":false});
-    // Retain the tested existing baseline explicitly. Low did not improve the
-    // round-2 matrix; regular Flash was unavailable. This is not a quality win.
-    {
-        payload["generation_config"]["thinking_level"] = json!(if effort == "thorough" {
-            "high"
-        } else {
-            "minimal"
+    // Legacy Standard follows the Low recommendation; Thorough remains High.
+    // Default deliberately leaves the provider's thinking choice unspecified.
+    if effort != "default" {
+        payload["generation_config"]["thinking_level"] = json!(match effort {
+            "standard" => "low",
+            "thorough" => "high",
+            value => value,
         });
     }
     if input.mode == Mode::UrlRecipe {
@@ -220,6 +220,13 @@ pub fn request_with_options(
         return Err(Error::Limit);
     }
     Ok(body)
+}
+
+pub fn valid_thinking(value: &str) -> bool {
+    matches!(
+        value,
+        "standard" | "thorough" | "default" | "minimal" | "low" | "medium" | "high"
+    )
 }
 fn public_recipe_url(value: &str) -> bool {
     use url::{Host, Url};

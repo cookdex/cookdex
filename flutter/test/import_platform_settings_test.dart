@@ -58,7 +58,9 @@ void main() {
           .setMockMethodCallHandler(channel, null),
     );
     final platform = NativeImportPlatform();
-    expect((await platform.settings()).effort, 'standard');
+    final settings = await platform.settings();
+    expect(settings.effort, 'standard');
+    expect(settings.thinking, 'low');
     await platform.saveSettings(
       key: '',
       model: 'custom-model',
@@ -73,4 +75,70 @@ void main() {
     await platform.removeKey();
     expect(calls.last.method, 'removeKey');
   });
+
+  for (final (stored, thinking) in [
+    ('standard', 'low'),
+    ('thorough', 'high'),
+    ('default', 'default'),
+    ('minimal', 'minimal'),
+    ('low', 'low'),
+    ('medium', 'medium'),
+    ('high', 'high'),
+  ]) {
+    test(
+      'native settings preserve $stored and expose $thinking thinking',
+      () async {
+        final calls = <MethodCall>[];
+        var saved = <String, Object>{
+          'hasKey': true,
+          'model': 'synthetic-existing-model',
+          'effort': stored,
+        };
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          if (call.method == 'settings') return saved;
+          if (call.method == 'saveSettings') {
+            final values = Map<String, Object>.from(call.arguments as Map);
+            saved = {
+              'hasKey': saved['hasKey']!,
+              'model': values['model']!,
+              'effort': values['effort']!,
+            };
+          }
+          return null;
+        });
+        addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+        final platform = NativeImportPlatform();
+        final original = await platform.settings();
+        expect(original.model, 'synthetic-existing-model');
+        expect(original.effort, stored);
+        expect(original.thinking, thinking);
+        expect(saved['effort'], stored);
+        expect(calls.map((call) => call.method), ['settings']);
+
+        await platform.saveSettings(
+          key: '',
+          model: 'synthetic-custom-model',
+          effort: stored,
+        );
+        expect(calls.last.arguments, {
+          'key': '',
+          'model': 'synthetic-custom-model',
+          'effort': stored,
+        });
+        final restored = await platform.settings();
+        expect(restored.hasKey, isTrue);
+        expect(restored.model, 'synthetic-custom-model');
+        expect(restored.effort, stored);
+        expect(restored.thinking, thinking);
+        expect(calls.map((call) => call.method), [
+          'settings',
+          'saveSettings',
+          'settings',
+        ]);
+      },
+    );
+  }
 }

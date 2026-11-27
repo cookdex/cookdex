@@ -85,6 +85,149 @@ Json recipeD() => {
 };
 
 void main() {
+  test('every Smart Create stage uses shared everyday staple identities', () {
+    final pantry = ['rice', 'flour', 'sugar', 'salt', 'pepper'];
+    final covered = [
+      'steamed rice',
+      'all-purpose flour',
+      'granulated sugar',
+      'salt and pepper',
+    ];
+    final different = [
+      'rice vinegar',
+      'almond flour',
+      'brown sugar',
+      'bell pepper',
+    ];
+    final photos = validatePhotos(
+      {
+        'found': [...covered, ...different],
+        'maybe': [],
+      },
+      [],
+      pantry,
+    );
+    expect(photos.found, different);
+    final kitchen = CreateKitchen(ingredients: ['carrots'], staples: pantry);
+    final ideas = validateIdeas(
+      {
+        'ideas': [
+          ideaRow('Carrot skillet', missing: [...covered, 'brown sugar']),
+        ],
+      },
+      kitchen,
+      [],
+      [],
+    );
+    expect(ideas.single.staples, pantry);
+    expect(ideas.single.missing, ['brown sugar']);
+    final dish = recipeD()
+      ..['title'] = ideas.single.title
+      ..['ingredients'] = [
+        ingredient('carrots', '2'),
+        ingredient('brown sugar', '1', 'tsp'),
+        for (final name in covered) ingredient(name, '1', 'tsp'),
+      ]
+      ..['steps'] = [
+        'Cook: Simmer the carrots, then stir in the remaining ingredients.',
+      ];
+    final warnings = <String>[];
+    validateRecipe(dish, kitchen, ideas.single, warnings: warnings);
+    expect(warnings, isEmpty);
+  });
+
+  test('mood-only ideas use separate instructions without kitchen economy', () {
+    final kitchen = CreateKitchen(
+      ingredients: [],
+      staples: ['oil'],
+      mood: 'A cozy lunch',
+      meal: 'Lunch',
+      effort: 'Easy',
+      servings: 2,
+      avoid: ['peanuts'],
+      otherPreferences: 'Prefer greens',
+    );
+    final request = createRequest('ideas', 'test-model', 'low', kitchen.input);
+    final instructions = request['system_instruction'] as String;
+    expect(instructions, moodIdeaPrompt);
+    expect(instructions, contains('distinct, varied, real home-cooked dishes'));
+    expect(
+      instructions,
+      contains("fit the cook's mood, meal and effort choices"),
+    );
+    expect(instructions, contains('Treat otherPreferences as soft guidance'));
+    expect(instructions, contains('Foods in avoid are strict exclusions'));
+    expect(
+      instructions,
+      contains('list everything needed beyond the listed staples'),
+    );
+    for (final phrase in [
+      'use-first',
+      'ready-to-make',
+      'shopping ideas',
+      'alreadyReady',
+      'alreadyShopping',
+      'maxExtraIngredients',
+      'ten items',
+    ]) {
+      expect(instructions, isNot(contains(phrase)), reason: phrase);
+    }
+    expect(kitchen.input.containsKey('maxExtraIngredients'), isFalse);
+    expect(request['generation_config'], {
+      'max_output_tokens': 16384,
+      'thinking_level': 'low',
+    });
+    expect(
+      createRequest(
+        'ideas',
+        'test-model',
+        'low',
+        kitchen.input,
+        problem: 'Invalid title.',
+      )['system_instruction'],
+      '$moodIdeaPrompt\nCorrect the previous validation problem: Invalid title.',
+    );
+  });
+
+  test(
+    'ingredient ideas retain their instructions with and without a mood',
+    () {
+      for (final mood in ['', 'A cozy lunch']) {
+        final kitchen = CreateKitchen(
+          ingredients: ['rice'],
+          staples: ['oil'],
+          mood: mood,
+        );
+        final request = createRequest(
+          'ideas',
+          'test-model',
+          'low',
+          kitchen.input,
+        );
+        expect(request['system_instruction'], ideaPrompt);
+        expect(kitchen.input['maxExtraIngredients'], 4);
+        final moodRequest = createRequest('ideas', 'test-model', 'low', {
+          ...kitchen.input,
+          'moodOnly': true,
+        });
+        expect(moodRequest['response_format'], request['response_format']);
+        expect(moodRequest['generation_config'], request['generation_config']);
+      }
+      expect(
+        createRequest('photos', 'test-model', 'low', {
+          'moodOnly': true,
+        })['system_instruction'],
+        photoPrompt,
+      );
+      expect(
+        createRequest('recipe', 'test-model', 'low', {
+          'moodOnly': true,
+        })['system_instruction'],
+        recipePrompt,
+      );
+    },
+  );
+
   test('descriptions keep the dish and mood while applying preferences silently', () {
     final kitchen = CreateKitchen(
       ingredients: kitchenD.ingredients,
@@ -309,7 +452,7 @@ void main() {
   });
 
   test(
-    'discovery caps count only foods beyond the kitchen and its staples',
+    'ingredient discovery caps count only foods beyond the kitchen and its staples',
     () {
       final foods = ['carrots', 'noodles', 'lime', 'ginger', 'celery', 'leeks'];
       for (var cap = 1; cap <= 6; cap++) {
@@ -327,6 +470,12 @@ void main() {
           foods.take(cap),
         );
       }
+    },
+  );
+
+  test(
+    'mood-only ideas retain provider order and allow more than ten purchases',
+    () {
       final mood = CreateKitchen(
         ingredients: [],
         staples: ['oil'],
@@ -334,12 +483,23 @@ void main() {
         avoid: ['peanuts'],
         extraIngredients: 1,
       );
-      final shopping = [...foods, 'cabbage', 'miso', 'broth', 'peas'];
+      final shopping = [
+        'carrots',
+        'noodles',
+        'lime',
+        'ginger',
+        'celery',
+        'leeks',
+        'cabbage',
+        'miso',
+        'broth',
+        'peas',
+      ];
       final accepted = validateIdeas(
         {
           'ideas': [
-            ideaRow('Brothy noodles', have: [], missing: ['oil', ...shopping]),
             ideaRow('Long list', have: [], missing: [...shopping, 'coconut']),
+            ideaRow('Brothy noodles', have: [], missing: ['oil', ...shopping]),
             ideaRow('Peanut soup', have: [], missing: ['peanuts']),
             ideaRow('No ingredients', have: []),
             ideaRow('Staples only', have: [], pantry: ['s1']),
@@ -350,13 +510,70 @@ void main() {
         [],
       );
       expect(accepted.map((idea) => idea.title), [
-        'Staples only',
+        'Long list',
         'Brothy noodles',
+        'Staples only',
       ]);
-      expect(accepted.last.missing, shopping);
-      expect(accepted.last.staples, ['oil']);
+      expect(accepted.first.missing, [...shopping, 'coconut']);
+      expect(accepted[1].missing, shopping);
+      expect(accepted[1].staples, ['oil']);
+      expect(
+        selectIdeaBatch(accepted, mood, limit: 2, readySlots: 0),
+        accepted.take(2),
+      );
+      expect(accepted.last.title, 'Staples only');
     },
   );
+
+  test('mood-only ideas keep structural and response limits', () {
+    final mood = CreateKitchen(ingredients: [], staples: [], mood: 'Soup');
+    for (final missing in [
+      List.filled(501, 'carrots'),
+      ['a' * 501],
+      [null],
+      ['', 'carrots'],
+      'carrots',
+    ]) {
+      final checks = <String>[];
+      expect(
+        validateIdeas(
+          {
+            'ideas': [ideaRow('Soup', have: [])..['missing'] = missing],
+          },
+          mood,
+          [],
+          checks,
+        ),
+        isEmpty,
+      );
+      expect(checks.single, contains('Invalid ingredient or ID list'));
+    }
+    expect(
+      validateIdeas(
+        {
+          'ideas': [
+            ideaRow('Soup', have: [], missing: List.filled(500, 'carrots')),
+          ],
+        },
+        mood,
+        [],
+        [],
+      ).single.missing,
+      ['carrots'],
+    );
+    for (final entries in [
+      List.generate(
+        61,
+        (i) => ideaRow('Soup $i', have: [], missing: ['carrots']),
+      ),
+      'Soup',
+    ]) {
+      expect(
+        () => validateIdeas({'ideas': entries}, mood, [], []),
+        throwsFormatException,
+      );
+    }
+  });
 
   test('time bands use 20 and 40 minute boundaries, meal and effort filters use actual duration', () {
     final k = CreateKitchen(ingredients: ['eggs'], staples: []);
@@ -483,6 +700,106 @@ void main() {
     expect(checked['ingredients'], dish['ingredients']);
   });
 
+  test('missing or non-list guessed markers become empty without warnings', () {
+    for (final markers in <Json>[
+      {},
+      {'aiGuessedFields': null, 'aiGuessedSteps': null},
+      {'aiGuessedFields': 'servings', 'aiGuessedSteps': 0},
+      {'aiGuessedFields': {'tags': true}, 'aiGuessedSteps': {'0': true}},
+      {'aiGuessedFields': true, 'aiGuessedSteps': '0, 1'},
+    ]) {
+      final dish = recipeD()
+        ..remove('aiGuessedFields')
+        ..remove('aiGuessedSteps')
+        ..addAll(markers);
+      final warnings = <String>[];
+      final checked = validateRecipe(dish, kitchenD, wraps, warnings: warnings);
+      expect(checked['aiGuessedFields'], isEmpty, reason: '$markers');
+      expect(checked['aiGuessedSteps'], isEmpty, reason: '$markers');
+      expect(warnings, isEmpty, reason: '$markers');
+      expect(validateRecipe(dish, kitchenD, wraps), checked);
+    }
+  });
+
+  test('mixed guessed markers retain only supported fields and valid indexes', () {
+    final dish = recipeD()
+      ..['aiGuessedFields'] = [
+        'servings', null, 'prepTime', 1, 'cookTime', false, 'totalTime',
+        'tags', '', 'title', 'Servings', ' totalTime ', {'tags': true}, [],
+      ]
+      ..['aiGuessedSteps'] = [0, -1, 2, 3, '1', 1.0, null, false, {}, [], 1];
+    final warnings = <String>[];
+    final checked = validateRecipe(dish, kitchenD, wraps, warnings: warnings);
+    expect(checked['aiGuessedFields'], [
+      'servings', 'prepTime', 'cookTime', 'totalTime', 'tags',
+    ]);
+    expect(checked['aiGuessedSteps'], [0, 2, 1]);
+    expect(checked['ingredients'], dish['ingredients']);
+    expect(checked['steps'], dish['steps']);
+    expect(warnings, isEmpty);
+    expect(dish['aiGuessedSteps'], contains(-1));
+    expect(validateRecipe(dish, kitchenD, wraps), checked);
+  });
+
+  test('one-based-looking guessed indexes are filtered without renumbering', () {
+    final dish = recipeD()
+      ..['steps'] = [
+        ...recipeD()['steps'] as List,
+        'Serve: Put the warm wraps on plates.',
+      ]
+      ..['aiGuessedSteps'] = [1, 2, 3, 4];
+    final warnings = <String>[];
+    final checked = validateRecipe(dish, kitchenD, wraps, warnings: warnings);
+    expect(checked['aiGuessedSteps'], [1, 2, 3]);
+    expect(checked['steps'], dish['steps']);
+    expect(warnings, isEmpty);
+    expect(validateRecipe(dish, kitchenD, wraps), checked);
+  });
+
+  test('discarded guessed markers do not bypass invalid recipe checks', () {
+    for (final edit in [
+      (Json j) => j['status'] = 'not_a_recipe',
+      (Json j) => j['ingredients'] = [],
+      (Json j) => j['steps'] = [],
+      (Json j) => j['description'] = '',
+      (Json j) => j['notes'] = null,
+      (Json j) => (j['ingredients'][0] as Json)['optional'] = 'yes',
+    ]) {
+      final dish = recipeD()
+        ..['aiGuessedFields'] = 'servings'
+        ..['aiGuessedSteps'] = [-1, 99, '0'];
+      edit(dish);
+      expect(
+        () => validateRecipe(dish, kitchenD, wraps, warnings: []),
+        throwsFormatException,
+        reason: '$dish',
+      );
+    }
+  });
+
+  test('food exclusions still inspect recipe fields with invalid guessed markers', () {
+    final kitchen = CreateKitchen(
+      ingredients: kitchenD.ingredients,
+      staples: kitchenD.staples,
+      avoid: ['peanuts'],
+    );
+    for (final edit in [
+      (Json j) => j['notes'] = 'Serve with peanuts.',
+      (Json j) => (j['steps'] as List).add('Finish: Sprinkle with peanuts.'),
+      (Json j) => (j['ingredients'] as List).add(ingredient('peanuts', '1')),
+    ]) {
+      final dish = recipeD()
+        ..['aiGuessedFields'] = 'servings'
+        ..['aiGuessedSteps'] = [-1, 99, '0'];
+      edit(dish);
+      expect(
+        () => validateRecipe(dish, kitchen, wraps, warnings: []),
+        throwsA(isA<AvoidedRecipe>()),
+        reason: '$dish',
+      );
+    }
+  });
+
   test('stock quantities are enforced across lines and package units, including optional quantities', () {
     for (final edit in [
       (Json j) => (j['ingredients'][1] as Json)['amount'] = '1/2',
@@ -593,7 +910,10 @@ void main() {
     final checked = validateRecipe(dish, k, ideas.single);
     expect(checked['ingredients'][1], ingredient('smoked paprika', '1/2', 'tsp'));
     expect(spice['prepNote'], 'smoked paprika');
-    for (final note in ['ground cumin', 'fresh parsley', 'to taste', '']) {
+    for (final note in [
+      'ground cumin', 'fresh parsley', 'to taste', '',
+      'basic spices', 'ground cinnamon and smoked paprika',
+    ]) {
       spice['prepNote'] = note;
       expect(
         () => validateRecipe(dish, k, ideas.single, warnings: []),

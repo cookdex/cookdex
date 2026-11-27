@@ -181,7 +181,7 @@ class _IdleBuildAheadState extends State<IdleBuildAhead> {
   );
 }
 
-/// Bounds retained Cards by recipe count, including grid rows. Visible children
+/// Bounds retained recipe rows by recipe count, including grid rows. Visible children
 /// remain live normally even after their retention allowance is released.
 class BuiltRowBudget {
   @visibleForTesting

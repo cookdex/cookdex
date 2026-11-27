@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show ThemeMode;
 
 import 'create_preferences.dart';
+import 'debounced_preference_write.dart';
 
 enum SearchField { title, ingredients, tags, notes, description }
 
@@ -38,7 +39,7 @@ class LocalPreferences extends ChangeNotifier {
   LocalPreferences._(this._path);
 
   final String? _path;
-  Timer? _timer;
+  late final _writeDebounce = DebouncedPreferenceWrite(_writeSnapshot);
   Future<void> _writes = Future.value();
   String? persistenceError;
   String query = '';
@@ -57,6 +58,15 @@ class LocalPreferences extends ChangeNotifier {
   bool saveImportPhotos = false;
   CreatePreferences _createPreferences = const CreatePreferences.defaults();
   CreatePreferences get createPreferences => _createPreferences;
+
+  // Keep the original storage location so existing backups and older versions
+  // retain the same list while Shopping and Smart Create share its editor.
+  List<String> get staples => _createPreferences.staples;
+
+  void setStaples(List<String> value) {
+    if (listEquals(value, staples)) return;
+    setCreatePreferences(_createPreferences.copyWith(staples: value));
+  }
 
   void setCreatePreferences(CreatePreferences value) {
     _createPreferences = value;
@@ -349,12 +359,13 @@ class LocalPreferences extends ChangeNotifier {
 
   void _scheduleWrite() {
     if (_path == null) return;
-    _timer?.cancel();
-    _timer = Timer(const Duration(milliseconds: 180), flush);
+    _writeDebounce.schedule();
   }
 
-  Future<void> flush() {
-    _timer?.cancel();
+  Future<void> flush() =>
+      _path == null ? Future.value() : _writeDebounce.flush();
+
+  Future<void> _writeSnapshot() {
     if (_path == null) return Future.value();
     final contents = jsonEncode({
       'query': query,
@@ -402,7 +413,7 @@ class LocalPreferences extends ChangeNotifier {
 
   @override
   void dispose() {
-    unawaited(flush());
+    if (_path != null) unawaited(_writeDebounce.dispose());
     super.dispose();
   }
 }

@@ -149,48 +149,52 @@ bool _testEnabled(WidgetTester tester) =>
 
 void main() {
   testWidgets(
-    'YouTube watching model applies on Save independently of the page model',
+    'generic model settings explain fixed YouTube watching and preserve legacy preference',
     (tester) async {
       final prefs = LocalPreferences.memory();
       addTearDown(prefs.dispose);
-      final service = _Service()..platform.model = 'custom-page-model';
+      prefs.setYoutubeWatchModel(YoutubeWatchModel.followImport);
+      final service = _Service()..platform.model = 'gemini-3.5-flash-lite';
       await _pump(tester, service, preferences: prefs);
-      await _tap(tester, 'Advanced');
-      await _tap(tester, 'Gemini 3.8 Flash');
-      await _tap(tester, 'Follow Smart Import');
-      expect(prefs.youtubeWatchModel, YoutubeWatchModel.flash);
+      expect(
+        find.text(
+          'Watching YouTube videos uses Gemini 3.8 Flash. '
+          'This setting does not change it.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byType(DropdownButtonFormField<YoutubeWatchModel>),
+        findsNothing,
+      );
+      await _tap(tester, 'Recipe import');
+      await _tap(tester, 'Low thinking');
+      await _tap(tester, 'High thinking');
       await _tap(tester, 'Save');
       expect(prefs.youtubeWatchModel, YoutubeWatchModel.followImport);
-      expect(service.platform.receivedModel, 'custom-page-model');
-      await tester.pumpWidget(const SizedBox.shrink());
-      await _pump(tester, service, preferences: prefs);
-      await _tap(tester, 'Advanced');
-      await _tap(tester, 'Follow Smart Import');
-      await _tap(tester, 'Gemini 3.5 Flash-Lite');
-      await _tap(tester, 'Save');
-      expect(prefs.youtubeWatchModel, YoutubeWatchModel.lite);
-      await _tap(tester, 'Reset to recommended');
-      expect(prefs.youtubeWatchModel, YoutubeWatchModel.lite);
-      await _tap(tester, 'Save');
-      expect(prefs.youtubeWatchModel, YoutubeWatchModel.flash);
+      expect(service.platform.receivedModel, 'gemini-3.5-flash-lite');
+      expect(service.platform.receivedEffort, 'high');
     },
   );
 
-  testWidgets('Advanced starts collapsed and effort saves without testing', (
+  testWidgets('model and thinking saves independently without testing', (
     tester,
   ) async {
     final service = _Service()..platform.model = 'gemini-3.5-flash-lite';
     var tests = 0;
     await _pump(tester, service, testKey: () async => tests++);
+    expect(find.text('Model and thinking'), findsOneWidget);
+    expect(find.text('Gemini 3.5 Flash-Lite · Low thinking'), findsOneWidget);
     expect(find.text('Effort'), findsNothing);
     expect(find.text('Save'), findsNothing);
-    await _tap(tester, 'Advanced');
-    expect(find.text('Standard'), findsOneWidget);
-    await _tap(tester, 'Standard');
-    await _tap(tester, 'Thorough');
+    await _tap(tester, 'Recipe import');
+    expect(find.text('Low thinking'), findsOneWidget);
+    await _tap(tester, 'Low thinking');
+    await _tap(tester, 'High thinking');
+    expect(service.platform.saves, 0);
     expect(find.text('Test key'), findsNothing);
     await _tap(tester, 'Save');
-    expect(service.platform.receivedEffort, 'thorough');
+    expect(service.platform.receivedEffort, 'high');
     expect(service.platform.receivedModel, 'gemini-3.5-flash-lite');
     expect(service.platform.receivedKey, isEmpty);
     expect(find.text('Test key'), findsNothing);
@@ -198,48 +202,56 @@ void main() {
   });
 
   testWidgets(
-    'reset restores recommended model and effort and leaves the saved key intact',
+    'reset restores Import low thinking and leaves the saved key intact',
     (tester) async {
       final service = _Service()..platform.effort = 'thorough';
       await _pump(tester, service);
       expect(_field('Gemini key'), findsNothing);
-      await _tap(tester, 'Advanced');
-      expect(find.text('Thorough'), findsOneWidget);
+      await _tap(tester, 'Recipe import');
+      expect(find.text('High thinking'), findsOneWidget);
       await _tap(tester, 'Reset to recommended');
-      expect(find.text('Standard'), findsOneWidget);
-      expect(find.text('Gemini 3.5 Flash-Lite (recommended)'), findsOneWidget);
-      expect(_field('Custom model ID'), findsNothing);
+      expect(find.text('Low thinking'), findsOneWidget);
+      expect(find.text('Gemini 3.5 Flash-Lite'), findsOneWidget);
+      expect(_field('Model ID'), findsNothing);
       expect(service.platform.saves, 0);
       expect(service.platform.removes, 0);
       await _tap(tester, 'Save');
       expect(service.platform.receivedKey, '');
       expect(service.platform.receivedModel, 'gemini-3.5-flash-lite');
-      expect(service.platform.receivedEffort, 'standard');
+      expect(service.platform.receivedEffort, 'low');
     },
   );
 
-  testWidgets('custom model choice requires an ID and persists with effort', (
+  testWidgets('custom model choice requires an ID and persists with thinking', (
     tester,
   ) async {
     final service = _Service()
       ..platform.model = 'gemini-3.5-flash-lite'
       ..platform.effort = 'thorough';
     await _pump(tester, service);
-    await _tap(tester, 'Advanced');
-    await _tap(tester, 'Gemini 3.5 Flash-Lite (recommended)');
+    await _tap(tester, 'Recipe import');
+    await _tap(tester, 'Gemini 3.5 Flash-Lite');
     await _tap(tester, 'Custom model ID');
     final save = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Save'),
     );
     expect(save.onPressed, isNull);
-    await tester.enterText(
-      _field('Custom model ID'),
-      ' synthetic-custom-model ',
-    );
+    await tester.enterText(_field('Model ID'), ' synthetic-custom-model ');
     await _tap(tester, 'Save');
     expect(service.platform.receivedModel, 'synthetic-custom-model');
-    expect(service.platform.receivedEffort, 'thorough');
+    expect(service.platform.receivedEffort, 'high');
     expect(service.platform.hasKey, isTrue);
+    await _tap(tester, 'Recipe import');
+    expect(
+      tester.widget<TextField>(_field('Model ID')).controller!.text,
+      'synthetic-custom-model',
+    );
+    await tester.enterText(_field('Model ID'), 'cancelled-model');
+    await _tap(tester, 'Reset to recommended');
+    await _tap(tester, 'Cancel');
+    expect(service.platform.saves, 1);
+    expect(service.platform.model, 'synthetic-custom-model');
+    expect(service.platform.effort, 'high');
   });
 
   testWidgets('saved key stays hidden and testing requires an explicit tap', (
@@ -511,9 +523,15 @@ void main() {
     tester,
   ) async {
     await _pump(tester, _Service(), width: 320, textScale: 2);
-    await _tap(tester, 'Advanced');
+    await _tap(tester, 'Recipe import');
     await _tap(tester, 'Reset to recommended');
-    for (final label in ['Save', 'View prompts', 'Last Smart Import']) {
+    expect(find.text('Low thinking'), findsOneWidget);
+    await _tap(tester, 'Cancel');
+    for (final label in [
+      'Recipe import',
+      'View prompts',
+      'Last Smart Import',
+    ]) {
       await tester.ensureVisible(find.text(label));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: label);

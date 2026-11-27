@@ -310,12 +310,13 @@ class _TextImportReviewState extends State<TextImportReview> {
     canPop: !_saving,
     child: CookdexFormScaffold(
       title: 'Import recipes',
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: PixelListView(
-            padding: const EdgeInsets.all(16),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final side =
+              ((constraints.maxWidth - 640) / 2).clamp(0.0, double.infinity) +
+              16;
+          return PixelListView(
+            padding: EdgeInsets.fromLTRB(side, 16, side, 16),
             children: [
               const Text('Choose the recipes to add to your library.'),
               const SizedBox(height: 12),
@@ -406,8 +407,8 @@ class _TextImportReviewState extends State<TextImportReview> {
                   child: const Text('Done'),
                 ),
             ],
-          ),
-        ),
+          );
+        },
       ),
     ),
   );

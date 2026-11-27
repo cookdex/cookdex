@@ -1,6 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+const recipeContentMaxWidth = 850.0;
+
+/// Keep portrait tablets and phones at their established reading widths.
+bool usesWidePageColumn(BuildContext context) {
+  final size = MediaQuery.sizeOf(context);
+  final desktop = switch (Theme.of(context).platform) {
+    TargetPlatform.windows ||
+    TargetPlatform.linux ||
+    TargetPlatform.macOS => true,
+    _ => false,
+  };
+  return desktop || (size.shortestSide >= 600 && size.width > size.height);
+}
+
+/// Inset content, leaving the scroll viewport across the whole available page.
+double widePageSideInset(BuildContext context, double width) =>
+    usesWidePageColumn(context)
+    ? ((width - recipeContentMaxWidth) / 2).clamp(16.0, double.infinity)
+    : 16;
+
 /// Classify the whole window, before rail or pane insets are applied.
 enum WindowSizeClass {
   compact,

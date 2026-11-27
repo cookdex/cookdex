@@ -283,7 +283,7 @@ void main() {
 
   for (final profile in _profiles.where((p) => p.$1 != 'small')) {
     testWidgets(
-      '${profile.$1}: recipe controls retain one row and remain reachable',
+      '${profile.$1}: recipe controls stay visible without scrolling sideways',
       (tester) async {
         await _fonts(tester);
         _viewport(tester, profile.$2, profile.$3);
@@ -326,8 +326,6 @@ void main() {
                 (w) => w is IconButton && w.key == const Key('recipe-view'),
               ),
             ]) {
-              await tester.ensureVisible(target);
-              await tester.pumpAndSettle();
               final rect = tester.getRect(target);
               expect(rect.left, greaterThanOrEqualTo(0));
               expect(rect.right, lessThanOrEqualTo(profile.$2.width));
@@ -336,7 +334,7 @@ void main() {
             }
           }
         }
-        // The last trigger remains usable after scrolling it into view.
+        // View is immediately usable, including after the controls wrap.
         await tester.tap(find.byKey(const Key('recipe-view')));
         await tester.pumpAndSettle();
         expect(prefs.view, RecipeView.compact);

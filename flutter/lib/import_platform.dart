@@ -7,6 +7,17 @@ import 'src/rust/api.dart';
 import 'import_page_fetcher.dart';
 
 class SmartImportSettings {
+  static const recommendedModel = 'gemini-3.5-flash-lite';
+  static const recommendedThinking = 'low';
+  static const thinkingValues = {
+    'standard',
+    'thorough',
+    'default',
+    'minimal',
+    'low',
+    'medium',
+    'high',
+  };
   const SmartImportSettings({
     required this.hasKey,
     required this.model,
@@ -15,6 +26,13 @@ class SmartImportSettings {
   final bool hasKey;
   final String model;
   final String effort;
+  // Legacy Standard follows the recommendation; Thorough remains High. Exact
+  // selections keep their value in the existing native preference.
+  String get thinking => switch (effort) {
+    'standard' => recommendedThinking,
+    'thorough' => 'high',
+    _ => effort,
+  };
 }
 
 class ImportPhoto {
@@ -107,7 +125,9 @@ class NativeImportPlatform
     return SmartImportSettings(
       hasKey: result['hasKey'] as bool,
       model: result['model'] as String,
-      effort: result['effort'] == 'thorough' ? 'thorough' : 'standard',
+      effort: SmartImportSettings.thinkingValues.contains(result['effort'])
+          ? result['effort'] as String
+          : 'standard',
     );
   }
 

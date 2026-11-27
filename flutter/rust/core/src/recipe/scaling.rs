@@ -50,6 +50,7 @@ pub fn display_scaled(value: Amount, unit: &str) -> Result<String> {
         let b = high.convert(from, to)?;
         let large_enough = a.numerator() >= a.denominator()
             || (unit == "cup" && a.numerator() * 2 >= a.denominator())
+            || (unit == "cup" && a.denominator() == 3)
             || unit == ladder.last().unwrap().0;
         if large_enough
             && measured(a)
@@ -116,6 +117,8 @@ mod tests {
     #[test]
     fn exact_ladders_ranges_and_counts() {
         for (input, unit, scale, expected) in [
+            ("2/3", "cup", 1, "1/3 cup"),
+            ("1/3", "cup", 3, "1/2 cup"),
             ("1/3", "cup", 4, "2/3 cup"),
             ("1/3", "cup", 5, "13 tbsp + 1 tsp"),
             ("3", "eggs", 3, "4 1/2 eggs"),

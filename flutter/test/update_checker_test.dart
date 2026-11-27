@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cookdex/local_preferences.dart';
+import 'package:cookdex/interaction_idle.dart';
 import 'package:cookdex/update_checker.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -100,6 +101,63 @@ class _Client implements HttpClient {
 }
 
 void main() {
+  testWidgets('waiting for idle is outside the completed transfer timeout', (
+    tester,
+  ) async {
+    final idle = InteractionIdle.instance, hold = Object();
+    final client = _Client(
+      _Request(Future.value(_Response(jsonEncode(releaseJson()), 200))),
+    );
+    final source = GitHubReleaseSource(
+      clientFactory: () => client,
+      timeout: const Duration(milliseconds: 100),
+    );
+    idle.hold(hold, true);
+    PublishedRelease? result;
+    Object? error;
+    final request = source.latest().then(
+      (value) => result = value,
+      onError: (Object e) {
+        error = e;
+        return null;
+      },
+    );
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(client.closed, isTrue);
+    await tester.pump(const Duration(seconds: 12));
+    expect(error, isNull);
+    expect(result, isNull);
+    idle.hold(hold, false);
+    await tester.pump(const Duration(milliseconds: 1));
+    await request;
+    expect(result!.version.toString(), '1.9.1');
+    source.close();
+  });
+
+  testWidgets('repeated manual checks share the flight while idle is held', (
+    tester,
+  ) async {
+    final idle = InteractionIdle.instance, hold = Object();
+    final prefs = LocalPreferences.memory();
+    final source = FakeReleaseSource();
+    final update = UpdateController(
+      preferences: prefs,
+      source: source,
+      installedVersion: () async => '1.10.5',
+    );
+    idle.hold(hold, true);
+    final first = update.check();
+    for (var n = 0; n < 20; n++) {
+      expect(identical(update.check(), first), isTrue);
+    }
+    idle.hold(hold, false);
+    await tester.pump(const Duration(milliseconds: 1));
+    await first;
+    expect(source.calls, 1);
+    update.dispose();
+    prefs.dispose();
+  });
+
   test('version comparison uses major minor patch and ignores v/build', () {
     final current = ReleaseVersion.parse('1.9.0+19000')!;
     for (final (tag, order) in [

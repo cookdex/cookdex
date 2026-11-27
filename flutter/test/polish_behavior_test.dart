@@ -179,7 +179,9 @@ void main() {
     store.dispose();
     prefs.dispose();
   });
-  testWidgets('Cards to Compact remeasures tight grid rows', (tester) async {
+  testWidgets('Cards to Compact replaces grid rows with compact list items', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -197,8 +199,9 @@ void main() {
     );
     prefs.setView(RecipeView.compact);
     await tester.pumpAndSettle();
+    expect(find.byType(RecipeGridRow), findsNothing);
     expect(
-      tester.getSize(find.byType(RecipeGridRow).first).height,
+      tester.getSize(find.byKey(const ValueKey('0'))).height,
       lessThan(80),
     );
     await tester.pumpWidget(const SizedBox.shrink());

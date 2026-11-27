@@ -840,14 +840,14 @@ fn exact_shopping_families_mixed_measures_and_unique_sources() {
     ];
     let items = shopping::add(&[], &r, &[0, 1, 2, 3, 4, 5, 6]).unwrap();
     assert_eq!(items.len(), 4);
-    assert_eq!(items[0].quantity_text(), "1 1/2 cups + 501/1000 kg");
+    assert_eq!(items[0].quantity_text(), "1 1/2 cups + 501 g");
     assert_eq!(items[0].contributors.len(), 1);
     assert_eq!(items[3].quantity_text(), "33/100 cup");
     let mut r2 = r.clone();
     r2.id = RecipeId("second".into());
     let items = shopping::add(&items, &r2, &[0]).unwrap();
     assert_eq!(items[0].contributors.len(), 2);
-    assert_eq!(items[0].quantity_text(), "2 1/2 cups + 501/1000 kg");
+    assert_eq!(items[0].quantity_text(), "2 1/2 cups + 501 g");
     let mut r = Recipe::new(fields("units"), "2026-10-08T00:00:00Z").unwrap();
     r.content.ingredients = vec![
         ingredient("a", "1", "l"),
@@ -858,7 +858,7 @@ fn exact_shopping_families_mixed_measures_and_unique_sources() {
         ingredient("c", "1", "tsp"),
     ];
     let items = shopping::add(&[], &r, &[0, 1, 2, 3, 4, 5]).unwrap();
-    assert_eq!(items[0].quantity_text(), "1 1/2 l");
+    assert_eq!(items[0].quantity_text(), "1.5 l");
     assert_eq!(items[1].quantity_text(), "2 lb");
     assert_eq!(items[2].quantity_text(), "1 cup + 1 tsp");
 }
@@ -887,8 +887,10 @@ fn shopping_detachment_targeted_undo_recovery_and_restart_preserve_sources() {
     let summed = s
         .add_shopping(checked.snapshot.generation, &recipe_id, &[0], &op())
         .unwrap();
-    assert!(!summed.snapshot.shopping[0].checked);
-    assert_eq!(summed.snapshot.shopping[0].quantity_text(), "33/50 cup");
+    assert_eq!(summed.snapshot.shopping[0], checked.snapshot.shopping[0]);
+    assert!(!summed.snapshot.shopping[1].checked);
+    assert_eq!(summed.snapshot.shopping[1].quantity_text(), "33/100 cup");
+    let id = summed.snapshot.shopping[1].id.clone();
     let detached = s
         .edit_shopping(
             summed.snapshot.generation,
@@ -899,7 +901,7 @@ fn shopping_detachment_targeted_undo_recovery_and_restart_preserve_sources() {
             &op(),
         )
         .unwrap();
-    assert!(detached.snapshot.shopping[0].contributors.is_empty());
+    assert!(detached.snapshot.shopping[1].contributors.is_empty());
     assert_eq!(
         s.undo_shopping(detached.snapshot.generation, &summed.undo, &op()),
         Err(Error::StaleWrite)
@@ -916,7 +918,7 @@ fn shopping_detachment_targeted_undo_recovery_and_restart_preserve_sources() {
     let undone = s
         .undo_shopping(other.snapshot.generation, &detached.undo, &op())
         .unwrap();
-    assert_eq!(undone.shopping.len(), 2);
+    assert_eq!(undone.shopping.len(), 3);
     assert_eq!(undone.shopping[0].contributors, vec![recipe_id.clone()]);
     let removed = s
         .edit_shopping(

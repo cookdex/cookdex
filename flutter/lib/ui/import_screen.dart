@@ -854,12 +854,16 @@ class _ImportScreenState extends State<ImportScreen>
   Widget _content() {
     final theme = Theme.of(context);
     final inset = _contentInset;
-    return Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: _contentWidth),
-        child: PixelSingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(inset, 4, inset, 12),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final side =
+            ((constraints.maxWidth - _contentWidth) / 2).clamp(
+              0.0,
+              double.infinity,
+            ) +
+            inset;
+        return PixelSingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(side, 4, side, 12),
           child: Semantics(
             blockUserActions: c.busy,
             child: IgnorePointer(
@@ -923,8 +927,8 @@ class _ImportScreenState extends State<ImportScreen>
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

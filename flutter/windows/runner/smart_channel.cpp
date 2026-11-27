@@ -24,6 +24,10 @@ std::string Field(const flutter::MethodCall<V>& call, const char* key) {
   return value ? *value : std::string();
 }
 struct Settings { std::string model = "gemini-3.5-flash-lite"; std::string key; std::string effort = "standard"; };
+bool ValidThinking(const std::string& value) {
+  return value == "standard" || value == "thorough" || value == "default" ||
+      value == "minimal" || value == "low" || value == "medium" || value == "high";
+}
 Settings Read() {
   PCREDENTIALW credential = nullptr;
   if (!CredReadW(kTarget, CRED_TYPE_GENERIC, 0, &credential)) {
@@ -37,7 +41,7 @@ Settings Read() {
   const auto effortSplit = value.find('\n', split + 1);
   if (effortSplit == std::string::npos) return {value.substr(0, split), value.substr(split + 1)};
   const auto effort = value.substr(effortSplit + 1);
-  if (effort != "standard" && effort != "thorough") throw std::runtime_error("The saved Gemini settings are invalid.");
+  if (!ValidThinking(effort)) throw std::runtime_error("The saved Gemini settings are invalid.");
   return {value.substr(0, split), value.substr(split + 1, effortSplit - split - 1), effort};
 }
 void Write(const Settings& settings) {
@@ -85,7 +89,7 @@ SmartChannel::SmartChannel(flutter::BinaryMessenger* messenger, HWND window) : w
           const auto model = Field(call, "model"), key = Field(call, "key");
           if (!std::regex_match(model, std::regex("[A-Za-z0-9._-]{1,120}")) || key.size() > 1024 || std::any_of(key.begin(), key.end(), [](unsigned char c) { return c < 33 || c > 126; })) throw std::runtime_error("Check the key and model.");
           const auto effort = Field(call, "effort");
-          if (!effort.empty() && effort != "standard" && effort != "thorough") throw std::runtime_error("Check the effort setting.");
+          if (!effort.empty() && !ValidThinking(effort)) throw std::runtime_error("Check the thinking setting.");
           settings.model = model;
           settings.effort = effort.empty() ? "standard" : effort;
           if (!key.empty()) settings.key = key;

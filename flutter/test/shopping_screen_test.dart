@@ -402,7 +402,9 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(NavigationRail),
-          matching: find.text(name),
+          matching: find.text(
+            name == 'Shopping list' ? 'Shopping\nlist' : name,
+          ),
         ),
       );
       await tester.pump();

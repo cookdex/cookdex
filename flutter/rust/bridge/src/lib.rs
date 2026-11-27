@@ -1,5 +1,9 @@
 pub mod api;
 mod convert;
+#[cfg(target_os = "android")]
+mod immediate_frame_hint;
+#[cfg(target_os = "android")]
+mod performance_hint;
 // JNI entry point for Auto Backup when the Flutter engine is not running.
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]

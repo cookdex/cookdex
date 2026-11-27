@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'app_platform.dart';
+import 'frame_work_binding.dart';
 import 'app_identity.dart';
 import 'bridge_loader.dart';
 import 'draft_storage.dart';
@@ -17,7 +18,11 @@ import 'settings_platform.dart';
 import 'startup_splash.dart';
 
 Future<void> main(List<String> args) async {
-  WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isAndroid) {
+    CookdexBinding();
+  } else {
+    WidgetsFlutterBinding.ensureInitialized();
+  }
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks([
       'Noto Sans',
@@ -72,7 +77,10 @@ Future<void> main(List<String> args) async {
       store: store,
       platform: platform,
       drafts: FileDraftStorage('$root/editor-draft.json'),
-      createDiagnostics: FileDraftStorage('$root/last-smart-create.json', limitBytes: 16 * 1024 * 1024),
+      createDiagnostics: FileDraftStorage(
+        '$root/last-smart-create.json',
+        limitBytes: 16 * 1024 * 1024,
+      ),
       importDrafts: FileDraftStorage(
         '$root/import-draft.json',
         limitBytes: 16 * 1024 * 1024,

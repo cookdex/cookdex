@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'draft_storage.dart';
+import 'gemini_error_messages.dart';
 import 'import_diagnostics.dart';
 import 'import_platform.dart';
 import 'local_preferences.dart';
@@ -228,10 +229,20 @@ class NativeImportService
         diagnostic.reply(reply.status, reply.bytes);
         await _record(diagnostic, epoch);
         _check(epoch);
-        final output = await task.accept(
-          status: reply.status,
-          bytes: reply.bytes,
-        );
+        late final ProviderOutput output;
+        try {
+          output = await task.accept(status: reply.status, bytes: reply.bytes);
+        } on ServiceError {
+          final capability = geminiCapabilityMessage(
+            reply.status,
+            reply.bytes,
+            settings: 'Smart Import settings',
+            photos: input.photos.isNotEmpty,
+            webPage: input.mode == ProviderMode.urlRecipe,
+          );
+          if (capability != null) throw StateError(capability);
+          rethrow;
+        }
         _check(epoch);
         if (output is ProviderOutput_Retry) {
           retry = true;
@@ -461,6 +472,13 @@ class NativeImportService
       final reply = await platform.providerRequest(body);
       _check(epoch);
       diagnostic.reply(reply.status, reply.bytes);
+      final capability = geminiCapabilityMessage(
+        reply.status,
+        reply.bytes,
+        settings: 'Smart Import settings',
+        video: mode == 'YouTube video',
+      );
+      if (capability != null) throw StateError(capability);
       final result = await read(reply);
       _check(epoch);
       diagnostic.validation('Accepted');
@@ -649,12 +667,12 @@ class NativeImportService
       watching = true;
       onPhase?.call(ImportPhase.watchingVideo);
       _check(epoch);
-      final watchChoice =
-          preferences?.youtubeWatchModel ?? YoutubeWatchModel.flash;
       final watchSettings = SmartImportSettings(
         hasKey: settings.hasKey,
-        model: watchChoice.modelId ?? settings.model,
-        effort: settings.effort,
+        // Watching retains the independently approved model and thinking.
+        // Import's model picker affects written sources and photos only.
+        model: 'gemini-3.8-flash',
+        effort: 'low',
       );
       final body = youtubeWatchRequest(
         video,

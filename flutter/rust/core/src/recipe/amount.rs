@@ -2,7 +2,7 @@ use super::{Result, bounded, error};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_INTEGER: u64 = 9_007_199_254_740_991;
-pub const NUMBER_PATTERN: &str = r"(?:[0-9]+(?:\s+(?i:and)\s+|\s*[-&]\s*|\s+)(?:[0-9]+/[0-9]+|[¼½¾⅓⅔⅛⅜⅝⅞⅐⅑⅒⅕⅖⅗⅘⅙⅚])|[0-9]+/[0-9]+|(?:[0-9]+\s*)?[¼½¾⅓⅔⅛⅜⅝⅞⅐⅑⅒⅕⅖⅗⅘⅙⅚]|[0-9]+(?:\.[0-9]+)?)";
+pub const NUMBER_PATTERN: &str = r"(?:[0-9]+(?:\s+(?i:and)\s+|\s*[-&]\s*|\s+)(?:[0-9]+/[0-9]+|[¼½¾⅓⅔⅛⅜⅝⅞⅐⅑⅒⅕⅖⅗⅘⅙⅚])|[0-9]+/[0-9]+|(?:[0-9]+\s*)?[¼½¾⅓⅔⅛⅜⅝⅞⅐⅑⅒⅕⅖⅗⅘⅙⅚]|[1-9][0-9]{0,2}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:[.,][0-9]+)?)";
 fn gcd(mut a: u128, mut b: u128) -> u128 {
     while b != 0 {
         (a, b) = (b, a % b);
@@ -356,6 +356,21 @@ impl Amount {
                 .ok_or_else(|| error("Quantity overflow."))?;
             return Ok(Rational::new(n, d)?.into());
         }
+        static GROUPED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+            regex::Regex::new(r"^[1-9][0-9]{0,2}(?:,[0-9]{3})+(?:\.[0-9]+)?$").unwrap()
+        });
+        let normalized = if text.contains(',') {
+            if GROUPED.is_match(text) {
+                text.replace(',', "")
+            } else if text.matches(',').count() == 1 && !text.contains('.') {
+                text.replace(',', ".")
+            } else {
+                return Err(error("Invalid quantity separators."));
+            }
+        } else {
+            text.into()
+        };
+        let text = normalized.as_str();
         let value = if let Some((whole, decimal)) = text.split_once('.') {
             integer(whole)?;
             integer(decimal)?;

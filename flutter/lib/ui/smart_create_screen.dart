@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../smart_create_controller.dart';
@@ -26,14 +25,12 @@ class SmartCreateScreen extends StatefulWidget {
     required this.onKey,
     required this.onSettings,
     required this.onStaples,
-    required this.onShop,
     this.onViewRecipe,
   });
 
   final SmartCreateController controller;
   final Future<void> Function(BuildContext, Candidate) onReview;
   final Future<void> Function(BuildContext) onKey, onSettings, onStaples;
-  final Future<void> Function(List<String>) onShop;
   final Future<void> Function(String id)? onViewRecipe;
 
   @override
@@ -61,9 +58,6 @@ class _SmartCreateScreenState extends State<SmartCreateScreen>
   Future<void> Function()? _retry;
   String? _openIdea;
   bool _optionsOpen = false;
-  bool _addingToList = false;
-  String? _shoppingErrorTitle;
-  final _shoppingErrorKey = GlobalKey();
 
   final _optionsKey = GlobalKey();
   final _ideaKeys = <String, GlobalKey>{};
@@ -153,37 +147,6 @@ class _SmartCreateScreenState extends State<SmartCreateScreen>
     final candidate = await c.recipe(idea);
     if (mounted && candidate != null) {
       await widget.onReview(context, candidate);
-    }
-  }
-
-  Future<void> _shop(CreateIdea idea) async {
-    if (_addingToList) return;
-    setState(() {
-      _addingToList = true;
-      _shoppingErrorTitle = null;
-    });
-    try {
-      await widget.onShop(idea.missing);
-      if (mounted) {
-        c.markAdded(idea.title);
-        HapticFeedback.selectionClick();
-      }
-    } catch (_) {
-      if (mounted) {
-        _shoppingErrorTitle = idea.title;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final target = _shoppingErrorKey.currentContext;
-          if (target != null && _openIdea == idea.title) {
-            Scrollable.ensureVisible(
-              target,
-              alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
-              duration: _motion,
-            );
-          }
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _addingToList = false);
     }
   }
 
@@ -547,7 +510,7 @@ class _SmartCreateScreenState extends State<SmartCreateScreen>
                               await c.useFlash();
                               if (mounted) await _run(retry);
                             },
-                            child: const Text('Use Flash'),
+                            child: const Text('Use Flash-Lite'),
                           ),
                         if (!c.needsKey)
                           TextButton(
@@ -615,33 +578,41 @@ class _SmartCreateScreenState extends State<SmartCreateScreen>
   Widget _page(int index) => PixelSingleChildScrollView(
     key: PageStorageKey('smart-create-$index'),
     controller: index == 2 ? _ideasScroll : null,
-    padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-    child: ExcludeFocus(
-      excluding: _busy && index < 2,
-      child: IgnorePointer(
-        ignoring: _busy && index < 2,
-        child: RepaintBoundary(
-          // The scroll transform changes each frame, but these chips and cards
-          // do not. Keep their display list across drags; edits still repaint.
-          child: Semantics(
-            container: true,
-            explicitChildNodes: true,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (index == 0) ...[
-                  Text(
-                    "List what you have on hand, add photos, or say what you're in the mood for. You'll get meal ideas to match.",
-                    style: FaceliftTokens.tileSubtitle(context),
+    child: Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+          child: ExcludeFocus(
+            excluding: _busy && index < 2,
+            child: IgnorePointer(
+              ignoring: _busy && index < 2,
+              child: RepaintBoundary(
+                // The scroll transform changes each frame, but these chips and cards
+                // do not. Keep their display list across drags; edits still repaint.
+                child: Semantics(
+                  container: true,
+                  explicitChildNodes: true,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (index == 0) ...[
+                        Text(
+                          "List what you have on hand, add photos, or say what you're in the mood for. You'll get meal ideas to match.",
+                          style: FaceliftTokens.tileSubtitle(context),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      ...switch (index) {
+                        0 => [..._input(), _message()],
+                        1 => [..._check(), if (c.error != null) _message()],
+                        _ => _ideas(),
+                      },
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                ],
-                ...switch (index) {
-                  0 => [..._input(), _message()],
-                  1 => [..._check(), if (c.error != null) _message()],
-                  _ => _ideas(),
-                },
-              ],
+                ),
+              ),
             ),
           ),
         ),
@@ -669,30 +640,29 @@ class _SmartCreateScreenState extends State<SmartCreateScreen>
           ),
         ],
         bottomNavigationBar: _footer(),
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
                   child: _steps(),
                 ),
-                Expanded(
-                  child: RetainedTabTransition(
-                    index: c.step,
-                    readyToWarm: false,
-                    children: [
-                      for (var i = 0; i < 3; i++)
-                        Builder(builder: (_) => _page(i)),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+            Expanded(
+              child: RetainedTabTransition(
+                index: c.step,
+                readyToWarm: false,
+                children: [
+                  for (var i = 0; i < 3; i++) Builder(builder: (_) => _page(i)),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     ),

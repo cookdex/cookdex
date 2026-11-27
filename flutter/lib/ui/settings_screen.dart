@@ -1,6 +1,7 @@
 import 'page_headings.dart';
 import 'pixel_scroll.dart';
 import 'retained_screen.dart';
+import 'window_size.dart';
 
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -31,6 +32,7 @@ class SettingsScreen extends StatelessWidget {
     this.onGeminiKey,
     this.onSmartCreateSettings,
     this.onSmartImportSettings,
+    this.onStaples,
     this.onHowCookdexWorks,
     this.onGitHub,
     this.onShareCookdex,
@@ -66,6 +68,7 @@ class SettingsScreen extends StatelessWidget {
   final VoidCallback? onGeminiKey;
   final VoidCallback? onSmartCreateSettings;
   final VoidCallback? onSmartImportSettings;
+  final VoidCallback? onStaples;
   final VoidCallback? onHowCookdexWorks;
   final VoidCallback? onGitHub;
   final VoidCallback? onShareCookdex;
@@ -238,19 +241,30 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
-      child: Column(
-        children: [
-          const TabHeading(title: Text('Settings')),
-          Expanded(child: _settingsList(context)),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final side = widePageSideInset(context, constraints.maxWidth);
+          return Column(
+            children: [
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: side - 16),
+                child: const TabHeading(title: Text('Settings')),
+              ),
+              Expanded(child: _settingsList(context, side: side)),
+            ],
+          );
+        },
       ),
     ),
   );
 
-  Widget _settingsList(BuildContext context) => PixelListView(
+  Widget _settingsList(
+    BuildContext context, {
+    required double side,
+  }) => PixelListView(
     key: const PageStorageKey('settings'),
     controller: controller,
-    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    padding: EdgeInsets.fromLTRB(side, 0, side, 16),
     children: [
       _group(context, 'Sync', [
         VisibleListenableBuilder(
@@ -315,6 +329,7 @@ class SettingsScreen extends StatelessWidget {
         ),
       ]),
       _group(context, 'Shopping list', [
+        _action('Staples', Symbols.kitchen, onStaples),
         _preferenceToggle(
           icon: Symbols.light_mode,
           label: 'Keep shopping screen awake',

@@ -13,13 +13,18 @@ class CreatePreferences {
     'gemini-3.5-flash-lite': 'Gemini 3.5 Flash-Lite',
     'gemini-3.8-flash': 'Gemini 3.8 Flash',
     'gemini-3.1-pro-preview': 'Gemini 3.1 Pro preview',
-    'gemini-4-argon': 'Gemini 4 Argon',
+    'gemini-4-hydrogen': 'Gemini 4 Hydrogen',
   };
   static String modelName(String id) => modelNames[id] ?? id;
   static String thinkingName(String value) =>
       '${value[0].toUpperCase()}${value.substring(1)} thinking';
-  static const suggestedModel = 'gemini-3.8-flash';
-  static const suggestedThinking = 'low';
+  static const suggestedModel = 'gemini-3.5-flash-lite';
+  static const suggestedThinking = 'high';
+  static bool isPaidModel(String model) => const {
+    'gemini-3.8-flash',
+    'gemini-3.1-pro-preview',
+    'gemini-4-argon',
+  }.contains(model);
 
   const CreatePreferences.defaults()
     : _staples = const [
@@ -41,6 +46,7 @@ class CreatePreferences {
       photoThinking = suggestedThinking,
       ideaThinking = suggestedThinking,
       recipeThinking = suggestedThinking,
+      _modelChoices = const {},
       _retiredModels = const {};
 
   CreatePreferences._({
@@ -55,9 +61,11 @@ class CreatePreferences {
     required this.photoThinking,
     required this.ideaThinking,
     required this.recipeThinking,
+    required Map<CreateStep, bool> modelChoices,
     required Map<CreateStep, String> retiredModels,
   }) : _staples = List.unmodifiable(staples),
        _avoid = List.unmodifiable(avoid),
+       _modelChoices = Map.unmodifiable(modelChoices),
        _retiredModels = Map.unmodifiable(retiredModels);
 
   final List<String> _staples, _avoid;
@@ -68,7 +76,12 @@ class CreatePreferences {
   final int extraIngredients;
   final String photoModel, ideaModel, recipeModel;
   final String photoThinking, ideaThinking, recipeThinking;
+  // True means the cook explicitly chose this step's model/thinking pair.
+  // False (or an absent in-memory entry) follows the current recommendation.
+  final Map<CreateStep, bool> _modelChoices;
   final Map<CreateStep, String> _retiredModels;
+
+  bool usesRecommendedFor(CreateStep step) => _modelChoices[step] != true;
 
   String? retiredModelFor(CreateStep step) => _retiredModels[step];
 
@@ -87,12 +100,30 @@ class CreatePreferences {
   CreatePreferences withSelection(
     CreateStep step,
     String model,
-    String thinking,
-  ) => switch (step) {
-    CreateStep.photo => copyWith(photoModel: model, photoThinking: thinking),
-    CreateStep.ideas => copyWith(ideaModel: model, ideaThinking: thinking),
-    CreateStep.recipe => copyWith(recipeModel: model, recipeThinking: thinking),
-  };
+    String thinking, {
+    bool useRecommended = false,
+  }) {
+    final selectedModel = useRecommended ? suggestedModel : model;
+    final selectedThinking = useRecommended ? suggestedThinking : thinking;
+    final choices = {..._modelChoices, step: !useRecommended};
+    return switch (step) {
+      CreateStep.photo => copyWith(
+        photoModel: selectedModel,
+        photoThinking: selectedThinking,
+        modelChoices: choices,
+      ),
+      CreateStep.ideas => copyWith(
+        ideaModel: selectedModel,
+        ideaThinking: selectedThinking,
+        modelChoices: choices,
+      ),
+      CreateStep.recipe => copyWith(
+        recipeModel: selectedModel,
+        recipeThinking: selectedThinking,
+        modelChoices: choices,
+      ),
+    };
+  }
 
   CreatePreferences withRetiredModel(CreateStep step, String retiredModel) {
     if (modelFor(step) != retiredModel || retiredModel == suggestedModel) {
@@ -102,6 +133,7 @@ class CreatePreferences {
       step,
       suggestedModel,
       suggestedThinking,
+      useRecommended: true,
     ).copyWith(retiredModels: {..._retiredModels, step: retiredModel});
   }
 
@@ -111,6 +143,7 @@ class CreatePreferences {
       'gemini-3.1-pro-preview',
       'gemini-3.7-flash',
       'gemini-3.8-flash',
+      'gemini-4-hydrogen',
       'gemini-4-argon',
     }.contains(model))
       'minimal',
@@ -131,6 +164,7 @@ class CreatePreferences {
     String? photoThinking,
     String? ideaThinking,
     String? recipeThinking,
+    Map<CreateStep, bool>? modelChoices,
     Map<CreateStep, String>? retiredModels,
   }) => CreatePreferences._(
     staples: staples ?? this.staples,
@@ -144,6 +178,16 @@ class CreatePreferences {
     photoThinking: photoThinking ?? this.photoThinking,
     ideaThinking: ideaThinking ?? this.ideaThinking,
     recipeThinking: recipeThinking ?? this.recipeThinking,
+    modelChoices:
+        modelChoices ??
+        {
+          ..._modelChoices,
+          if (photoModel != null || photoThinking != null)
+            CreateStep.photo: true,
+          if (ideaModel != null || ideaThinking != null) CreateStep.ideas: true,
+          if (recipeModel != null || recipeThinking != null)
+            CreateStep.recipe: true,
+        },
     retiredModels:
         retiredModels ??
         {
@@ -170,6 +214,10 @@ class CreatePreferences {
     'photoThinking': photoThinking,
     'ideaThinking': ideaThinking,
     'recipeThinking': recipeThinking,
+    'modelChoices': {
+      for (final step in CreateStep.values)
+        step.name: !usesRecommendedFor(step),
+    },
     if (_retiredModels.isNotEmpty)
       'retiredModels': {
         for (final e in _retiredModels.entries) e.key.name: e.value,
@@ -207,9 +255,34 @@ class CreatePreferences {
           : 'default';
     }
 
-    final photo = model('photoModel', defaults.photoModel);
-    final idea = model('ideaModel', defaults.ideaModel);
-    final recipe = model('recipeModel', defaults.recipeModel);
+    final choices = data['modelChoices'];
+    (String, String, bool) selection(CreateStep step, String prefix) {
+      final storedModel = model('${prefix}Model', suggestedModel);
+      final storedThinking = thinking(
+        '${prefix}Thinking',
+        storedModel,
+        suggestedThinking,
+      );
+      final choice = choices is Map ? choices[step.name] : null;
+      final hasModel =
+          data['${prefix}Model'] is String &&
+          (data['${prefix}Model'] as String).trim().isNotEmpty;
+      final hasThinking =
+          data['${prefix}Thinking'] is String &&
+          thinkingLevels(storedModel).contains(data['${prefix}Thinking']);
+      final explicit = choice is bool
+          ? choice
+          : (hasModel || hasThinking) &&
+                !(storedModel == 'gemini-3.8-flash' &&
+                    data['${prefix}Thinking'] == 'low');
+      return explicit
+          ? (storedModel, storedThinking, true)
+          : (suggestedModel, suggestedThinking, false);
+    }
+
+    final photo = selection(CreateStep.photo, 'photo');
+    final idea = selection(CreateStep.ideas, 'idea');
+    final recipe = selection(CreateStep.recipe, 'recipe');
     final count = data['servings'];
     final extras = data['extraIngredients'];
     final retired = data['retiredModels'];
@@ -225,6 +298,11 @@ class CreatePreferences {
       extraIngredients: extras is int && extras >= 1 && extras <= 6
           ? extras
           : defaults.extraIngredients,
+      modelChoices: {
+        CreateStep.photo: photo.$3,
+        CreateStep.ideas: idea.$3,
+        CreateStep.recipe: recipe.$3,
+      },
       retiredModels: {
         if (retired is Map)
           for (final step in CreateStep.values)
@@ -232,16 +310,12 @@ class CreatePreferences {
                 when model.trim().isNotEmpty)
               step: model.trim(),
       },
-      photoModel: photo,
-      ideaModel: idea,
-      recipeModel: recipe,
-      photoThinking: thinking('photoThinking', photo, defaults.photoThinking),
-      ideaThinking: thinking('ideaThinking', idea, defaults.ideaThinking),
-      recipeThinking: thinking(
-        'recipeThinking',
-        recipe,
-        defaults.recipeThinking,
-      ),
+      photoModel: photo.$1,
+      ideaModel: idea.$1,
+      recipeModel: recipe.$1,
+      photoThinking: photo.$2,
+      ideaThinking: idea.$2,
+      recipeThinking: recipe.$2,
     );
   }
 }

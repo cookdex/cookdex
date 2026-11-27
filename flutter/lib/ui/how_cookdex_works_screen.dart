@@ -70,15 +70,16 @@ class _HowCookdexWorksScreenState extends State<HowCookdexWorksScreen> {
     appBar: pageHeadingBar(context, title: helpTitle),
     body: SafeArea(
       top: false,
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final side =
+              ((constraints.maxWidth - 760) / 2).clamp(0.0, double.infinity) +
+              16;
           // Mount every section header so a direct link can reach even the
           // last card before the reader has scrolled through the guide.
-          child: PixelSingleChildScrollView(
+          return PixelSingleChildScrollView(
             key: const PageStorageKey('how-cookdex-works'),
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.fromLTRB(side, 16, side, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -134,8 +135,8 @@ class _HowCookdexWorksScreenState extends State<HowCookdexWorksScreen> {
                   ),
               ],
             ),
-          ),
-        ),
+          );
+        },
       ),
     ),
   );

@@ -39,23 +39,48 @@ class AppNavigation extends StatelessWidget {
       ),
     ];
     if (rail) {
-      return NavigationRail(
-        scrollable: true,
-        selectedIndex: selected,
-        onDestinationSelected: onSelect,
-        groupAlignment: 0,
-        labelType: NavigationRailLabelType.all,
-        destinations: [
-          for (final (label, icon, selectedIcon) in destinations)
-            NavigationRailDestination(
-              icon: icon,
-              selectedIcon: selectedIcon,
-              label: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 120),
-                child: Text(label, textAlign: TextAlign.center),
+      final labelStyle = Theme.of(context).textTheme.labelMedium!
+          .copyWith(height: 1.1, letterSpacing: 0, fontWeight: FontWeight.w500);
+      final labelMeasure = TextPainter(
+        text: TextSpan(text: 'Shopping\nlist', style: labelStyle),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout(maxWidth: 80);
+      final labelHeight = labelMeasure.height.ceilToDouble();
+      labelMeasure.dispose();
+      return SizedBox(
+        width: 80,
+        child: NavigationRail(
+          minWidth: 80,
+          scrollable: true,
+          selectedIndex: selected,
+          onDestinationSelected: onSelect,
+          groupAlignment: 0,
+          labelType: NavigationRailLabelType.all,
+          selectedLabelTextStyle: labelStyle.copyWith(
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+          unselectedLabelTextStyle: labelStyle.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          destinations: [
+            for (final (label, icon, selectedIcon) in destinations)
+              NavigationRailDestination(
+                icon: icon,
+                selectedIcon: selectedIcon,
+                padding: const EdgeInsets.only(bottom: 8),
+                label: SizedBox(
+                  width: 80,
+                  height: labelHeight,
+                  child: Text(
+                    label == 'Shopping list' ? 'Shopping\nlist' : label,
+                    semanticsLabel: label,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       );
     }
     return _CookingBarVisibility(

@@ -173,7 +173,7 @@ fn shared_rules_cannot_diverge_and_retry_contains_specific_problem() {
             .contains("cut off before the recipe")
     );
     assert_eq!(body["generation_config"]["max_output_tokens"], 65536);
-    assert_eq!(body["generation_config"]["thinking_level"], "minimal");
+    assert_eq!(body["generation_config"]["thinking_level"], "low");
     assert_eq!(
         body["response_format"]["schema"]["properties"]["status"]["enum"],
         json!(["ok", "unreadable", "not_a_recipe", "retrieval_failed"])
@@ -424,9 +424,53 @@ fn effort_preserves_standard_default_and_only_changes_thinking() {
     )
     .unwrap();
     assert_eq!(thorough["generation_config"]["thinking_level"], "high");
-    thorough["generation_config"]["thinking_level"] = json!("minimal");
+    thorough["generation_config"]["thinking_level"] = json!("low");
     assert_eq!(thorough, default);
     assert!(provider::request_with_effort(&input(), "mock-model", None, "unknown").is_err());
+}
+
+#[test]
+fn selected_thinking_and_custom_model_reach_text_photos_and_url_context() {
+    for kind in ["text", "photos", "url"] {
+        let mut i = input();
+        if kind == "photos" {
+            i.photos.push(provider::Photo {
+                mime_type: "image/jpeg".into(),
+                bytes: vec![0xff, 0xd8, 0xff, 0xd9],
+            });
+        } else if kind == "url" {
+            i.mode = provider::Mode::UrlRecipe;
+            i.source = "https://example.com/recipe".into();
+        }
+        let reference: Value = serde_json::from_slice(
+            &provider::request_with_effort(&i, "synthetic-custom-model", None, "standard").unwrap(),
+        )
+        .unwrap();
+        for (stored, effective) in [
+            ("standard", Some("low")),
+            ("thorough", Some("high")),
+            ("default", None),
+            ("minimal", Some("minimal")),
+            ("low", Some("low")),
+            ("medium", Some("medium")),
+            ("high", Some("high")),
+        ] {
+            let mut body: Value = serde_json::from_slice(
+                &provider::request_with_effort(&i, "synthetic-custom-model", None, stored).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(body["model"], "synthetic-custom-model");
+            assert_eq!(
+                body["generation_config"]["thinking_level"].as_str(),
+                effective
+            );
+            if effective.is_none() {
+                assert!(body["generation_config"].get("thinking_level").is_none());
+            }
+            body["generation_config"]["thinking_level"] = json!("low");
+            assert_eq!(body, reference, "{kind}: {stored}");
+        }
+    }
 }
 
 #[test]

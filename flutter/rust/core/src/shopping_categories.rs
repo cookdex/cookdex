@@ -89,7 +89,12 @@ impl Setup {
     }
     pub fn classify(&self, name: &str) -> String {
         let key = normalize(name);
-        let mut best = (0usize, 0usize, false, OTHER);
+        // The shared Staples list also contains these generic pantry names.
+        let mut best = match key.as_str() {
+            "oil" => (1usize, key.len(), false, "pantry"),
+            "basic spice" => (2usize, key.len(), false, "spices"),
+            _ => (0usize, 0usize, false, OTHER),
+        };
         for (id, phrase) in VOCABULARY.iter() {
             if contains_phrase(&key, phrase) {
                 let score = (phrase.split_whitespace().count(), phrase.len(), false, *id);

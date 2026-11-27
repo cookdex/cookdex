@@ -5,7 +5,8 @@ import '../create_preferences.dart';
 import '../import_service.dart';
 import '../local_preferences.dart';
 import '../smart_create_protocol.dart'
-    show photoPrompt, ideaPrompt, recipePrompt;
+    show photoPrompt, ideaPrompt, moodIdeaPrompt, recipePrompt;
+import 'gemini_model_dialog.dart';
 import 'navigation_feedback.dart';
 import 'page_headings.dart';
 import 'pixel_scroll.dart';
@@ -17,6 +18,7 @@ Future<void> openCreateSettings(
   BuildContext context, {
   required LocalPreferences preferences,
   required ImportService service,
+  required Future<void> Function(BuildContext) onStaples,
   required Future<String?> Function() lastDiagnostic,
   required Future<void> Function() clearDiagnostic,
 }) => Navigator.of(context, rootNavigator: true).push<void>(
@@ -25,16 +27,12 @@ Future<void> openCreateSettings(
     builder: (_) => CreateSettingsScreen(
       preferences: preferences,
       service: service,
+      onStaples: onStaples,
       lastDiagnostic: lastDiagnostic,
       clearDiagnostic: clearDiagnostic,
     ),
   ),
 );
-
-Future<void> openCreateStaples(
-  BuildContext context, {
-  required LocalPreferences preferences,
-}) => _editNames(context, preferences: preferences, staples: true);
 
 Future<void> _editNames(
   BuildContext context, {
@@ -147,11 +145,13 @@ class CreateSettingsScreen extends StatefulWidget {
     super.key,
     required this.preferences,
     required this.service,
+    required this.onStaples,
     required this.lastDiagnostic,
     required this.clearDiagnostic,
   });
   final LocalPreferences preferences;
   final ImportService service;
+  final Future<void> Function(BuildContext) onStaples;
   final Future<String?> Function() lastDiagnostic;
   final Future<void> Function() clearDiagnostic;
   @override
@@ -288,20 +288,24 @@ class _CreateSettingsScreenState extends State<CreateSettingsScreen> {
 
   Future<void> _model(CreateStep step) async {
     final p = widget.preferences.createPreferences;
-    final result = await showDialog<(String, String)>(
+    final result = await showDialog<GeminiModelSelection>(
       context: context,
-      builder: (_) => _ModelDialog(
-        step: step.label,
+      builder: (_) => GeminiModelDialog(
+        title: step.label,
         model: p.modelFor(step),
         thinking: p.thinkingFor(step),
+        recommendedModel: CreatePreferences.suggestedModel,
+        recommendedThinking: CreatePreferences.suggestedThinking,
+        useRecommended: p.usesRecommendedFor(step),
       ),
     );
     if (!mounted || result == null) return;
     widget.preferences.setCreatePreferences(
       widget.preferences.createPreferences.withSelection(
         step,
-        result.$1,
-        result.$2,
+        result.model,
+        result.thinking,
+        useRecommended: result.useRecommended,
       ),
     );
   }
@@ -375,12 +379,16 @@ class _CreateSettingsScreenState extends State<CreateSettingsScreen> {
                                 ),
                             ],
                           ),
-                          trailing: const Icon(Symbols.edit),
-                          onTap: () => _editNames(
-                            context,
-                            preferences: widget.preferences,
-                            staples: staples,
+                          trailing: Icon(
+                            staples ? Symbols.chevron_right : Symbols.edit,
                           ),
+                          onTap: () => staples
+                              ? widget.onStaples(context)
+                              : _editNames(
+                                  context,
+                                  preferences: widget.preferences,
+                                  staples: false,
+                                ),
                         ),
                       ListTile(
                         title: const Text('Other preferences'),
@@ -448,7 +456,8 @@ class _CreateSettingsScreenState extends State<CreateSettingsScreen> {
                         title: const Text('View prompts'),
                         onTap: () => _showText('View prompts', const [
                           ('Photo recognition', photoPrompt),
-                          ('Recipe ideas', ideaPrompt),
+                          ('Recipe ideas — ingredients or photos', ideaPrompt),
+                          ('Recipe ideas — mood only', moodIdeaPrompt),
                           ('Full recipe', recipePrompt),
                         ]),
                       ),
@@ -513,128 +522,6 @@ class _CountDialogState extends State<_CountDialog> {
       ),
       FilledButton(
         onPressed: () => Navigator.pop(context, count),
-        child: const Text('Save'),
-      ),
-    ],
-  );
-}
-
-class _ModelDialog extends StatefulWidget {
-  const _ModelDialog({
-    required this.step,
-    required this.model,
-    required this.thinking,
-  });
-  final String step, model, thinking;
-  @override
-  State<_ModelDialog> createState() => _ModelDialogState();
-}
-
-class _ModelDialogState extends State<_ModelDialog> {
-  late final model = TextEditingController(text: widget.model);
-  static const models = CreatePreferences.modelNames;
-  late String choice = models.containsKey(widget.model)
-      ? widget.model
-      : 'custom';
-  late String thinking = widget.thinking;
-  void updateModel() {
-    if (!CreatePreferences.thinkingLevels(model.text.trim())
-        .contains(thinking)) {
-      thinking = 'default';
-    }
-    setState(() {});
-  }
-
-  @override
-  void dispose() {
-    model.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    scrollable: true,
-    title: Text(widget.step),
-    content: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        DropdownButtonFormField<String>(
-          itemHeight: null,
-          initialValue: choice,
-          key: ValueKey(choice),
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Model'),
-          items: [
-            for (final entry in models.entries)
-              DropdownMenuItem(
-                value: entry.key,
-                child: Text(
-                  entry.key == 'gemini-4-argon' ||
-                          entry.key == 'gemini-3.1-pro-preview'
-                      ? '${entry.value} (paid key)'
-                      : entry.value,
-                ),
-              ),
-            const DropdownMenuItem(
-              value: 'custom',
-              child: Text('Custom model ID'),
-            ),
-          ],
-          onChanged: (value) {
-            choice = value!;
-            model.text = choice == 'custom' ? '' : choice;
-            updateModel();
-          },
-        ),
-        const SizedBox(height: 8),
-        if (choice == 'custom')
-          TextField(
-            controller: model,
-            onChanged: (_) => updateModel(),
-            autocorrect: false,
-            enableSuggestions: false,
-            decoration: const InputDecoration(labelText: 'Model ID'),
-          ),
-        const SizedBox(height: 16),
-        DropdownButtonFormField<String>(
-          key: ValueKey(thinking),
-          initialValue: thinking,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Thinking'),
-          items: [
-            for (final level in CreatePreferences.thinkingLevels(
-              model.text.trim(),
-            ))
-              DropdownMenuItem(
-                value: level,
-                child: Text(CreatePreferences.thinkingName(level)),
-              ),
-          ],
-          onChanged: (value) => setState(() => thinking = value!),
-        ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            onPressed: () {
-              choice = CreatePreferences.suggestedModel;
-              model.text = CreatePreferences.suggestedModel;
-              thinking = CreatePreferences.suggestedThinking;
-              updateModel();
-            },
-            child: const Text('Reset to recommended'),
-          ),
-        ),
-      ],
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: model.text.trim().isEmpty
-            ? null
-            : () => Navigator.pop(context, (model.text.trim(), thinking)),
         child: const Text('Save'),
       ),
     ],

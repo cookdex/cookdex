@@ -165,12 +165,13 @@ class _SnapshotsScreenState extends State<SnapshotsScreen> {
     appBar: pageHeadingBar(context, title: 'Snapshots'),
     body: SafeArea(
       top: false,
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 640),
-          child: PixelListView(
-            padding: const EdgeInsets.all(16),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final side =
+              ((constraints.maxWidth - 640) / 2).clamp(0.0, double.infinity) +
+              16;
+          return PixelListView(
+            padding: EdgeInsets.fromLTRB(side, 16, side, 16),
             children: [
               const Text(
                 'Automatic snapshots save your changed recipe library once a day. They stay on this device only.',
@@ -223,8 +224,8 @@ class _SnapshotsScreenState extends State<SnapshotsScreen> {
                   for (final entry in _listing!.entries) _entry(context, entry),
               ],
             ],
-          ),
-        ),
+          );
+        },
       ),
     ),
   );
